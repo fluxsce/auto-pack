@@ -1,0 +1,45 @@
+.post-build-fields {
+  &__full {
+    width: 100%;
+  }
+
+  &__hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--el-text-color-secondary);
+  }
+
+  &__transfers {
+    margin-top: 4px;
+  }
+
+  &__transfers-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--shell-content-text-secondary, var(--el-text-color-regular));
+  }
+
+  &__transfer-set {
+    padding: 12px 12px 2px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+    background: var(--env-panel-bg, var(--el-fill-color-blank));
+  }
+
+  &__transfer-set-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--el-text-color-secondary);
+  }
+}

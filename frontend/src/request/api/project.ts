@@ -1,0 +1,201 @@
+import type { PackProject, PackProjectPayload, ProjectType } from '@/types'
+import http from '../utils/http'
+
+export function fetchProjectTypes(): Promise<{ types: ProjectType[] }> {
+  return http.get('/project/types')
+}
+
+export interface FetchProjectsParams {
+  workspace_rec_id?: string
+  project_type?: ProjectType
+}
+
+export function fetchProjects(params?: FetchProjectsParams): Promise<{ items: PackProject[] }> {
+  return http.get('/projects', { params })
+}
+
+export function fetchProject(recId: string): Promise<PackProject> {
+  return http.get(`/projects/${recId}`)
+}
+
+export function createProject(data: PackProjectPayload): Promise<PackProject> {
+  return http.post('/projects', data)
+}
+
+export function updateProject(recId: string, data: PackProjectPayload): Promise<PackProject> {
+  return http.put(`/projects/${recId}`, data)
+}
+
+export function deleteProject(recId: string): Promise<{ message: string }> {
+  return http.delete(`/projects/${recId}`)
+}
+
+export interface CronPreviewResult {
+  next_runs: string[]
+  timezone: string
+}
+
+/** Preview next scheduled build times using server-side cron parser (robfig). */
+export function previewProjectCron(data: { cron: string; count?: number }): Promise<CronPreviewResult> {
+  return http.post('/projects/cron-preview', data)
+}
+
+export interface BatchRepoBranchPayload {
+  workspace_rec_id: string
+  repo_branch: string
+}
+
+export function batchUpdateRepoBranch(
+  data: BatchRepoBranchPayload,
+): Promise<{ updated: number }> {
+  return http.post('/projects/batch-repo-branch', data)
+}
+
+export interface BatchProjectVersionPayload {
+  workspace_rec_id: string
+  project_version: string
+}
+
+export function batchUpdateProjectVersion(
+  data: BatchProjectVersionPayload,
+): Promise<{ updated: number }> {
+  return http.post('/projects/batch-project-version', data)
+}
+
+export interface BatchPostBuildEmailPayload {
+  workspace_rec_id: string
+  enabled: boolean
+  when: string
+  env_rec_id: string
+  recipients: string
+  subject: string
+  body: string
+  name?: string
+}
+
+export function batchUpdatePostBuildEmail(
+  data: BatchPostBuildEmailPayload,
+): Promise<{ updated: number }> {
+  return http.post('/projects/batch-post-build-email', data)
+}
+
+export interface BatchAutoReleasePayload {
+  workspace_rec_id: string
+  release_branch: string
+  tag_branch: string
+  release_note?: string
+  release_date?: string
+  allow_repeat?: boolean
+  update_pom_version?: boolean
+  create_target_branch?: boolean
+  target_branch?: string
+}
+
+export interface BatchAutoReleaseResultItem {
+  project_name: string
+  status: 'ok' | 'skipped' | 'failed'
+  message?: string
+  steps?: string[]
+}
+
+export interface BatchAutoReleaseResponse {
+  released: number
+  skipped: number
+  failed: number
+  results: BatchAutoReleaseResultItem[]
+}
+
+export interface BatchAutoReleaseStartResponse {
+  status: 'running'
+  release_rec_id: string
+  workspace_rec_id: string
+  workspace_name?: string
+  release_branch?: string
+  tag?: string
+}
+
+export type WorkspaceReleaseStatus = 'running' | 'success' | 'partial' | 'failed'
+
+export interface WorkspaceReleaseRecord {
+  rec_id: string
+  workspace_rec_id: string
+  release_num: number
+  status: WorkspaceReleaseStatus
+  release_branch: string
+  tag_branch: string
+  target_branch?: string
+  released: number
+  skipped: number
+  failed: number
+  message?: string
+  log_path?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
+}
+
+export interface WorkspaceReleaseLogResponse {
+  content: string
+  offset: number
+  size: number
+  total: number
+  complete: boolean
+  status: WorkspaceReleaseStatus
+  release: WorkspaceReleaseRecord
+}
+
+export type BatchAutoReleaseJobStatus = 'idle' | 'running' | 'completed'
+
+export interface BatchAutoReleaseStatusResponse {
+  status: BatchAutoReleaseJobStatus
+  release_rec_id?: string
+  workspace_rec_id?: string
+  workspace_name?: string
+  tag?: string
+  release_branch?: string
+  started_at?: string
+  finished_at?: string
+  released?: number
+  skipped?: number
+  failed?: number
+  results?: BatchAutoReleaseResultItem[]
+  current_project?: string
+  done_count?: number
+  total_count?: number
+  foreign?: boolean
+  active_workspace_name?: string
+}
+
+/** Starts async auto-release; poll status until completed. No long HTTP timeout. */
+export function batchAutoRelease(
+  data: BatchAutoReleasePayload,
+): Promise<BatchAutoReleaseStartResponse> {
+  return http.post('/projects/batch-auto-release', data)
+}
+
+export function batchAutoReleaseStatus(
+  workspaceRecId: string,
+): Promise<BatchAutoReleaseStatusResponse> {
+  return http.get('/projects/batch-auto-release/status', {
+    params: { workspace_rec_id: workspaceRecId },
+  })
+}
+
+export function fetchWorkspaceReleaseHistory(
+  workspaceRecId: string,
+  limit = 30,
+): Promise<{ items: WorkspaceReleaseRecord[] }> {
+  return http.get('/projects/batch-auto-release/history', {
+    params: { workspace_rec_id: workspaceRecId, limit },
+  })
+}
+
+export function fetchWorkspaceReleaseLog(
+  workspaceRecId: string,
+  releaseRecId: string,
+  offset = 0,
+): Promise<WorkspaceReleaseLogResponse> {
+  return http.get(`/projects/batch-auto-release/history/${releaseRecId}/log`, {
+    params: { workspace_rec_id: workspaceRecId, offset },
+  })
+}

@@ -1,0 +1,29 @@
+-- 工作空间批量自动发版记录
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS AP_PACK_WORKSPACE_RELEASE (
+  rec_id TEXT NOT NULL PRIMARY KEY,
+  workspace_rec_id TEXT NOT NULL,
+  release_num INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'running',
+  release_branch TEXT NOT NULL DEFAULT '',
+  tag_branch TEXT NOT NULL DEFAULT '',
+  target_branch TEXT NOT NULL DEFAULT '',
+  released INTEGER NOT NULL DEFAULT 0,
+  skipped INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  message TEXT NOT NULL DEFAULT '',
+  log_path TEXT NOT NULL DEFAULT '',
+  started_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS IX_AP_PACK_WORKSPACE_RELEASE_NUM
+  ON AP_PACK_WORKSPACE_RELEASE(workspace_rec_id, release_num);
+
+CREATE INDEX IF NOT EXISTS IX_AP_PACK_WORKSPACE_RELEASE_WS
+  ON AP_PACK_WORKSPACE_RELEASE(workspace_rec_id, created_at DESC);
+
+COMMIT;

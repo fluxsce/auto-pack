@@ -1,0 +1,10 @@
+@use '../abstracts' as *;
+
+:root {
+  @include app-layout-vars();
+  @include app-theme-vars($theme-light);
+}
+
+html.dark {
+  @include app-theme-vars($theme-dark);
+}

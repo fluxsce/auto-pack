@@ -1,0 +1,7 @@
+# Backend (SQLite、构建产物)
+backend/data/
+backend/bin/
+
+# Release packages
+build/
+/backend/logs/

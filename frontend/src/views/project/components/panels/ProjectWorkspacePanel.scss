@@ -1,0 +1,74 @@
+.project-workspace-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  &__path-hint {
+    margin: 4px 0 0;
+    font-size: 12px;
+    font-family: ui-monospace, monospace;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
+  &__breadcrumb {
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__crumb-sep {
+    margin: 0 4px;
+    opacity: 0.6;
+  }
+
+  &__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  &__hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__table {
+    width: 100%;
+
+    .is-dir {
+      font-weight: 600;
+      color: var(--shell-accent, var(--el-color-primary));
+    }
+
+    :deep(.el-table__row) {
+      cursor: pointer;
+    }
+
+    :deep(.el-table__cell:last-child .cell) {
+      overflow: visible;
+    }
+  }
+}

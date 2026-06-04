@@ -1,0 +1,42 @@
+@use 'variables' as *;
+
+/// Emit --app-color-* custom properties from a theme map.
+@mixin app-theme-vars($theme-map) {
+  @each $key, $value in $theme-map {
+    @if $key == 'shadow-sm' {
+      --app-shadow-sm: #{$value};
+    } @else {
+      --app-color-#{$key}: #{$value};
+    }
+  }
+}
+
+@mixin app-layout-vars() {
+  --app-header-height: #{$header-height};
+  --app-nav-height: #{$nav-height};
+  --app-dialog-header-height: #{$dialog-header-height};
+  --app-dialog-footer-height: #{$dialog-footer-height};
+  --app-dialog-border-radius: #{$dialog-border-radius};
+  --app-dialog-min-width: #{$dialog-min-width};
+  --app-dialog-min-height: #{$dialog-min-height};
+  --app-content-max-width: #{$content-max-width};
+  --app-content-padding: #{$content-padding};
+  --app-dialog-z-index: #{$dialog-z-index};
+}
+
+@mixin semantic-color-vars($dark: false) {
+  --color-background: var(--app-color-bg);
+  --color-background-soft: var(--app-color-surface);
+  --color-border: var(--app-color-border);
+  --color-heading: var(--app-color-text);
+  --color-text: var(--app-color-text);
+  --section-gap: 160px;
+
+  @if $dark {
+    --color-background-mute: #{$vt-black-mute};
+    --color-border-hover: #{$vt-divider-dark-1};
+  } @else {
+    --color-background-mute: #{$vt-white-mute};
+    --color-border-hover: #{$vt-divider-light-1};
+  }
+}

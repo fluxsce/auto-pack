@@ -1,0 +1,195 @@
+.project-manage {
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  &__intro {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    margin: 0 0 6px;
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.02em;
+    color: var(--shell-content-text, var(--el-text-color-primary));
+  }
+
+  &__desc {
+    margin: 0;
+    max-width: 52em;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__actions {
+    display: flex;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  $toolbar-control-height: var(--el-component-size, 32px);
+
+  &__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+    margin-bottom: 16px;
+  }
+
+  &__toolbar-workspace {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 1 auto;
+    min-width: min(400px, 100%);
+  }
+
+  &__toolbar-filters {
+    display: flex;
+    flex: 1 1 320px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  &__filter-search {
+    flex: 1 1 180px;
+    min-width: 160px;
+    max-width: 280px;
+  }
+
+  &__filter-select {
+    width: 140px;
+
+    &--narrow {
+      width: 112px;
+    }
+  }
+
+  &__filter-refresh {
+    flex-shrink: 0;
+  }
+
+  &__bulk-ops {
+    flex-shrink: 0;
+  }
+
+  &__bulk-ops-icon {
+    margin-left: 4px;
+  }
+
+  &__toolbar-label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__workspace-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 200px;
+    max-width: 400px;
+    height: $toolbar-control-height;
+    box-sizing: border-box;
+    padding: 0 12px;
+    border: 1px solid var(--env-panel-input-border, var(--el-border-color));
+    border-radius: var(--el-border-radius-base, 4px);
+    background: var(--env-panel-input-bg, var(--el-fill-color-blank));
+    color: var(--shell-content-text, var(--el-text-color-primary));
+    font-size: 14px;
+    line-height: 1;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover {
+      border-color: var(--shell-accent, var(--el-color-primary));
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--shell-accent, var(--el-color-primary));
+      outline-offset: 2px;
+    }
+  }
+
+  &__workspace-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__workspace-chevron {
+    flex-shrink: 0;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__btn-icon {
+    margin-right: 4px;
+  }
+
+  &__editor-wrap {
+    width: 100%;
+    max-width: var(--app-content-max-width, 1200px);
+    margin-inline: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .project-manage__head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-manage__actions {
+    padding-top: 0;
+
+    .el-button {
+      flex: 1;
+    }
+  }
+
+  .project-manage__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-manage__toolbar-workspace {
+    flex-direction: column;
+    align-items: stretch;
+    min-width: 0;
+  }
+
+  .project-manage__workspace-trigger {
+    width: 100%;
+    max-width: none;
+  }
+
+  .project-manage__toolbar-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-manage__filter-search {
+    max-width: none;
+  }
+
+  .project-manage__filter-select {
+    width: 100%;
+  }
+}

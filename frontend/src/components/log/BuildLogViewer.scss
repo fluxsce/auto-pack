@@ -1,0 +1,44 @@
+.build-log-viewer {
+  margin: 0;
+  padding: 10px 12px 14px;
+  min-height: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  font-family: ui-monospace, 'Courier New', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  tab-size: 4;
+
+  &__line {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #333;
+
+    &--command {
+      color: #1a5276;
+    }
+
+    &--section {
+      color: #111;
+      font-weight: 600;
+    }
+
+    &--info {
+      color: #333;
+    }
+
+    &--success {
+      color: #1e7e34;
+      font-weight: 600;
+    }
+
+    &--warning {
+      color: #b45f06;
+    }
+
+    &--error {
+      color: #c0392b;
+      font-weight: 600;
+    }
+  }
+}

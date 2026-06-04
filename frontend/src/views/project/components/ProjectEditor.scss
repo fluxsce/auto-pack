@@ -1,0 +1,306 @@
+.project-editor {
+  border-radius: 16px;
+  overflow: hidden;
+
+  :deep(.el-card__body) {
+    padding: 0;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  &__layout {
+    display: flex;
+    min-height: 520px;
+  }
+
+  &__nav {
+    flex-shrink: 0;
+    width: 200px;
+    padding: 12px 0 16px;
+    border-right: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+    background: var(--env-panel-inset-bg, var(--el-fill-color-lighter));
+  }
+
+  &__nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    border-left: 3px solid transparent;
+    background: transparent;
+    color: var(--shell-content-text, var(--el-text-color-primary));
+    font-size: 14px;
+    line-height: 1.4;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      color 0.15s ease;
+
+    &:hover {
+      background: var(--env-panel-bg, var(--el-fill-color-blank));
+    }
+
+    &--active {
+      border-left-color: var(--shell-accent, var(--el-color-primary));
+      background: var(--env-panel-bg, var(--el-fill-color-blank));
+      font-weight: 600;
+      color: var(--shell-accent, var(--el-color-primary));
+    }
+  }
+
+  &__nav-icon {
+    flex-shrink: 0;
+    font-size: 16px;
+  }
+
+  &__main {
+    flex: 1;
+    min-width: 0;
+    padding: 20px 28px 0;
+    background: var(--env-panel-bg, var(--el-fill-color-blank));
+  }
+
+  &__panel {
+    max-width: 720px;
+
+    &--wide {
+      max-width: 880px;
+    }
+  }
+
+  &__panel-head {
+    margin-bottom: 20px;
+  }
+
+  &__panel-title {
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--shell-content-text, var(--el-text-color-primary));
+  }
+
+  &__panel-desc {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__scm-radio {
+    :deep(.el-form-item__content) {
+      padding-top: 4px;
+    }
+  }
+
+  &__field-stack {
+    width: 100%;
+  }
+
+  &__field-desc {
+    margin: 0 0 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__advanced-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 4px 0 16px 148px;
+    padding: 4px 0;
+    border: none;
+    background: none;
+    color: var(--shell-accent, var(--el-color-primary));
+    font-size: 13px;
+    cursor: pointer;
+
+    &:hover {
+      opacity: 0.85;
+    }
+
+    .el-icon {
+      transition: transform 0.15s ease;
+    }
+  }
+
+  &__advanced-chevron--open {
+    transform: rotate(90deg);
+    transition: transform 0.15s ease;
+  }
+
+  &__advanced-body {
+    padding-bottom: 8px;
+  }
+
+  &__build-block {
+    border: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  &__build-block-head {
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--env-panel-inset-bg, var(--el-fill-color-lighter));
+    border-bottom: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+  }
+
+  &__build-block-body {
+    padding: 16px 14px 4px;
+  }
+
+  &__path-hint {
+    margin: 8px 0 0 148px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__empty-hint {
+    margin: 0;
+    font-size: 13px;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__full {
+    width: 100%;
+  }
+
+  &__workspace-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--env-panel-input-border, var(--el-border-color));
+    border-radius: var(--el-border-radius-base);
+    background: var(--env-panel-input-bg, var(--el-fill-color-blank));
+    color: var(--shell-content-text, var(--el-text-color-primary));
+    font-size: 14px;
+    cursor: pointer;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    &:not(:disabled):hover {
+      border-color: var(--shell-accent, var(--el-color-primary));
+    }
+  }
+
+  &__workspace-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  &__hint {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__ref-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  &__ref-tag {
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+
+    &:hover {
+      opacity: 0.85;
+    }
+  }
+
+  &__select-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 100%;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--shell-accent, var(--el-color-primary));
+    font-size: 14px;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--el-fill-color-light);
+    }
+  }
+
+  &__footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 24px 0 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+  }
+}
+
+@media (max-width: 768px) {
+  .project-editor__layout {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .project-editor__nav {
+    display: flex;
+    width: 100%;
+    overflow-x: auto;
+    padding: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+  }
+
+  .project-editor__nav-item {
+    flex-shrink: 0;
+    width: auto;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+    padding: 12px 14px;
+
+    &--active {
+      border-left-color: transparent;
+      border-bottom-color: var(--shell-accent, var(--el-color-primary));
+    }
+  }
+
+  .project-editor__main {
+    padding: 16px;
+  }
+
+  .project-editor__advanced-toggle,
+  .project-editor__path-hint {
+    margin-left: 0;
+  }
+}

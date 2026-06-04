@@ -1,0 +1,112 @@
+// Opaque env panels — avoids backdrop-filter blur on cards in app layout.
+.tech-shell {
+  --env-panel-bg: #ffffff;
+  --env-panel-inset-bg: #f8fafc;
+  --env-panel-border: #e2e8f0;
+  --env-panel-input-bg: #ffffff;
+  --env-panel-input-border: #cbd5e1;
+  --env-panel-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 0 0 1px #e2e8f0;
+  --env-panel-footer-bg: #f8fafc;
+}
+
+html.dark .tech-shell {
+  --env-panel-bg: #1e293b;
+  --env-panel-inset-bg: #0f172a;
+  --env-panel-border: #334155;
+  --env-panel-input-bg: #0f172a;
+  --env-panel-input-border: #475569;
+  --env-panel-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 0 1px #334155;
+  --env-panel-footer-bg: #172033;
+}
+
+.env-panel {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--env-panel-bg) !important;
+  box-shadow: var(--env-panel-shadow) !important;
+  border: 1px solid var(--env-panel-border) !important;
+  color: var(--shell-content-text, var(--el-text-color-primary));
+
+  .el-card__header {
+    border-bottom-color: var(--env-panel-border) !important;
+  }
+}
+
+.env-type-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+
+  &--remote {
+    color: #0369a1;
+    background: rgba(14, 165, 233, 0.14);
+  }
+
+  &--toolchain {
+    color: #6d28d9;
+    background: rgba(139, 92, 246, 0.14);
+  }
+
+  &--credential {
+    color: #b45309;
+    background: rgba(245, 158, 11, 0.16);
+  }
+
+  &--unknown {
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+    background: var(--el-fill-color-light);
+  }
+}
+
+html.dark .tech-shell {
+  .env-type-tag--remote {
+    color: #7dd3fc;
+    background: rgba(14, 165, 233, 0.2);
+  }
+
+  .env-type-tag--toolchain {
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, 0.22);
+  }
+
+  .env-type-tag--credential {
+    color: #fcd34d;
+    background: rgba(245, 158, 11, 0.22);
+  }
+}
+
+.project-type-tag {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: #0f766e;
+  background: rgba(20, 184, 166, 0.14);
+
+  &--maven,
+  &--gradle {
+    color: #b45309;
+    background: rgba(245, 158, 11, 0.16);
+  }
+
+  &--npm,
+  &--vue {
+    color: #047857;
+    background: rgba(16, 185, 129, 0.14);
+  }
+
+  &--go {
+    color: #1d4ed8;
+    background: rgba(59, 130, 246, 0.14);
+  }
+
+  &--custom {
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+    background: var(--el-fill-color-light);
+  }
+}

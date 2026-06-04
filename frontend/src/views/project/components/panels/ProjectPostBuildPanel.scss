@@ -1,0 +1,90 @@
+.post-build-panel {
+  &__desc {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__empty {
+    padding: 24px 0;
+  }
+
+  &__action {
+    margin-bottom: 16px;
+    border: 1px dashed var(--env-panel-border, var(--el-border-color));
+    border-radius: 12px;
+    background: var(--env-panel-inset-bg, var(--el-fill-color-lighter));
+    overflow: hidden;
+  }
+
+  &__action-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+    background: var(--env-panel-bg, var(--el-fill-color-blank));
+  }
+
+  &__drag {
+    flex-shrink: 0;
+    color: var(--el-text-color-placeholder);
+    cursor: grab;
+  }
+
+  &__name {
+    flex: 1;
+    min-width: 120px;
+    max-width: 220px;
+  }
+
+  &__type-select {
+    width: 168px;
+  }
+
+  &__action-body {
+    padding: 12px 16px 4px;
+
+    :deep(.el-form-item) {
+      margin-bottom: 14px;
+    }
+
+    :deep(.el-form-item__label) {
+      font-weight: 500;
+    }
+  }
+
+  &__full {
+    width: 100%;
+  }
+
+  &__add {
+    margin-top: 8px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+    background: var(--env-panel-bg, var(--el-fill-color-blank));
+  }
+
+  &__add-title {
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--shell-content-text-secondary, var(--el-text-color-regular));
+  }
+
+  &__add-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+  }
+
+  &__add-select {
+    flex: 1;
+    min-width: 200px;
+    max-width: 360px;
+  }
+}

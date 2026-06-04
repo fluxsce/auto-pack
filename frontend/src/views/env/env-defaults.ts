@@ -1,0 +1,51 @@
+import type { EnvType } from '@/types'
+
+export const FALLBACK_ENV_TYPES: EnvType[] = [
+  'ssh',
+  'sftp',
+  'ftp',
+  'git',
+  'maven',
+  'nodejs',
+  'jdk',
+  'smtp',
+]
+
+export const DEFAULT_ENV_CONFIG: Record<EnvType, Record<string, unknown>> = {
+  ssh: { host: '', port: 22, username: '', password: '', private_key_path: '', timeout_sec: 60 },
+  sftp: {
+    host: '',
+    port: 22,
+    username: '',
+    password: '',
+    private_key_path: '',
+    remote_path: '/',
+    timeout_sec: 60,
+  },
+  ftp: { host: '', port: 21, username: '', password: '', base_path: '/', passive: true, timeout_sec: 60 },
+  git: {
+    auth_type: 'https',
+    auth_token: '',
+    auth_username: '',
+    auth_password: '',
+    private_key_path: '',
+    private_key_passphrase: '',
+    git_path: '',
+    username: '',
+    email: '',
+  },
+  maven: { maven_home: '', mvn_path: '', settings_xml: '', java_home: '' },
+  nodejs: { node_path: '', npm_path: '', npx_path: '' },
+  jdk: { java_home: '', java_path: '' },
+  smtp: {
+    host: '',
+    port: 587,
+    username: '',
+    password: '',
+    from: '',
+    from_name: 'Auto Pack',
+    tls: false,
+    starttls: true,
+    timeout_sec: 60,
+  },
+}

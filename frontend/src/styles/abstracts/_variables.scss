@@ -1,0 +1,64 @@
+// Layout
+$header-height: 56px !default;
+$nav-height: 48px !default;
+$dialog-header-height: 44px !default;
+$dialog-footer-height: 40px !default;
+$dialog-border-radius: 16px !default;
+$dialog-min-width: 400px !default;
+$dialog-min-height: 280px !default;
+$content-max-width: 1200px !default;
+$content-padding: 24px !default;
+$dialog-z-index: 2500 !default;
+
+// Typography
+$font-family-base:
+  Inter,
+  -apple-system,
+  BlinkMacSystemFont,
+  'Segoe UI',
+  Roboto,
+  Oxygen,
+  Ubuntu,
+  Cantarell,
+  'Fira Sans',
+  'Droid Sans',
+  'Helvetica Neue',
+  sans-serif !default;
+$font-size-base: 15px !default;
+$line-height-base: 1.6 !default;
+
+// Legacy palette (vuejs/theme)
+$vt-white: #ffffff !default;
+$vt-white-soft: #f8f8f8 !default;
+$vt-white-mute: #f2f2f2 !default;
+$vt-black: #181818 !default;
+$vt-black-soft: #222222 !default;
+$vt-black-mute: #282828 !default;
+$vt-indigo: #2c3e50 !default;
+$vt-divider-light-1: rgba(60, 60, 60, 0.29) !default;
+$vt-divider-light-2: rgba(60, 60, 60, 0.12) !default;
+$vt-divider-dark-1: rgba(84, 84, 84, 0.65) !default;
+$vt-divider-dark-2: rgba(84, 84, 84, 0.48) !default;
+
+// Theme tokens (compiled to CSS custom properties)
+$theme-light: (
+  'primary': #409eff,
+  'bg': #f5f7fa,
+  'surface': #ffffff,
+  'text': #303133,
+  'text-secondary': #606266,
+  'border': #ebeef5,
+  'header-bg': #ffffff,
+  'shadow-sm': 0 1px 4px rgba(0, 0, 0, 0.06),
+) !default;
+
+$theme-dark: (
+  'primary': #409eff,
+  'bg': #141414,
+  'surface': #1d1e1f,
+  'text': #e5eaf3,
+  'text-secondary': #a3a6ad,
+  'border': #414243,
+  'header-bg': #1d1e1f,
+  'shadow-sm': 0 1px 4px rgba(0, 0, 0, 0.35),
+) !default;

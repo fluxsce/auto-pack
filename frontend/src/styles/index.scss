@@ -1,0 +1,17 @@
+@use 'tokens/theme';
+@use 'base/reset';
+@use 'base/root';
+@use 'layout/tech-background';
+@use 'layout/app-layout-header';
+@use 'layout/app-layout';
+@use 'views/env-panel';
+@use 'components/app-dialog';
+
+a {
+  text-decoration: none;
+  color: var(--app-color-primary);
+
+  &:hover {
+    opacity: 0.85;
+  }
+}

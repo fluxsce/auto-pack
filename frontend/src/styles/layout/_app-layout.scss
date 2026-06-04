@@ -1,0 +1,67 @@
+#app {
+  min-height: 100vh;
+}
+
+.app-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-layout-content {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  background: var(--shell-content-bg);
+
+  &__workspace {
+    min-height: 100%;
+    box-sizing: border-box;
+  }
+
+  &__head {
+    max-width: var(--app-content-max-width);
+    margin: 0 auto;
+    padding: 16px var(--app-content-padding) 0;
+    box-sizing: border-box;
+  }
+
+  &__inner {
+    width: 100%;
+    max-width: var(--app-content-max-width);
+    margin: 0 auto;
+    padding: var(--app-content-padding);
+    box-sizing: border-box;
+  }
+
+  :deep(.el-card) {
+    border-radius: 16px;
+    border: 1px solid var(--shell-card-border);
+    background: var(--shell-card-bg);
+    backdrop-filter: blur(12px);
+    box-shadow: var(--shell-card-shadow);
+    color: var(--shell-content-text);
+
+    .el-card__header {
+      border-bottom-color: var(--shell-card-border);
+      color: var(--shell-content-text);
+      font-weight: 600;
+    }
+  }
+
+  :deep(.el-table) {
+    --el-table-bg-color: transparent;
+    --el-table-tr-bg-color: transparent;
+    --el-table-header-bg-color: var(--shell-table-header-bg);
+    color: var(--shell-content-text);
+  }
+
+  :deep(h4) {
+    color: var(--shell-content-text-secondary);
+  }
+}

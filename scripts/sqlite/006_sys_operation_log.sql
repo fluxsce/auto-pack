@@ -1,0 +1,30 @@
+-- 全局操作审计日志
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS AP_SYS_OPERATION_LOG (
+  rec_id TEXT NOT NULL PRIMARY KEY,
+  user_rec_id TEXT NOT NULL DEFAULT '',
+  login_name TEXT NOT NULL DEFAULT '',
+  action TEXT NOT NULL DEFAULT '',
+  module TEXT NOT NULL DEFAULT '',
+  target_type TEXT NOT NULL DEFAULT '',
+  target_id TEXT NOT NULL DEFAULT '',
+  target_name TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  detail TEXT NOT NULL DEFAULT '',
+  request_method TEXT NOT NULL DEFAULT '',
+  request_path TEXT NOT NULL DEFAULT '',
+  client_ip TEXT NOT NULL DEFAULT '',
+  success INTEGER NOT NULL DEFAULT 1 CHECK (success IN (0,1)),
+  error_message TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS IX_AP_SYS_OPLOG_CREATED
+  ON AP_SYS_OPERATION_LOG(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS IX_AP_SYS_OPLOG_MODULE
+  ON AP_SYS_OPERATION_LOG(module, created_at DESC);
+
+COMMIT;

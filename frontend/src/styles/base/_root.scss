@@ -1,0 +1,40 @@
+@use '../abstracts' as *;
+
+:root {
+  --vt-c-white: #{$vt-white};
+  --vt-c-white-soft: #{$vt-white-soft};
+  --vt-c-white-mute: #{$vt-white-mute};
+  --vt-c-black: #{$vt-black};
+  --vt-c-black-soft: #{$vt-black-soft};
+  --vt-c-black-mute: #{$vt-black-mute};
+  --vt-c-indigo: #{$vt-indigo};
+  --vt-c-divider-light-1: #{$vt-divider-light-1};
+  --vt-c-divider-light-2: #{$vt-divider-light-2};
+  --vt-c-divider-dark-1: #{$vt-divider-dark-1};
+  --vt-c-divider-dark-2: #{$vt-divider-dark-2};
+  --vt-c-text-light-1: var(--vt-c-indigo);
+  --vt-c-text-light-2: rgba(60, 60, 60, 0.66);
+  --vt-c-text-dark-1: var(--vt-c-white);
+  --vt-c-text-dark-2: rgba(235, 235, 235, 0.64);
+
+  @include semantic-color-vars(false);
+}
+
+html.dark {
+  @include semantic-color-vars(true);
+}
+
+body {
+  min-height: 100vh;
+  color: var(--color-text);
+  background: var(--color-background);
+  transition:
+    color 0.5s,
+    background-color 0.5s;
+  line-height: $line-height-base;
+  font-family: $font-family-base;
+  font-size: $font-size-base;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

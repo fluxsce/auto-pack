@@ -1,0 +1,48 @@
+.file-content-dialog {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--env-panel-border, var(--el-border-color-lighter));
+    border-radius: 8px;
+    background: var(--env-panel-inset-bg, var(--el-fill-color-lighter));
+  }
+
+  &__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  &__path {
+    min-width: 0;
+    font-family: ui-monospace, 'Courier New', Consolas, monospace;
+    font-size: 12px;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__size {
+    font-size: 12px;
+    color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
+  }
+
+  &__actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+}

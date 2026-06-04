@@ -1,0 +1,24 @@
+# autopack 应用配置（默认开发/发布均可使用，发版时随 configs/ 目录一并拷贝）
+
+server:
+  # 监听地址，格式 host:port 或 :port
+  addr: ":8080"
+
+database:
+  # SQLite 文件路径（相对路径基于 configs 目录的上一级，即应用根目录）
+  path: "./data/db/autopack.db"
+
+web:
+  jwt_secret: "auto-pack-dev-secret-change-in-production"
+  frontend:
+    # 前端 dist 目录；留空则自动解析：可执行文件同目录 web/，或开发时 ../frontend/dist
+    path: ""
+
+log:
+  level: info
+  # 日志文件（相对路径基于应用根目录）；轮转：单文件最大 max_size_mb，保留 max_backups 个历史文件
+  file: "./logs/autopack.log"
+  max_size_mb: 100
+  max_backups: 10
+  max_age_days: 0
+  also_stdout: true
