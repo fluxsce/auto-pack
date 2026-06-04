@@ -68,8 +68,14 @@ func (h *Handler) clone(w http.ResponseWriter, r *http.Request) {
 	cloned := make([]repository.PackProject, 0, len(projects))
 	for _, src := range projects {
 		newID := idMap[src.RecID]
-		name := strings.TrimSpace(src.ProjectName)
+		name, version, repoURL, branch, remark := projectcfg.NormalizeProjectSCM(
+			src.ProjectName, src.ProjectVersion, src.RepoURL, src.RepoBranch, src.Remark,
+		)
 		if err := projectcfg.ValidateProjectName(name); err != nil {
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := projectcfg.ValidateVersion(version); err != nil {
 			httpx.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -96,20 +102,20 @@ func (h *Handler) clone(w http.ResponseWriter, r *http.Request) {
 			RecID:          newID,
 			WorkspaceRecID: dest.RecID,
 			ProjectName:    name,
-			ProjectVersion: src.ProjectVersion,
+			ProjectVersion: version,
 			ProjectType:    src.ProjectType,
-			RepoURL:        src.RepoURL,
-			RepoBranch:     src.RepoBranch,
+			RepoURL:        repoURL,
+			RepoBranch:     branch,
 			WorkDir:        projectcfg.SuggestWorkDir(name),
 			ConfigJSON:     normalized,
-			GitEnvRecID:    src.GitEnvRecID,
-			JdkEnvRecID:    src.JdkEnvRecID,
-			MavenEnvRecID:  src.MavenEnvRecID,
-			NodejsEnvRecID: src.NodejsEnvRecID,
-			DeployEnvRecID: src.DeployEnvRecID,
+			GitEnvRecID:    strings.TrimSpace(src.GitEnvRecID),
+			JdkEnvRecID:    strings.TrimSpace(src.JdkEnvRecID),
+			MavenEnvRecID:  strings.TrimSpace(src.MavenEnvRecID),
+			NodejsEnvRecID: strings.TrimSpace(src.NodejsEnvRecID),
+			DeployEnvRecID: strings.TrimSpace(src.DeployEnvRecID),
 			IsEnabled:      src.IsEnabled,
 			SortNum:        src.SortNum,
-			Remark:         src.Remark,
+			Remark:         remark,
 		})
 	}
 	if err := h.repo.Insert(dest); err != nil {

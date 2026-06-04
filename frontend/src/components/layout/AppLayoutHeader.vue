@@ -111,7 +111,12 @@ onMounted(() => {
 <template>
   <header class="app-shell-header">
     <div class="app-shell-header__inner">
-      <RouterLink class="shell-brand shell-brand--link" :to="{ name: 'projects' }">
+      <RouterLink
+        :to="{ name: 'dashboard' }"
+        class="shell-brand shell-brand--link"
+        :class="{ 'is-active': route.name === 'dashboard' }"
+        :aria-label="t('dashboardIntroOpen')"
+      >
         <AppBrandLogo />
         <span class="shell-brand__text">{{ t('appTitle') }}</span>
         <span v-if="appVersion" class="shell-brand__version">v{{ appVersion }}</span>

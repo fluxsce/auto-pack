@@ -6,13 +6,19 @@ import EnvSettingsView from '@/views/env/EnvSettingsView.vue'
 import ProjectManageView from '@/views/project/ProjectManageView.vue'
 import UserManageView from '@/views/user/UserManageView.vue'
 import OperationLogView from '@/views/audit/OperationLogView.vue'
+import DashboardView from '@/views/dashboard/DashboardView.vue'
 import LoginView from '@/views/home/LoginView.vue'
 import { setupRouterGuards } from './guards'
 
 const appChildren: RouteRecordRaw[] = [
   {
     path: '',
-    redirect: { name: 'env' },
+    redirect: { name: 'dashboard' },
+  },
+  {
+    path: 'dashboard',
+    name: 'dashboard',
+    component: DashboardView,
   },
   {
     path: 'env',

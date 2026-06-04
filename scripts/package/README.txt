@@ -5,7 +5,7 @@ Contents:
   autopack(.exe)   API server
   web/             Frontend static files (dist); served by autopack at /autopack/
   configs/         app.yaml (server addr, database path, jwt, frontend path)
-  scripts/sqlite/  Database schema (applied on first start)
+  scripts/sqlite/  Database migrations (*.sql, applied in order on first start)
   data/            SQLite database + autopack.pid (runtime)
   logs/            Application and service stdout logs
 
@@ -36,5 +36,8 @@ Keep the web/ folder next to the binary when deploying.
 
 Packaging (from repo):
   Windows:  scripts\package-windows.ps1
-  Linux:    scripts/package-linux.sh
-  Tip: stop local "npm run dev" before Windows pack to avoid npm ci EPERM on node_modules.
+  Linux:    sh scripts/package-linux.sh
+  Tip: stop local "npm run dev" before Windows pack to avoid npm ci EPERM.
+  Linux pack always runs npm ci — do not copy frontend/node_modules from Windows.
+  If Linux reports "set: invalid option" on line 3, CRLF line endings — run once:
+    sh scripts/fix-sh-lf.sh

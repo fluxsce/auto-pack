@@ -28,6 +28,7 @@ import {
 import { DEFAULT_BUILD_TRIGGERS } from '@/types/build-triggers'
 import { DEFAULT_BUILD_CONFIG, mergeBuildConfig } from './project-defaults'
 import { FALLBACK_PROJECT_TYPES, normalizeProjectTypes, projectTypeLabel } from './project-meta'
+import { normalizeProjectFormFields, trimProjectFromApi } from './project-form-trim'
 import { workspaceOptionLabel } from './workspace/workspace-paths'
 
 export type ProjectPanelMode = 'none' | 'create' | 'edit' | 'clone'
@@ -188,26 +189,27 @@ export function useProjects() {
   }
 
   function applyProjectToForm(row: PackProject): void {
-    form.workspace_rec_id = row.workspace_rec_id
-    form.project_name = row.project_name
-    form.project_version = row.project_version
-    form.project_type = row.project_type
-    form.repo_url = row.repo_url
-    form.repo_branch = row.repo_branch
-    form.config_json = row.config_json
-    form.git_env_rec_id = row.git_env_rec_id ?? ''
-    form.jdk_env_rec_id = row.jdk_env_rec_id ?? ''
-    form.maven_env_rec_id = row.maven_env_rec_id ?? ''
-    form.nodejs_env_rec_id = row.nodejs_env_rec_id ?? ''
-    form.deploy_env_rec_id = row.deploy_env_rec_id ?? ''
-    form.is_enabled = row.is_enabled
-    form.sort_num = row.sort_num
-    form.remark = row.remark
+    const p = trimProjectFromApi(row)
+    form.workspace_rec_id = p.workspace_rec_id
+    form.project_name = p.project_name
+    form.project_version = p.project_version
+    form.project_type = p.project_type
+    form.repo_url = p.repo_url
+    form.repo_branch = p.repo_branch
+    form.config_json = p.config_json
+    form.git_env_rec_id = p.git_env_rec_id
+    form.jdk_env_rec_id = p.jdk_env_rec_id
+    form.maven_env_rec_id = p.maven_env_rec_id
+    form.nodejs_env_rec_id = p.nodejs_env_rec_id
+    form.deploy_env_rec_id = p.deploy_env_rec_id
+    form.is_enabled = p.is_enabled
+    form.sort_num = p.sort_num
+    form.remark = p.remark
     parseBuildConfig()
   }
 
-  function sanitizeProjectPayload(): PackProjectPayload {
-    const envId = (v: unknown) => (v == null ? '' : String(v).trim())
+  function buildProjectPayload(): PackProjectPayload {
+    normalizeProjectFormFields(form)
     return {
       workspace_rec_id: form.workspace_rec_id,
       project_name: form.project_name,
@@ -217,11 +219,11 @@ export function useProjects() {
       repo_branch: form.repo_branch,
       work_dir: '',
       config_json: form.config_json,
-      git_env_rec_id: envId(form.git_env_rec_id),
-      jdk_env_rec_id: envId(form.jdk_env_rec_id),
-      maven_env_rec_id: envId(form.maven_env_rec_id),
-      nodejs_env_rec_id: envId(form.nodejs_env_rec_id),
-      deploy_env_rec_id: envId(form.deploy_env_rec_id),
+      git_env_rec_id: form.git_env_rec_id,
+      jdk_env_rec_id: form.jdk_env_rec_id,
+      maven_env_rec_id: form.maven_env_rec_id,
+      nodejs_env_rec_id: form.nodejs_env_rec_id,
+      deploy_env_rec_id: form.deploy_env_rec_id,
       is_enabled: form.is_enabled,
       sort_num: form.sort_num,
       remark: form.remark,
@@ -374,7 +376,7 @@ export function useProjects() {
       return
     }
     saving.value = true
-    const payload = sanitizeProjectPayload()
+    const payload = buildProjectPayload()
     try {
       if (editingId.value) {
         const saved = await updateProject(editingId.value, payload)

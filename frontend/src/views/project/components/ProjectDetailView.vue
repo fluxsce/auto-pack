@@ -39,7 +39,10 @@ const emit = defineEmits<{
   workspaceOpen: [entry: import('@/types').ProjectWorkspaceEntry]
 }>()
 
-const title = computed(() => props.project?.project_name ?? '')
+const title = computed(() => props.project?.project_name?.trim() ?? '')
+
+const displayRepoBranch = computed(() => props.project?.repo_branch?.trim() || '—')
+const displayRepoUrl = computed(() => props.project?.repo_url?.trim() || '—')
 
 const selectedBuildNum = computed(() => {
   if (!props.selectedBuildId) return null
@@ -129,11 +132,11 @@ function onNavClick(id: ProjectDetailSection | 'configure'): void {
           <dl v-if="project" class="project-detail__meta">
             <div class="project-detail__meta-row">
               <dt>{{ $t('projectColBranch') }}</dt>
-              <dd>{{ project.repo_branch || '—' }}</dd>
+              <dd>{{ displayRepoBranch }}</dd>
             </div>
             <div class="project-detail__meta-row">
               <dt>{{ $t('projectColRepoUrl') }}</dt>
-              <dd class="project-detail__mono">{{ project.repo_url || '—' }}</dd>
+              <dd class="project-detail__mono">{{ displayRepoUrl }}</dd>
             </div>
             <div class="project-detail__meta-row">
               <dt>{{ $t('projectColWorkDir') }}</dt>

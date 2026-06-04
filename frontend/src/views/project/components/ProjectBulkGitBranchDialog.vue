@@ -26,6 +26,10 @@ watch(open, (v) => {
   if (v) branch.value = 'main'
 })
 
+function trimBranch(): void {
+  branch.value = branch.value.trim()
+}
+
 async function onSubmit(): Promise<void> {
   const value = branch.value.trim()
   if (!value) {
@@ -74,6 +78,7 @@ async function onSubmit(): Promise<void> {
           v-model="branch"
           :placeholder="$t('projectBranchPlaceholder')"
           autocomplete="off"
+          @blur="trimBranch"
         />
       </el-form-item>
       <p class="project-bulk-branch__note">{{ $t('projectBranchHint') }}</p>

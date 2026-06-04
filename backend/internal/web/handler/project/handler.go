@@ -251,15 +251,13 @@ type projectPayload struct {
 }
 
 func (p *projectPayload) toModel(h *Handler, recID string) (*repository.PackProject, error) {
-	name := strings.TrimSpace(p.ProjectName)
+	name, version, repoURL, branch, remark := projectcfg.NormalizeProjectSCM(
+		p.ProjectName, p.ProjectVersion, p.RepoURL, p.RepoBranch, p.Remark,
+	)
 	if err := projectcfg.ValidateProjectName(name); err != nil {
 		return nil, err
 	}
 	projectType := strings.TrimSpace(strings.ToLower(p.ProjectType))
-	version := strings.TrimSpace(p.ProjectVersion)
-	if version == "" {
-		version = "1.0.0"
-	}
 	if err := projectcfg.ValidateVersion(version); err != nil {
 		return nil, err
 	}
@@ -312,10 +310,6 @@ func (p *projectPayload) toModel(h *Handler, recID string) (*repository.PackProj
 	if p.IsEnabled == 0 {
 		isEnabled = 0
 	}
-	branch := strings.TrimSpace(p.RepoBranch)
-	if branch == "" {
-		branch = "main"
-	}
 	// Work path is under workspace root: {slug(name)}
 	workDir := projectcfg.SuggestWorkDir(name)
 	return &repository.PackProject{
@@ -324,7 +318,7 @@ func (p *projectPayload) toModel(h *Handler, recID string) (*repository.PackProj
 		ProjectName:    name,
 		ProjectVersion: version,
 		ProjectType:    projectType,
-		RepoURL:        strings.TrimSpace(p.RepoURL),
+		RepoURL:        repoURL,
 		RepoBranch:     branch,
 		WorkDir:        workDir,
 		ConfigJSON:     cfgJSON,
@@ -335,7 +329,7 @@ func (p *projectPayload) toModel(h *Handler, recID string) (*repository.PackProj
 		DeployEnvRecID: strings.TrimSpace(p.DeployEnvRecID),
 		IsEnabled:      isEnabled,
 		SortNum:        p.SortNum,
-		Remark:         strings.TrimSpace(p.Remark),
+		Remark:         remark,
 	}, nil
 }
 

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import type { PackProject, ProjectType } from '@/types'
 import { buildStatusLabel, buildStatusTagType, listBuildOutcome } from '../project-build-status'
-import { formatBuildTime } from '../project-format'
+import { formatBuildTime, lastBuildAtSortKey } from '../project-format'
 import { projectTypeTagClass } from '../project-meta'
 
 const props = defineProps<{
@@ -36,6 +36,10 @@ const emptyTitle = computed(() =>
   props.hasListFilters ? t('projectEmptyFilter') : t('projectEmptyList'),
 )
 const emptyHint = computed(() => (props.hasListFilters ? '' : t('projectEmptyListHint')))
+
+function compareLastBuildAt(a: PackProject, b: PackProject): number {
+  return lastBuildAtSortKey(a.last_build_at) - lastBuildAtSortKey(b.last_build_at)
+}
 </script>
 
 <template>
@@ -107,7 +111,14 @@ const emptyHint = computed(() => (props.hasListFilters ? '' : t('projectEmptyLis
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('projectColBuildTime')" width="156" align="left">
+        <el-table-column
+          prop="last_build_at"
+          :label="$t('projectColBuildTime')"
+          width="156"
+          align="left"
+          sortable
+          :sort-method="compareLastBuildAt"
+        >
           <template #default="{ row }">
             <span
               class="project-list__build-time"

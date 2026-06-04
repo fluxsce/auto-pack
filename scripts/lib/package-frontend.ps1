@@ -9,14 +9,22 @@ function Build-Frontend {
     Push-Location $FrontendDir
     try {
         $viteJs = Join-Path $FrontendDir "node_modules\vite\bin\vite.js"
+        $rolldownBinding = Join-Path $FrontendDir "node_modules\@rolldown\binding-win32-x64-msvc"
+        $needCi = $false
         if (-not (Test-Path $viteJs)) {
-            Write-Host "    npm ci (node_modules missing)"
+            Write-Host "    npm ci (vite missing)"
+            $needCi = $true
+        } elseif (-not (Test-Path $rolldownBinding)) {
+            Write-Host "    npm ci (windows rolldown binding missing — reinstall for this OS)"
+            $needCi = $true
+        }
+        if ($needCi) {
             npm ci
             if ($LASTEXITCODE -ne 0) {
                 throw "npm ci failed with exit code $LASTEXITCODE"
             }
         } else {
-            Write-Host "    skip npm ci (reuse node_modules)"
+            Write-Host "    skip npm ci (deps OK on this machine)"
         }
 
         Write-Host "    vite build"

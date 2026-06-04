@@ -39,7 +39,7 @@
     box-sizing: border-box;
   }
 
-  :deep(.el-card) {
+  .el-card {
     border-radius: 16px;
     border: 1px solid var(--shell-card-border);
     background: var(--shell-card-bg);
@@ -54,14 +54,14 @@
     }
   }
 
-  :deep(.el-table) {
+  .el-table {
     --el-table-bg-color: transparent;
     --el-table-tr-bg-color: transparent;
     --el-table-header-bg-color: var(--shell-table-header-bg);
     color: var(--shell-content-text);
   }
 
-  :deep(h4) {
+  h4 {
     color: var(--shell-content-text-secondary);
   }
 }

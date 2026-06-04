@@ -1,7 +1,8 @@
 #!/usr/bin/env sh
 # Shared helpers for start/stop/restart (POSIX sh).
 
-APP_ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+# start.sh sources this file; $0 is start.sh in the package root (same dir as autopack binary).
+APP_ROOT="$(CDPATH= cd -- "$(dirname "$0")" && pwd)"
 PID_FILE="${APP_ROOT}/data/autopack.pid"
 LOG_DIR="${APP_ROOT}/logs"
 LOG_FILE="${LOG_DIR}/autopack-stdout.log"

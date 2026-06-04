@@ -140,7 +140,7 @@ scripts/
 
 | 平台 | 脚本 | 输出 |
 |------|------|------|
-| Linux amd64 | `bash scripts/package-linux.sh` | `build/autopack-linux-amd64/`、`build/autopack-linux-amd64.tar.gz` |
+| Linux amd64 | `sh scripts/package-linux.sh` | `build/autopack-linux-amd64/`、`build/autopack-linux-amd64.tar.gz` |
 | Windows amd64 | `powershell -File scripts/package-windows.ps1` | `build/autopack-windows-amd64/`、`build/autopack-windows-amd64.zip` |
 
 **依赖**：Go 1.25+、Node.js 20+、npm（无需 C 编译器 / CGO）。
@@ -155,14 +155,14 @@ autopack-{os}-amd64/
 ├── start.sh / stop.sh / restart.sh / status.sh   # Linux 后台启停
 ├── start.bat / stop.bat / restart.bat / status.bat # Windows 后台启停
 ├── README.txt
-├── scripts/sqlite/001_init_schema.sql
+├── scripts/sqlite/*.sql
 ├── data/             # 数据库与 autopack.pid
 └── logs/
 ```
 
 在解压目录内执行 `start.sh` 或 `start.bat`（后台运行），浏览器访问 `http://localhost:8080/autopack/`。前端产物位于发布包内的 **`web/`** 目录，由 `autopack` 进程代理访问（勿删除该目录）。
 
-**打包注意（Windows）**：若 `npm ci` 报 EPERM，请先停止本地 `npm run dev` / 关闭占用 `node_modules` 的进程；打包脚本在已有 `node_modules` 时会跳过 `npm ci`，并用 `node node_modules/vite/bin/vite.js build` 构建，避免 `vite` 不在 PATH 时构建失败。
+**打包注意**：Linux 脚本**每次**在 `frontend` 下执行 `npm ci`（勿从 Windows 拷贝 `node_modules`）。Windows 若 `npm ci` 报 EPERM，先停 `npm run dev`；有 `node_modules` 时会跳过 `npm ci` 以规避文件占用。
 
 ---
 

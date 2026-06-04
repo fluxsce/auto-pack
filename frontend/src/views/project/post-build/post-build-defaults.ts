@@ -4,10 +4,11 @@ import type {
   PostBuildTransferSet,
   PostBuildWhen,
 } from '@/types/post-build'
+import { randomId } from '@/utils/random-id'
 import { isRegisteredPostBuildType } from './post-build-registry'
 
 export function newPostBuildActionId(): string {
-  return crypto.randomUUID()
+  return randomId()
 }
 
 export function defaultTransferSet(): PostBuildTransferSet {

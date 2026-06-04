@@ -14,6 +14,7 @@ import type {
 import { gitEnvOptionLabel } from '@/views/env/env-git'
 import { projectTypeTagClass, suggestedEnvTypes } from '../project-meta'
 import { derivedProjectWorkDir, resolvedWorkPath } from '../project-paths'
+import { normalizeProjectFormFields } from '../project-form-trim'
 import { effectiveWorkspaceRoot, workspaceOptionLabel } from '../workspace/workspace-paths'
 import {
   PROJECT_EDITOR_NAV,
@@ -138,6 +139,10 @@ function selectSection(id: ProjectEditorSection): void {
   activeSection.value = id
   if (id === 'environment' || id === 'scm' || id === 'deploy') emit('reloadEnvs')
 }
+
+function trimFormFields(): void {
+  normalizeProjectFormFields(props.form)
+}
 </script>
 
 <template>
@@ -198,7 +203,7 @@ function selectSection(id: ProjectEditorSection): void {
               />
             </el-form-item>
             <el-form-item :label="$t('projectColName')" required>
-              <el-input v-model="form.project_name" />
+              <el-input v-model="form.project_name" @blur="trimFormFields" />
             </el-form-item>
             <el-form-item :label="$t('projectColVersion')" required>
               <el-input
@@ -240,7 +245,7 @@ function selectSection(id: ProjectEditorSection): void {
                 <el-input-number v-model="form.sort_num" :min="0" :max="9999" />
               </el-form-item>
               <el-form-item :label="$t('envColRemark')">
-                <el-input v-model="form.remark" type="textarea" :rows="2" />
+                <el-input v-model="form.remark" type="textarea" :rows="2" @blur="trimFormFields" />
               </el-form-item>
             </div>
           </section>
@@ -261,10 +266,18 @@ function selectSection(id: ProjectEditorSection): void {
 
             <template v-if="scmMode === 'git'">
               <el-form-item :label="$t('projectColRepoUrl')">
-                <el-input v-model="form.repo_url" :placeholder="$t('projectRepoUrlPlaceholder')" />
+                <el-input
+                  v-model="form.repo_url"
+                  :placeholder="$t('projectRepoUrlPlaceholder')"
+                  @blur="trimFormFields"
+                />
               </el-form-item>
               <el-form-item :label="$t('projectColBranch')">
-                <el-input v-model="form.repo_branch" :placeholder="$t('projectBranchPlaceholder')" />
+                <el-input
+                  v-model="form.repo_branch"
+                  :placeholder="$t('projectBranchPlaceholder')"
+                  @blur="trimFormFields"
+                />
                 <p class="project-editor__hint">{{ $t('projectBranchHint') }}</p>
                 <div class="project-editor__ref-tags">
                   <el-tag

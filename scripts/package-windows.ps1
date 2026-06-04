@@ -37,7 +37,7 @@ if (-not $bundledJs) {
 Write-Host "    Static files: $WebDir ($($bundledJs.Count) JS file(s), served by autopack.exe)"
 
 Copy-Item (Join-Path $Root "backend\configs") (Join-Path $Staging "configs") -Recurse -Force
-Copy-Item (Join-Path $Root "scripts\sqlite\001_init_schema.sql") (Join-Path $Staging "scripts\sqlite\") -Force
+Copy-Item (Join-Path $Root "scripts\sqlite\*.sql") (Join-Path $Staging "scripts\sqlite\") -Force
 $winScripts = Join-Path $Root "scripts\package\windows"
 Copy-Item (Join-Path $winScripts "*") $Staging -Force
 Copy-Item (Join-Path $Root "scripts\package\README.txt") (Join-Path $Staging "README.txt") -Force

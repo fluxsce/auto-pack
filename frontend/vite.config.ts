@@ -10,6 +10,15 @@ const appBase = '/autopack/'
 export default defineConfig({
   base: appBase,
   plugins: [vue(), vueDevTools()],
+  build: {
+    chunkSizeWarningLimit: 1600,
+    rolldownOptions: {
+      onLog(level, log, defaultHandler) {
+        if (log.code === 'INVALID_ANNOTATION') return
+        defaultHandler(level, log)
+      },
+    },
+  },
   server: {
     proxy: {
       '/autopack/api': {

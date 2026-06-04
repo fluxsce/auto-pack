@@ -31,7 +31,7 @@ export function setupRouterGuards(router: Router): void {
 
     if (isGuestRoute(to) && authed) {
       const redirect = resolveRedirect(to.query.redirect)
-      return redirect ?? { name: 'env' }
+      return redirect ?? { name: 'dashboard' }
     }
   })
 }

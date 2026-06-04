@@ -31,7 +31,7 @@ async function onLogin(): Promise<void> {
     sessionStore.setUser(result.user)
     message.success(t('loginSuccess'))
     const redirect = resolveRedirect(route.query.redirect)
-    await router.replace(redirect ?? { name: 'env' })
+    await router.replace(redirect ?? { name: 'dashboard' })
   } catch (error) {
     message.error((error as Error).message)
   } finally {
