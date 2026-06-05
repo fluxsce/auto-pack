@@ -8,10 +8,14 @@ import (
 	"strings"
 )
 
-const pomFileName = "pom.xml"
+const (
+	pomFileName             = "pom.xml"
+	datahubParentArtifactID = "datahub-utils-parentPom"
+)
 
 var (
-	reParentVersion      = regexp.MustCompile(`(?s)(<parent>\s*.*?\s*<version>)\s*[^<]*\s*(</version>)`)
+	reParentVersion      = regexp.MustCompile(`(?s)(<version>)\s*[^<]*\s*(</version>)`)
+	reParentArtifactID   = regexp.MustCompile(`(?s)<artifactId>\s*([^<]*?)\s*</artifactId>`)
 	reVersionTag         = regexp.MustCompile(`<version>\s*([^<]*?)\s*</version>`)
 	reParentBlock        = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
 	reDatahubCoreVersion = regexp.MustCompile(
@@ -25,7 +29,7 @@ func PomPath(projectDir string) string {
 	return filepath.Join(projectDir, pomFileName)
 }
 
-// UpdatePomVersions sets project version, parent version (if present), and optionally datahub.core.version to tag.
+// UpdatePomVersions sets project version, datahub-utils-parentPom parent version (if present), and optionally datahub.core.version to tag.
 func UpdatePomVersions(content, tag string) (string, error) {
 	updated, skip, err := updatePomVersions(content, tag)
 	if skip != "" {
@@ -44,10 +48,7 @@ func updatePomVersions(content, tag string) (updated string, skipReason string, 
 		return "", "无效的 pom.xml（缺少 project）", nil
 	}
 
-	out := content
-	if reParentVersion.MatchString(out) {
-		out = reParentVersion.ReplaceAllString(out, "${1}"+tag+"${2}")
-	}
+	out := updateDatahubParentVersion(content, tag)
 
 	out, err = replaceRootProjectVersion(out, tag)
 	if err != nil {
@@ -57,6 +58,30 @@ func updatePomVersions(content, tag string) (updated string, skipReason string, 
 		out = upsertDatahubCoreVersion(out, tag)
 	}
 	return out, "", nil
+}
+
+func updateDatahubParentVersion(content, tag string) string {
+	return reParentBlock.ReplaceAllStringFunc(content, func(block string) string {
+		if !parentHasArtifactID(block, datahubParentArtifactID) {
+			return block
+		}
+		if !reParentVersion.MatchString(block) {
+			return block
+		}
+		return reParentVersion.ReplaceAllString(block, "${1}"+tag+"${2}")
+	})
+}
+
+func parentHasArtifactID(parentBlock, artifactID string) bool {
+	artifactID = strings.TrimSpace(artifactID)
+	if artifactID == "" {
+		return false
+	}
+	m := reParentArtifactID.FindStringSubmatch(parentBlock)
+	if len(m) < 2 {
+		return false
+	}
+	return strings.TrimSpace(m[1]) == artifactID
 }
 
 func replaceRootProjectVersion(content, tag string) (string, error) {

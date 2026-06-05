@@ -61,11 +61,14 @@ func syncOriginRefs(ctx context.Context, dir string, env []string, log *publishL
 
 func checkoutFromOriginBranch(ctx context.Context, dir string, env []string, releaseBranch string, log *publishLogger) error {
 	ref := originBranchRef(releaseBranch)
-	log.step("从远程 %s 检出发版分支 %s", ref, releaseBranch)
+	log.step("从远程 %s 强制检出发版分支 %s", ref, releaseBranch)
 	if _, err := runGit(ctx, dir, env, "checkout", "-f", "-B", releaseBranch, ref); err != nil {
 		return fmt.Errorf("checkout from %s: %w", ref, err)
 	}
-	_, _ = runGitAllow(ctx, dir, env, "reset", "--hard", ref)
+	if _, err := runGit(ctx, dir, env, "reset", "--hard", ref); err != nil {
+		return fmt.Errorf("reset --hard %s: %w", ref, err)
+	}
+	log.step("工作区已与 %s 对齐", ref)
 	return nil
 }
 
@@ -99,32 +102,29 @@ func checkoutReleaseBranchFromTag(ctx context.Context, dir string, env []string,
 	)
 }
 
-// checkoutReleaseBranch prefers origin over stale local branches.
+// checkoutReleaseBranch always prefers origin over local branches (avoids stale workspace checkouts).
 func checkoutReleaseBranch(ctx context.Context, dir string, env []string, releaseBranch, versionTag string, log *publishLogger) error {
 	releaseBranch = strings.TrimSpace(releaseBranch)
 	if releaseBranch == "" {
 		return fmt.Errorf("release branch is required")
-	}
-	originRef := originBranchRef(releaseBranch)
-	if gitRefExists(ctx, dir, env, originRef) {
-		return checkoutFromOriginBranch(ctx, dir, env, releaseBranch, log)
 	}
 	onOrigin, err := originHeadBranchExists(ctx, dir, env, releaseBranch)
 	if err != nil {
 		return fmt.Errorf("ls-remote origin %s: %w", releaseBranch, err)
 	}
 	if onOrigin {
-		log.step("远程发版分支 %s 存在，同步到本地后检出", releaseBranch)
+		log.step("远程发版分支 %s 存在，强制拉取并检出（忽略本地分支）", releaseBranch)
 		if err := fetchOriginBranch(ctx, dir, env, releaseBranch, log); err != nil {
 			return fmt.Errorf("fetch origin %s: %w", releaseBranch, err)
 		}
-		if gitRefExists(ctx, dir, env, originRef) {
-			return checkoutFromOriginBranch(ctx, dir, env, releaseBranch, log)
+		originRef := originBranchRef(releaseBranch)
+		if !gitRefExists(ctx, dir, env, originRef) {
+			return fmt.Errorf("fetched origin/%s but remote-tracking ref is missing", releaseBranch)
 		}
-		return fmt.Errorf("fetched origin/%s but remote-tracking ref is missing", releaseBranch)
+		return checkoutFromOriginBranch(ctx, dir, env, releaseBranch, log)
 	}
 	if gitRefExists(ctx, dir, env, releaseBranch) {
-		log.step("远程已删除 %s，忽略本地残留分支", releaseBranch)
+		log.step("远程无发版分支 %s，忽略本地残留分支", releaseBranch)
 	}
 	return checkoutReleaseBranchFromTag(ctx, dir, env, releaseBranch, versionTag, log)
 }

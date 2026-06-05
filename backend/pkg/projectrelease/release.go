@@ -46,12 +46,6 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		res.Message = "work directory is empty"
 		return res
 	}
-	versionPath, updateNotesPath, ok := ResourcePaths(workDir)
-	if !ok {
-		res.Status = "skipped"
-		res.Message = "Version.txt or UpdateNotes.txt not found under src/main/resources"
-		return res
-	}
 
 	tag := strings.TrimSpace(req.Tag)
 	if tag == "" {
@@ -62,29 +56,40 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 	if releaseDate == "" {
 		releaseDate = time.Now().Format("2006-01-02")
 	}
+	branch := strings.TrimSpace(req.ReleaseBranch)
+	if branch == "" {
+		res.Message = "release branch is required"
+		return res
+	}
 	commitMsg := ResolveCommitMessage(req.ReleaseNote, tag)
 
 	steps := []string{}
 	log := newPublishLogger(&steps)
 	log.step("开始发版（工程 %s）", name)
 
-	branch := strings.TrimSpace(req.ReleaseBranch)
-	if branch == "" {
-		res.Message = "release branch is required"
-		res.Steps = steps
-		return res
-	}
-
-	// Checkout release branch (or base tag) before reading Version.txt — avoid merging develop workspace cache.
+	// Sync from origin before reading or creating resource files — avoid polluted local branches.
 	if r.Git != nil {
 		if err := r.Git.SyncReleaseWorktree(ctx, project, workDir, branch, tag, log); err != nil {
 			res.Message = err.Error()
 			res.Steps = steps
 			return res
 		}
-		if baseVer := topVersionFromFile(versionPath); baseVer != "" {
-			log.step("Version.txt 以发版分支内容为准（当前首行版本 %s）", baseVer)
-		}
+	}
+
+	versionPath, updateNotesPath, ok := ResolveResourcePaths(workDir)
+	if !ok {
+		res.Message = "invalid project work directory"
+		res.Steps = steps
+		return res
+	}
+	if _, err := EnsureResourceFiles(versionPath, updateNotesPath, log); err != nil {
+		res.Message = err.Error()
+		res.Steps = steps
+		return res
+	}
+
+	if baseVer := topVersionFromFile(versionPath); baseVer != "" {
+		log.step("Version.txt 以发版分支内容为准（当前首行版本 %s）", baseVer)
 	}
 
 	content, err := BuildVersionContent(versionPath, updateNotesPath, SyncOptions{

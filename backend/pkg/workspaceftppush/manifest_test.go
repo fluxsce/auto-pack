@@ -1,6 +1,7 @@
 package workspaceftppush
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -8,7 +9,7 @@ import (
 func TestDefaultBackupPath(t *testing.T) {
 	ts := time.Date(2026, 6, 4, 14, 30, 5, 0, time.UTC)
 	got := DefaultBackupPath("/deploy/release", ts)
-	want := "/deploy/release/BAK/20260604"
+	want := "/deploy/release/BAK/20260604143005000"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -29,6 +30,16 @@ func TestResolvePushLayout(t *testing.T) {
 			t.Fatalf("got %+v want %+v", got, want)
 		}
 	})
+}
+
+func TestMergeUpdateNoteContent(t *testing.T) {
+	existing := "20260529 shangjian old entry\n备份包路径:/bak/old.war\n更新包路径:/deploy/old.war\n"
+	manifest := "20260604 shangjian new entry\n备份包路径:/bak/new.war\n更新包路径:/deploy/new.war\n"
+	got := MergeUpdateNoteContent(existing, manifest)
+	want := strings.TrimRight(existing, "\n") + "\n" + strings.TrimRight(manifest, "\n") + "\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
 }
 
 func TestBuildManifestContent(t *testing.T) {

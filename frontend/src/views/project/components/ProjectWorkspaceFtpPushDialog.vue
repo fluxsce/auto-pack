@@ -4,8 +4,15 @@ import { useI18n } from 'vue-i18n'
 import { useMessage } from '@/components/feedback/message'
 import { APP_DIALOG_POPPER_CLASS } from '@/components/feedback/dialog/constants'
 import { fetchEnvSettings } from '@/request/api/env'
-import { pushProjectWorkspaceFtp } from '@/request/api/build'
+import { fetchProjectWorkspaceFtpRemoteNote, pushProjectWorkspaceFtp } from '@/request/api/build'
 import type { EnvSetting, PackBuildStatus, ProjectWorkspaceEntry } from '@/types'
+import {
+  backupFilePath,
+  buildManifestPreview,
+  defaultBackupDir,
+  mergeUpdateNotePreview,
+  resolvePushLayout,
+} from '@/utils/workspace-ftp'
 import { ProjectBuildLogPanel } from './panels'
 
 const open = defineModel<boolean>('open', { required: true })
@@ -35,6 +42,10 @@ const backupManual = ref(false)
 const pusher = ref('')
 const taskRef = ref('')
 const detail = ref('')
+const remoteNoteContent = ref('')
+const remoteNoteExists = ref(false)
+const remoteNoteLoading = ref(false)
+let remoteNoteTimer: ReturnType<typeof setTimeout> | null = null
 
 const entryLabel = computed(() => {
   const e = props.entry
@@ -48,49 +59,34 @@ const uploadName = computed(() => {
   return e.is_dir ? `${e.name}.zip` : e.name
 })
 
-function normalizeRemoteDir(p: string): string {
-  let s = p.trim().replaceAll('\\', '/').replace(/\/+$/, '')
-  if (!s) return '/'
-  if (!s.startsWith('/')) s = `/${s}`
-  return s
-}
-
-function resolvePushLayout(pushPathRaw: string, fileName: string): { pushDir: string; updatePath: string } {
-  const trimmed = pushPathRaw.trim().replaceAll('\\', '/').replace(/\/+$/, '') || '/'
-  const normalized = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
-  const base = normalized.split('/').pop() ?? ''
-  if (fileName && base === fileName) {
-    const parent = normalized.slice(0, normalized.length - base.length).replace(/\/+$/, '') || '/'
-    return { pushDir: normalizeRemoteDir(parent), updatePath: normalized }
-  }
-  const pushDir = normalizeRemoteDir(pushPathRaw)
-  return { pushDir, updatePath: `${pushDir}/${fileName}` }
-}
-
 const pushLayout = computed(() => resolvePushLayout(pushPath.value, uploadName.value))
 
 const defaultBackupPath = computed(() => {
   if (!pushPath.value.trim()) return ''
-  const stamp = formatBackupStamp(new Date())
-  return `${pushLayout.value.pushDir}/BAK/${stamp}`
+  return defaultBackupDir(pushPath.value, uploadName.value)
 })
 
-const backupFilePath = computed(() => {
-  const backupDir = backupPath.value.trim() || defaultBackupPath.value
-  if (!backupDir) return ''
-  return `${normalizeRemoteDir(backupDir)}/${uploadName.value}`
+const backupFilePathPreview = computed(() => {
+  if (!pushPath.value.trim()) return ''
+  return backupFilePath(pushPath.value, uploadName.value, backupPath.value)
 })
 
-const previewContent = computed(() =>
+const newManifestBlock = computed(() =>
   buildManifestPreview(
     new Date(),
     pusher.value,
     taskRef.value,
-    backupFilePath.value,
+    backupFilePathPreview.value,
     pushPath.value.trim() ? pushLayout.value.updatePath : uploadName.value,
     detail.value,
   ),
 )
+
+const previewContent = computed(() =>
+  mergeUpdateNotePreview(remoteNoteContent.value, newManifestBlock.value),
+)
+
+const previewRows = computed(() => (remoteNoteExists.value ? 8 : 4))
 
 const logComplete = computed(() => pushStatus.value !== 'running')
 const logLoading = computed(() => saving.value && pushStatus.value === 'running' && !logText.value)
@@ -113,6 +109,40 @@ watch(defaultBackupPath, (v) => {
   }
 })
 
+watch([ftpEnvRecId, pushPath, uploadName], () => {
+  scheduleRemoteNoteLoad()
+})
+
+function scheduleRemoteNoteLoad(): void {
+  if (remoteNoteTimer) clearTimeout(remoteNoteTimer)
+  remoteNoteTimer = setTimeout(() => {
+    void loadRemoteNote()
+  }, 400)
+}
+
+async function loadRemoteNote(): Promise<void> {
+  if (!props.projectRecId || !ftpEnvRecId.value || !pushPath.value.trim()) {
+    remoteNoteContent.value = ''
+    remoteNoteExists.value = false
+    return
+  }
+  remoteNoteLoading.value = true
+  try {
+    const res = await fetchProjectWorkspaceFtpRemoteNote(props.projectRecId, {
+      ftp_env_rec_id: ftpEnvRecId.value,
+      push_path: pushPath.value.trim(),
+      file_name: uploadName.value,
+    })
+    remoteNoteExists.value = res.exists
+    remoteNoteContent.value = res.exists ? res.content : ''
+  } catch {
+    remoteNoteContent.value = ''
+    remoteNoteExists.value = false
+  } finally {
+    remoteNoteLoading.value = false
+  }
+}
+
 function resetForm(): void {
   ftpEnvRecId.value = ''
   pushPath.value = ''
@@ -121,6 +151,8 @@ function resetForm(): void {
   pusher.value = ''
   taskRef.value = ''
   detail.value = ''
+  remoteNoteContent.value = ''
+  remoteNoteExists.value = false
   logText.value = t('projectFtpPushLogReady')
   pushStatus.value = null
 }
@@ -176,32 +208,6 @@ function onEnvChange(recId: string): void {
   }
 }
 
-function formatBackupStamp(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
-}
-
-function buildManifestPreview(
-  pushTime: Date,
-  pusherName: string,
-  taskRefText: string,
-  backupPathText: string,
-  updatePathText: string,
-  detailText: string,
-): string {
-  const dateYmd = formatBackupStamp(pushTime)
-  const lines = [
-    `${dateYmd} ${pusherName.trim()} ${taskRefText.trim()}`,
-    `备份包路径:${backupPathText.trim()}`,
-    `更新包路径:${updatePathText.trim()}`,
-  ]
-  const detail = detailText.replace(/\r\n/g, '\n').trimEnd()
-  if (detail.trim()) {
-    lines.push(detail)
-  }
-  return `${lines.join('\n')}\n`
-}
-
 async function onSubmit(): Promise<void> {
   if (!props.projectRecId || !props.entry) return
   if (!ftpEnvRecId.value) {
@@ -229,6 +235,7 @@ async function onSubmit(): Promise<void> {
     `  ${t('projectFtpPushLogTarget', { name: entryLabel.value })}`,
     `  ${t('projectFtpPushLogEnv', { name: envName })}`,
     `  ${t('projectFtpPushLogPushPath', { path: pushPath.value.trim() })}`,
+    ...(remoteNoteExists.value ? [`  ${t('projectFtpPushLogNoteAppend')}`] : []),
   ])
 
   saving.value = true
@@ -336,14 +343,17 @@ async function onSubmit(): Promise<void> {
               :placeholder="$t('projectFtpPushDetailPlaceholder')"
             />
           </el-form-item>
-          <el-form-item :label="$t('projectFtpPushInfoPreview')">
+          <el-form-item v-loading="remoteNoteLoading" :label="$t('projectFtpPushInfoPreview')">
             <el-input
               :model-value="previewContent"
               type="textarea"
-              :rows="4"
+              :rows="previewRows"
               readonly
               class="project-ftp-push__preview"
             />
+            <p v-if="remoteNoteExists" class="project-ftp-push__hint project-ftp-push__hint--append">
+              {{ $t('projectFtpPushNoteAppendPreview') }}
+            </p>
             <p class="project-ftp-push__hint">{{ $t('projectFtpPushInfoFormatHint') }}</p>
           </el-form-item>
         </el-form>
@@ -394,6 +404,10 @@ async function onSubmit(): Promise<void> {
     font-size: 12px;
     line-height: 1.45;
     color: var(--shell-content-text-secondary, var(--el-text-color-placeholder));
+
+    &--append {
+      color: var(--el-color-primary);
+    }
   }
 
   &__preview :deep(textarea) {

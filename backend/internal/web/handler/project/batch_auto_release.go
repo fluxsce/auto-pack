@@ -153,9 +153,12 @@ func parseBatchAutoReleasePayload(r *http.Request) (batchAutoReleasePayload, err
 	if body.ReleaseBranch == "" {
 		return body, errors.New("release_branch is required")
 	}
-	body.TagBranch = strings.TrimSpace(body.TagBranch)
+	body.TagBranch = projectrelease.NormalizeVersionTag(body.TagBranch)
 	if body.TagBranch == "" {
 		return body, errors.New("tag_branch is required")
+	}
+	if err := projectrelease.ValidateVersionTag(body.TagBranch); err != nil {
+		return body, err
 	}
 	body.ReleaseDate = strings.TrimSpace(body.ReleaseDate)
 	if body.ReleaseDate == "" {
@@ -272,8 +275,21 @@ func (h *Handler) runBatchAutoRelease(
 	status := repository.ResolveReleaseStatus(released, skipped, failed)
 	summary := "released=" + strconv.Itoa(released) + " skipped=" + strconv.Itoa(skipped) + " failed=" + strconv.Itoa(failed)
 	logText := h.formatPersistedReleaseLog(body, results, released, skipped, failed, updatePom, createTarget, true, "")
-	_ = os.WriteFile(logPath, []byte(logText), 0o644)
 	_ = h.releases.Finish(job.ReleaseRecID, status, summary, logPath, released, skipped, failed, &fin)
+
+	branchDetail := ""
+	if released > 0 {
+		repoBranch := projectrelease.RepoBranchForVersionTag(body.TagBranch)
+		if n, err := h.projects.UpdateRepoBranchByWorkspace(ws.RecID, repoBranch); err != nil {
+			branchDetail = " repo_branch_sync_error=" + err.Error()
+		} else {
+			_ = h.runner.Scheduler().Reload()
+			branchDetail = " repo_branch_synced=" + strconv.FormatInt(n, 10) + " branch=" + repoBranch
+			logText += "\n\n[发版后] 已将工作空间 Git 分支设置为 " + repoBranch +
+				"（" + strconv.FormatInt(n, 10) + " 个工程）"
+			_ = os.WriteFile(logPath, []byte(logText), 0o644)
+		}
+	}
 
 	h.audit.Record(r.Context(), r, audit.Entry{
 		UserRecID: auditUserRecID,
@@ -283,7 +299,7 @@ func (h *Handler) runBatchAutoRelease(
 		Detail: "branch=" + body.ReleaseBranch + " target=" + body.TargetBranch +
 			" create_target=" + strconv.FormatBool(createTarget) +
 			" released=" + strconv.Itoa(released) +
-			" skipped=" + strconv.Itoa(skipped) + " failed=" + strconv.Itoa(failed),
+			" skipped=" + strconv.Itoa(skipped) + " failed=" + strconv.Itoa(failed) + branchDetail,
 		Success: failed == 0,
 	})
 }

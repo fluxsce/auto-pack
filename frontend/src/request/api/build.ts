@@ -73,3 +73,16 @@ export function pushProjectWorkspaceFtp(
 ): Promise<WorkspaceFtpPushResult> {
   return http.post(`/projects/${projectRecId}/workspace/ftp-push`, data)
 }
+
+export interface WorkspaceFtpRemoteNote {
+  exists: boolean
+  content: string
+  info_path: string
+}
+
+export function fetchProjectWorkspaceFtpRemoteNote(
+  projectRecId: string,
+  params: { ftp_env_rec_id: string; push_path: string; file_name?: string },
+): Promise<WorkspaceFtpRemoteNote> {
+  return http.get(`/projects/${projectRecId}/workspace/ftp-remote-note`, { params })
+}

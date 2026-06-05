@@ -167,6 +167,20 @@ export interface BatchAutoReleaseStatusResponse {
 }
 
 /** Starts async auto-release; poll status until completed. No long HTTP timeout. */
+export interface BatchAutoReleaseDefaultsResponse {
+  release_branch: string
+  tag_branch: string
+  tag_source?: 'remote' | 'history' | 'workspace'
+}
+
+export function fetchBatchAutoReleaseDefaults(
+  workspaceRecId: string,
+): Promise<BatchAutoReleaseDefaultsResponse> {
+  return http.get('/projects/batch-auto-release/defaults', {
+    params: { workspace_rec_id: workspaceRecId },
+  })
+}
+
 export function batchAutoRelease(
   data: BatchAutoReleasePayload,
 ): Promise<BatchAutoReleaseStartResponse> {

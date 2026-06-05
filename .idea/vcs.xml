@@ -2,9 +2,5 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/backend/data/workspaces/V9.0.0-P01/flux-collaboration-SrvApi" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/backend/data/workspaces/V9.0.0-P01/flux-collaboration-datahub01api" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/backend/data/workspaces/default/flux-collaboration-SrvApi" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/backend/data/workspaces/default/flux-collaboration-datahub01api" vcs="Git" />
   </component>
 </project>

@@ -379,6 +379,7 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       v-model:open="bulkAutoReleaseOpen"
       :workspace-rec-id="activeWorkspaceRecId"
       :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :workspace-code="activeWorkspace?.workspace_code ?? ''"
       :project-count="workspaceProjectCount"
       @success="loadList()"
     />

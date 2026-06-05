@@ -107,7 +107,6 @@ func Push(req Request) (Result, error) {
 	updatePath := layout.UpdatePath
 	backupFilePath := UpdateRemotePath(backupDir, uploadName)
 	infoRemote := UpdateRemotePath(layout.PushDir, InfoFileName)
-	backupInfoPath := UpdateRemotePath(backupDir, InfoFileName)
 	manifestBackup := ""
 
 	exists, err := ftpclient.RemoteExists(conn, req.FTPConfig, updatePath)
@@ -121,16 +120,6 @@ func Push(req Request) (Result, error) {
 		manifestBackup = backupFilePath
 	}
 
-	noteExists, err := ftpclient.RemoteExists(conn, req.FTPConfig, infoRemote)
-	if err != nil {
-		return Result{}, fmt.Errorf("check remote note: %w", err)
-	}
-	if noteExists {
-		if err := ftpclient.BackupRemoteFile(conn, req.FTPConfig, infoRemote, backupInfoPath); err != nil {
-			return Result{}, fmt.Errorf("backup remote note: %w", err)
-		}
-	}
-
 	if err := ftpclient.UploadLocalFile(conn, req.FTPConfig, updatePath, uploadLocal); err != nil {
 		return Result{}, fmt.Errorf("upload update package: %w", err)
 	}
@@ -141,7 +130,20 @@ func Push(req Request) (Result, error) {
 		Detail:   req.Detail,
 		PushTime: pushTime,
 	}, backupFilePath, updatePath)
-	if err := ftpclient.UploadBytes(conn, req.FTPConfig, strings.TrimPrefix(infoRemote, "/"), []byte(manifest)); err != nil {
+
+	noteExists, err := ftpclient.RemoteExists(conn, req.FTPConfig, infoRemote)
+	if err != nil {
+		return Result{}, fmt.Errorf("check remote note: %w", err)
+	}
+	noteUpload := manifest
+	if noteExists {
+		existing, err := ftpclient.DownloadRemote(conn, req.FTPConfig, infoRemote)
+		if err != nil {
+			return Result{}, fmt.Errorf("read remote note: %w", err)
+		}
+		noteUpload = MergeUpdateNoteContent(string(existing), manifest)
+	}
+	if err := ftpclient.UploadBytes(conn, req.FTPConfig, strings.TrimPrefix(infoRemote, "/"), []byte(noteUpload)); err != nil {
 		return Result{}, fmt.Errorf("upload info file: %w", err)
 	}
 
@@ -149,7 +151,7 @@ func Push(req Request) (Result, error) {
 		BackupPath:   manifestBackup,
 		UpdatePath:   updatePath,
 		InfoFilePath: infoRemote,
-		InfoContent:  manifest,
+		InfoContent:  noteUpload,
 	}, nil
 }
 

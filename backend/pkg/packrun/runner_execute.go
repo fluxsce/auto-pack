@@ -232,10 +232,8 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 		if _, err := log.runGit(ctx, workDir, shellEnv, "fetch", "--tags", "--progress", "origin"); err != nil {
 			return err
 		}
-		if _, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", branch); err != nil {
-			if _, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", "origin/"+branch); err != nil {
-				return fmt.Errorf("git checkout %s: %w", branch, err)
-			}
+		if err := checkoutProjectRef(ctx, workDir, shellEnv, branch, log); err != nil {
+			return err
 		}
 		log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
 		return nil
@@ -266,6 +264,22 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 	}
 	log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
 	return nil
+}
+
+func checkoutProjectRef(ctx context.Context, workDir string, shellEnv []string, repoBranch string, log *buildLogger) error {
+	repoBranch = strings.TrimSpace(repoBranch)
+	for _, ref := range git.CheckoutRefCandidates(repoBranch) {
+		if _, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", ref); err == nil {
+			return nil
+		}
+	}
+	if git.IsTagRef(repoBranch) {
+		return fmt.Errorf("git checkout tag ref %s: tag not found locally (run fetch --tags)", repoBranch)
+	}
+	if _, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", "origin/"+repoBranch); err == nil {
+		return nil
+	}
+	return fmt.Errorf("git checkout %s: branch or tag not found", repoBranch)
 }
 
 func (r *Runner) gitShellEnv(

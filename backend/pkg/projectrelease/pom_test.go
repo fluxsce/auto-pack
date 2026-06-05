@@ -53,11 +53,56 @@ func TestUpdatePomVersions_srvApi(t *testing.T) {
 	}
 }
 
+func TestUpdatePomVersions_onlyDatahubParentVersion(t *testing.T) {
+	const pom = `<project>
+<parent>
+<groupId>com.flux</groupId>
+<artifactId>other-parent</artifactId>
+<version>1.0.0</version>
+</parent>
+<version>10.0.0-SNAPSHOT</version>
+</project>`
+	out, skip, err := updatePomVersions(pom, "V9.0.0-P01-01")
+	if err != nil || skip != "" {
+		t.Fatalf("err=%v skip=%q", err, skip)
+	}
+	if !strings.Contains(out, "<version>1.0.0</version>") {
+		t.Fatal("other parent version should stay unchanged")
+	}
+	if strings.Count(out, "<version>V9.0.0-P01-01</version>") != 1 {
+		t.Fatalf("only project version should update: %s", out)
+	}
+}
+
+func TestUpdatePomVersions_datahubParentArtifact(t *testing.T) {
+	const pom = `<project>
+<parent>
+<groupId>com.flux</groupId>
+<artifactId>datahub-utils-parentPom</artifactId>
+<version>9.0.0-P00</version>
+</parent>
+<version>10.0.0-SNAPSHOT</version>
+</project>`
+	out, skip, err := updatePomVersions(pom, "V9.0.0-P01-01")
+	if err != nil || skip != "" {
+		t.Fatalf("err=%v skip=%q", err, skip)
+	}
+	if !strings.Contains(out, "<artifactId>datahub-utils-parentPom</artifactId>") {
+		t.Fatal("parent block missing")
+	}
+	if strings.Count(out, "<version>V9.0.0-P01-01</version>") != 2 {
+		t.Fatalf("parent and project version should update: %s", out)
+	}
+	if strings.Contains(out, "9.0.0-P00") {
+		t.Fatal("old parent version should be replaced")
+	}
+}
+
 func TestUpdatePomVersions_noParentVersion(t *testing.T) {
 	const pom = `<project>
 <parent>
 <groupId>com.flux</groupId>
-<artifactId>parent-pom</artifactId>
+<artifactId>datahub-utils-parentPom</artifactId>
 </parent>
 <version>10.0.0-SNAPSHOT</version>
 </project>`

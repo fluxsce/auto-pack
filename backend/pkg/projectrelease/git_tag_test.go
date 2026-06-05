@@ -34,6 +34,15 @@ func TestGitTagRefCandidates_tagOnly(t *testing.T) {
 	}
 }
 
+func TestValidateVersionTag(t *testing.T) {
+	if err := ValidateVersionTag("V9.0.0-P08"); err != nil {
+		t.Fatalf("valid: %v", err)
+	}
+	if err := ValidateVersionTag("bad tag"); err == nil {
+		t.Fatal("expected error for space")
+	}
+}
+
 func TestResolveGitTagRefsForCheckout(t *testing.T) {
 	refs := resolveGitTagRefsForCheckout("release/V9.0.0-P01", "V9.0.0-P01-01")
 	if len(refs) != 3 {

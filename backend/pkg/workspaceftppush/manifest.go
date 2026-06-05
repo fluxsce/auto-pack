@@ -53,6 +53,19 @@ func BuildManifestContent(in ManifestInput, backupPath, updatePath string) strin
 	return strings.Join(lines, "\n") + "\n"
 }
 
+// MergeUpdateNoteContent appends a new manifest block after existing remote note text.
+func MergeUpdateNoteContent(existing, manifest string) string {
+	manifest = strings.TrimRight(strings.ReplaceAll(manifest, "\r\n", "\n"), "\n")
+	if manifest == "" {
+		return strings.TrimRight(strings.ReplaceAll(existing, "\r\n", "\n"), "\n") + "\n"
+	}
+	existing = strings.TrimRight(strings.ReplaceAll(existing, "\r\n", "\n"), "\n")
+	if existing == "" {
+		return manifest + "\n"
+	}
+	return existing + "\n" + manifest + "\n"
+}
+
 // PushLayout holds resolved remote paths after interpreting push_path.
 type PushLayout struct {
 	PushDir    string // parent directory for updateNote.txt and default BAK
@@ -88,14 +101,18 @@ func ResolvePushLayout(pushPath, uploadName string) PushLayout {
 	}
 }
 
-// DefaultBackupPath appends BAK/{timestamp} under pushDir.
-func DefaultBackupPath(pushDir string, ts time.Time) string {
-	pushDir = normalizeRemoteDir(pushDir)
+// BackupDirStamp returns YYYYMMDDHHmmssSSS for BAK subdirectory names.
+func BackupDirStamp(ts time.Time) string {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
-	stamp := ts.Format("20060102")
-	return pushDir + "/BAK/" + stamp
+	return ts.Format("20060102150405") + fmt.Sprintf("%03d", ts.Nanosecond()/1e6)
+}
+
+// DefaultBackupPath appends BAK/{timestamp} under pushDir.
+func DefaultBackupPath(pushDir string, ts time.Time) string {
+	pushDir = normalizeRemoteDir(pushDir)
+	return pushDir + "/BAK/" + BackupDirStamp(ts)
 }
 
 func normalizeRemoteDir(p string) string {

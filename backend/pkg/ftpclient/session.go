@@ -75,16 +75,48 @@ func RenameRemote(conn *ftp.ServerConn, cfg envtypes.FTPConfig, srcRel, dstRel s
 	return nil
 }
 
-// BackupRemoteFile moves the remote file to dst when possible; otherwise copies (source kept until overwrite).
+// BackupRemoteFile moves the remote file to dst when possible; otherwise copies (source kept).
+// If dst already exists the backup is skipped (no overwrite, no delete).
 func BackupRemoteFile(conn *ftp.ServerConn, cfg envtypes.FTPConfig, srcRel, dstRel string) error {
+	dstExists, err := RemoteExists(conn, cfg, dstRel)
+	if err != nil {
+		return err
+	}
+	if dstExists {
+		return nil
+	}
 	if err := RenameRemote(conn, cfg, srcRel, dstRel); err == nil {
 		return nil
 	}
 	return CopyRemote(conn, cfg, srcRel, dstRel)
 }
 
+// DownloadRemote reads the full content of a remote file relative to base_path.
+func DownloadRemote(conn *ftp.ServerConn, cfg envtypes.FTPConfig, rel string) ([]byte, error) {
+	base := normalizeBase(cfg.BasePath)
+	remote := joinFTPPath(base, rel)
+	resp, err := conn.Retr(remote)
+	if err != nil {
+		return nil, fmt.Errorf("retr %s: %w", remote, err)
+	}
+	defer resp.Close()
+	data, err := io.ReadAll(resp)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", remote, err)
+	}
+	return data, nil
+}
+
 // CopyRemote copies a remote file to another remote path (download + upload).
+// If dst already exists the copy is skipped.
 func CopyRemote(conn *ftp.ServerConn, cfg envtypes.FTPConfig, srcRel, dstRel string) error {
+	dstExists, err := RemoteExists(conn, cfg, dstRel)
+	if err != nil {
+		return err
+	}
+	if dstExists {
+		return nil
+	}
 	base := normalizeBase(cfg.BasePath)
 	src := joinFTPPath(base, srcRel)
 	dst := joinFTPPath(base, dstRel)
@@ -96,10 +128,11 @@ func CopyRemote(conn *ftp.ServerConn, cfg envtypes.FTPConfig, srcRel, dstRel str
 		return fmt.Errorf("retr %s: %w", src, err)
 	}
 	defer resp.Close()
-	if err := conn.Stor(dst, resp); err != nil {
-		return fmt.Errorf("stor %s: %w", dst, err)
+	data, err := io.ReadAll(resp)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", src, err)
 	}
-	return nil
+	return UploadBytes(conn, cfg, dstRel, data)
 }
 
 // UploadBytes stores content at a remote path relative to base_path.

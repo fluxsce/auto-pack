@@ -40,8 +40,8 @@ func (g *GitCommitter) SyncReleaseWorktree(
 	if err != nil {
 		return err
 	}
-	if !git.IsRepository(ctx, workDir) {
-		return fmt.Errorf("not a git repository: %s", workDir)
+	if err := g.EnsureGitRepository(ctx, project, workDir, releaseBranch, log); err != nil {
+		return err
 	}
 	if _, err := git.Open(workDir); err != nil {
 		return err
@@ -91,8 +91,8 @@ func (g *GitCommitter) PublishChanges(
 		return err
 	}
 
-	if !git.IsRepository(ctx, workDir) {
-		return fmt.Errorf("not a git repository: %s", workDir)
+	if err := g.EnsureGitRepository(ctx, project, workDir, releaseBranch, log); err != nil {
+		return err
 	}
 	if _, err := git.Open(workDir); err != nil {
 		return err
