@@ -40,6 +40,14 @@ powershell -File scripts/package-windows.ps1
 
 详见 [scripts/README.md](scripts/README.md)。
 
+## 正式版补丁发版与 FTP 推送
+
+已上线正式版本的缺陷修复、修订 Tag 发版、自动构建与公司 FTP 推送流程说明见：
+
+- [docs/release-production-patch.md](docs/release-production-patch.md)
+
+控制台 **任务面板** 中有对应的简明操作指引。
+
 ## 启动
 
 ### 后端

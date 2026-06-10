@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
+import { ArrowDown, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import type { PackProject, ProjectType } from '@/types'
 import { buildStatusLabel, buildStatusTagType, listBuildOutcome } from '../project-build-status'
 import { formatBuildTime, lastBuildAtSortKey } from '../project-format'
@@ -20,10 +21,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   open: [row: PackProject]
   build: [row: PackProject]
+  analyzeDeps: [row: PackProject]
   clone: [row: PackProject]
   edit: [row: PackProject]
   delete: [row: PackProject]
 }>()
+
+function isMavenProject(row: PackProject): boolean {
+  return String(row.project_type).toLowerCase() === 'maven'
+}
 
 const activeType = defineModel<string>('activeType', { required: true })
 
@@ -37,8 +43,51 @@ const emptyTitle = computed(() =>
 )
 const emptyHint = computed(() => (props.hasListFilters ? '' : t('projectEmptyListHint')))
 
-function compareLastBuildAt(a: PackProject, b: PackProject): number {
-  return lastBuildAtSortKey(a.last_build_at) - lastBuildAtSortKey(b.last_build_at)
+function extractBuildAt(v: unknown): unknown {
+  if (v && typeof v === 'object' && 'last_build_at' in v) {
+    return (v as { last_build_at?: unknown }).last_build_at
+  }
+  return v
+}
+
+/** Element Plus passes row objects to sort-method; be defensive anyway. */
+function compareLastBuildAt(a: unknown, b: unknown): number {
+  return lastBuildAtSortKey(extractBuildAt(a)) - lastBuildAtSortKey(extractBuildAt(b))
+}
+
+type RowActionCommand = 'open' | 'analyze-deps' | 'clone' | 'edit' | 'delete'
+
+async function onRowAction(command: RowActionCommand, row: PackProject): Promise<void> {
+  if (command === 'delete') {
+    try {
+      await ElMessageBox.confirm(t('projectDeleteConfirm'), t('delete'), {
+        type: 'warning',
+        confirmButtonText: t('delete'),
+        cancelButtonText: t('cancel'),
+        confirmButtonClass: 'el-button--danger',
+      })
+    } catch {
+      return
+    }
+    emit('delete', row)
+    return
+  }
+  switch (command) {
+    case 'open':
+      emit('open', row)
+      break
+    case 'analyze-deps':
+      emit('analyzeDeps', row)
+      break
+    case 'clone':
+      emit('clone', row)
+      break
+    case 'edit':
+      emit('edit', row)
+      break
+    default:
+      break
+  }
 }
 </script>
 
@@ -139,24 +188,46 @@ function compareLastBuildAt(a: PackProject, b: PackProject): number {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('projectColActions')" min-width="248" fixed="right" align="right">
+        <el-table-column :label="$t('projectColActions')" width="168" fixed="right" align="right">
           <template #default="{ row }">
             <div class="project-list__actions">
-              <el-button link type="primary" @click.stop="emit('build', row)">
+              <el-button
+                class="project-list__action-primary"
+                size="small"
+                type="primary"
+                plain
+                @click.stop="emit('build', row)"
+              >
                 {{ $t('projectBuildNow') }}
               </el-button>
-              <el-button link type="primary" @click.stop="emit('open', row)">
-                {{ $t('projectDetailOpen') }}
-              </el-button>
-              <el-button link type="primary" @click.stop="emit('clone', row)">
-                {{ $t('projectClone') }}
-              </el-button>
-              <el-button link type="primary" @click.stop="emit('edit', row)">{{ $t('edit') }}</el-button>
-              <AppPopconfirm :title="$t('projectDeleteConfirm')" @confirm="emit('delete', row)">
-                <template #reference>
-                  <el-button link type="danger" @click.stop>{{ $t('delete') }}</el-button>
+              <el-dropdown
+                trigger="click"
+                @command="(cmd: RowActionCommand) => onRowAction(cmd, row)"
+              >
+                <el-button class="project-list__action-more" size="small" @click.stop>
+                  {{ $t('projectListMore') }}
+                  <el-icon class="project-list__action-more-icon"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="open">
+                      {{ $t('projectDetailOpen') }}
+                    </el-dropdown-item>
+                    <el-dropdown-item v-if="isMavenProject(row)" command="analyze-deps">
+                      {{ $t('projectMavenDepsAnalyze') }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="clone" divided>
+                      {{ $t('projectClone') }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="edit">
+                      {{ $t('edit') }}
+                    </el-dropdown-item>
+                    <el-dropdown-item command="delete">
+                      <span class="project-list__action-danger">{{ $t('delete') }}</span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
                 </template>
-              </AppPopconfirm>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
@@ -280,10 +351,30 @@ function compareLastBuildAt(a: PackProject, b: PackProject): number {
   }
 
   &__actions {
-    display: inline-flex;
-    flex-wrap: wrap;
+    display: flex;
+    align-items: center;
     justify-content: flex-end;
-    gap: 2px 4px;
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  &__action-primary {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  &__action-more {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  &__action-more-icon {
+    margin-left: 2px;
+    font-size: 12px;
+  }
+
+  &__action-danger {
+    color: var(--el-color-danger);
   }
 
   &__empty {

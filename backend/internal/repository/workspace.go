@@ -112,6 +112,18 @@ func (r *WorkspaceRepository) Update(item *PackWorkspace) error {
 	return nil
 }
 
+func (r *WorkspaceRepository) DeleteUnchecked(recID string) error {
+	res, err := r.db.Exec(`DELETE FROM AP_PACK_WORKSPACE WHERE rec_id = ?`, recID)
+	if err != nil {
+		return err
+	}
+	aff, _ := res.RowsAffected()
+	if aff == 0 {
+		return ErrWorkspaceNotFound
+	}
+	return nil
+}
+
 func (r *WorkspaceRepository) Delete(recID string) error {
 	n, err := r.CountProjects(recID)
 	if err != nil {

@@ -22,15 +22,16 @@ import (
 )
 
 type batchAutoReleasePayload struct {
-	WorkspaceRecID     string `json:"workspace_rec_id"`
-	ReleaseBranch      string `json:"release_branch"`
-	TagBranch          string `json:"tag_branch"`
-	ReleaseNote        string `json:"release_note"`
-	ReleaseDate        string `json:"release_date"`
-	AllowRepeat        *bool  `json:"allow_repeat"`
-	UpdatePomVersion   *bool  `json:"update_pom_version"`
-	CreateTargetBranch *bool  `json:"create_target_branch"`
-	TargetBranch       string `json:"target_branch"`
+	WorkspaceRecID     string                      `json:"workspace_rec_id"`
+	ReleaseBranch      string                      `json:"release_branch"`
+	TagBranch          string                      `json:"tag_branch"`
+	ReleaseNote        string                      `json:"release_note"`
+	ReleaseDate        string                      `json:"release_date"`
+	AllowRepeat        *bool                       `json:"allow_repeat"`
+	UpdatePomVersion   *bool                       `json:"update_pom_version"`
+	CreateTargetBranch *bool                       `json:"create_target_branch"`
+	TargetBranch       string                      `json:"target_branch"`
+	PostOptions        *projectrelease.PostOptions `json:"post_options"`
 }
 
 type batchAutoReleaseStartResponse struct {
@@ -55,7 +56,7 @@ func (h *Handler) batchAutoRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	releaseRecID, logPath, err := h.beginWorkspaceReleaseRecord(ws, body)
+	releaseRecID, logPath, err := h.beginWorkspaceReleaseRecord(ws, body, body.PostOptions)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -96,7 +97,11 @@ func (h *Handler) batchAutoRelease(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) beginWorkspaceReleaseRecord(ws *repository.PackWorkspace, body batchAutoReleasePayload) (recID, logPath string, err error) {
+func (h *Handler) beginWorkspaceReleaseRecord(
+	ws *repository.PackWorkspace,
+	body batchAutoReleasePayload,
+	postOpts *projectrelease.PostOptions,
+) (recID, logPath string, err error) {
 	num, err := h.releases.NextReleaseNum(ws.RecID)
 	if err != nil {
 		return "", "", err
@@ -111,18 +116,26 @@ func (h *Handler) beginWorkspaceReleaseRecord(ws *repository.PackWorkspace, body
 	if body.CreateTargetBranch != nil && *body.CreateTargetBranch {
 		target = strings.TrimSpace(body.TargetBranch)
 	}
+	postJSON := ""
+	if postOpts != nil {
+		postJSON, err = projectrelease.MarshalPostOptions(postOpts)
+		if err != nil {
+			return "", "", err
+		}
+	}
 	now := time.Now().UTC()
 	item := &repository.PackWorkspaceRelease{
-		RecID:          recID,
-		WorkspaceRecID: ws.RecID,
-		ReleaseNum:     num,
-		Status:         repository.ReleaseStatusRunning,
-		ReleaseBranch:  body.ReleaseBranch,
-		TagBranch:      body.TagBranch,
-		TargetBranch:   target,
-		Message:        "running",
-		LogPath:        logPath,
-		StartedAt:      &now,
+		RecID:           recID,
+		WorkspaceRecID:  ws.RecID,
+		ReleaseNum:      num,
+		Status:          repository.ReleaseStatusRunning,
+		ReleaseBranch:   body.ReleaseBranch,
+		TagBranch:       body.TagBranch,
+		TargetBranch:    target,
+		Message:         "running",
+		LogPath:         logPath,
+		PostOptionsJSON: postJSON,
+		StartedAt:       &now,
 	}
 	if err := h.releases.Insert(item); err != nil {
 		return "", "", err
@@ -136,7 +149,7 @@ func (h *Handler) batchAutoReleaseStatus(w http.ResponseWriter, r *http.Request)
 		httpx.WriteError(w, http.StatusBadRequest, "workspace_rec_id is required")
 		return
 	}
-	st := h.releaseCoord.Status(wsID)
+	st := h.enrichBatchReleaseStatus(wsID, h.releaseCoord.Status(wsID))
 	httpx.WriteJSON(w, http.StatusOK, st)
 }
 

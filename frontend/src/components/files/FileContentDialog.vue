@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { CopyDocument, Download } from '@element-plus/icons-vue'
 import { AppDialog } from '@/components/feedback/dialog'
 import { useMessage } from '@/components/feedback/message'
+import { copyTextToClipboard } from '@/utils/clipboard'
 import { basenameFromPath, formatFileSize } from './format'
 import FileTextViewer from './FileTextViewer.vue'
 
@@ -46,12 +47,9 @@ const canCopy = computed(() => props.readable && !!props.content)
 
 async function copyContent(): Promise<void> {
   if (!props.content) return
-  try {
-    await navigator.clipboard.writeText(props.content)
-    message.success(t('fileViewerCopied'))
-  } catch {
-    message.error(t('fileViewerCopyFailed'))
-  }
+  const ok = await copyTextToClipboard(props.content)
+  if (ok) message.success(t('fileViewerCopied'))
+  else message.error(t('fileViewerCopyFailed'))
 }
 
 function onDownload(): void {

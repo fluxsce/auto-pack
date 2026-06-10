@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { ArrowDown, CopyDocument } from '@element-plus/icons-vue'
 import { BuildLogViewer } from '@/components/log'
 import { useMessage } from '@/components/feedback/message'
+import { copyTextToClipboard } from '@/utils/clipboard'
 import type { WorkspaceReleaseStatus } from '../../release-status'
 
 const props = defineProps<{
@@ -63,12 +64,9 @@ function onScroll(): void {
 
 async function copyLog(): Promise<void> {
   if (!props.content) return
-  try {
-    await navigator.clipboard.writeText(props.content)
-    message.success(t('projectLogCopied'))
-  } catch {
-    message.error(t('projectLogCopyFailed'))
-  }
+  const ok = await copyTextToClipboard(props.content)
+  if (ok) message.success(t('projectLogCopied'))
+  else message.error(t('projectLogCopyFailed'))
 }
 
 watch(

@@ -237,6 +237,40 @@ func (r *BuildRepository) ListOlderThan(projectRecID string, before time.Time) (
 	return list, rows.Err()
 }
 
+func (r *BuildRepository) FindRunningByWorkspace(workspaceRecID string) (*PackBuild, error) {
+	workspaceRecID = strings.TrimSpace(workspaceRecID)
+	if workspaceRecID == "" {
+		return nil, nil
+	}
+	row := r.db.QueryRow(`
+		SELECT b.rec_id, b.project_rec_id, b.build_num, b.status, b.message, b.log_path,
+			b.started_at, b.finished_at, b.created_at
+		FROM AP_PACK_BUILD b
+		INNER JOIN AP_PACK_PROJECT p ON p.rec_id = b.project_rec_id
+		WHERE p.workspace_rec_id = ? AND b.status IN (?, ?)
+		ORDER BY b.build_num DESC
+		LIMIT 1`,
+		workspaceRecID, BuildStatusPending, BuildStatusRunning)
+	item, err := scanBuildRow(row)
+	if errors.Is(err, ErrBuildNotFound) {
+		return nil, nil
+	}
+	return item, err
+}
+
+func (r *BuildRepository) DeleteByWorkspace(workspaceRecID string) error {
+	workspaceRecID = strings.TrimSpace(workspaceRecID)
+	if workspaceRecID == "" {
+		return nil
+	}
+	_, err := r.db.Exec(`
+		DELETE FROM AP_PACK_BUILD
+		WHERE project_rec_id IN (
+			SELECT rec_id FROM AP_PACK_PROJECT WHERE workspace_rec_id = ?
+		)`, workspaceRecID)
+	return err
+}
+
 func (r *BuildRepository) Delete(recID string) error {
 	res, err := r.db.Exec(`DELETE FROM AP_PACK_BUILD WHERE rec_id = ?`, recID)
 	if err != nil {

@@ -20,6 +20,11 @@ type BuildSchedulerReloader interface {
 	ReloadBuildScheduler() error
 }
 
+// ReleaseActivityChecker reports whether a workspace auto-release is in progress.
+type ReleaseActivityChecker interface {
+	WorkspaceReleaseActive(workspaceRecID string) bool
+}
+
 type clonePayload struct {
 	SourceRecID string `json:"source_rec_id"`
 	wsPayload

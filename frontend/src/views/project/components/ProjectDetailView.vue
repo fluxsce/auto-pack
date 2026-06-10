@@ -28,10 +28,15 @@ const props = defineProps<{
   typeLabel: (type: unknown) => string
 }>()
 
+const isMaven = computed(
+  () => String(props.project?.project_type ?? '').toLowerCase() === 'maven',
+)
+
 const emit = defineEmits<{
   back: []
   configure: []
   buildNow: []
+  analyzeDeps: []
   selectSection: [section: ProjectDetailSection]
   selectBuild: [buildId: string]
   workspaceUp: []
@@ -79,6 +84,9 @@ function onNavClick(id: ProjectDetailSection | 'configure'): void {
           <el-button type="primary" :loading="building" :disabled="!project" @click="emit('buildNow')">
             <el-icon class="project-detail__btn-icon"><VideoPlay /></el-icon>
             {{ $t('projectBuildNow') }}
+          </el-button>
+          <el-button v-if="isMaven" :disabled="!project" @click="emit('analyzeDeps')">
+            {{ $t('projectMavenDepsAnalyze') }}
           </el-button>
           <el-button @click="emit('back')">{{ $t('back') }}</el-button>
         </div>

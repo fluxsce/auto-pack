@@ -16,21 +16,36 @@ import (
 
 // Handler manages /api/workspaces CRUD.
 type Handler struct {
-	repo      *repository.WorkspaceRepository
-	projects  *repository.ProjectRepository
-	scheduler BuildSchedulerReloader
-	audit     *audit.Recorder
-	dataDir   string
+	repo         *repository.WorkspaceRepository
+	projects     *repository.ProjectRepository
+	builds       *repository.BuildRepository
+	releases     *repository.WorkspaceReleaseRepository
+	scheduler    BuildSchedulerReloader
+	releaseGuard ReleaseActivityChecker
+	audit        *audit.Recorder
+	dataDir      string
 }
 
 func NewHandler(
 	repo *repository.WorkspaceRepository,
 	projects *repository.ProjectRepository,
+	builds *repository.BuildRepository,
+	releases *repository.WorkspaceReleaseRepository,
 	scheduler BuildSchedulerReloader,
+	releaseGuard ReleaseActivityChecker,
 	dataDir string,
 	rec *audit.Recorder,
 ) *Handler {
-	return &Handler{repo: repo, projects: projects, scheduler: scheduler, audit: rec, dataDir: dataDir}
+	return &Handler{
+		repo:         repo,
+		projects:     projects,
+		builds:       builds,
+		releases:     releases,
+		scheduler:    scheduler,
+		releaseGuard: releaseGuard,
+		audit:        rec,
+		dataDir:      dataDir,
+	}
 }
 
 type workspaceItem struct {
@@ -54,6 +69,8 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+base+"/{recID}", requireAuth(http.HandlerFunc(h.get)))
 	mux.Handle("PUT "+base+"/{recID}", requireAuth(http.HandlerFunc(h.update)))
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))
+	mux.Handle("POST "+base+"/{recID}/purge", requireAuth(http.HandlerFunc(h.purge)))
+	mux.Handle("GET "+base+"/{recID}/maven-dependency-analysis", requireAuth(http.HandlerFunc(h.mavenDependencyAnalysis)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {

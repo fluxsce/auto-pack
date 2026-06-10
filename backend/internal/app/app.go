@@ -6,6 +6,7 @@ import (
 
 	"auto-pack/backend/internal/httpx"
 	"auto-pack/backend/internal/web"
+	"auto-pack/backend/pkg/boottime"
 	"auto-pack/backend/pkg/config"
 )
 
@@ -15,8 +16,9 @@ func NewHandler(db *sql.DB, cfg config.Config) http.Handler {
 
 	mux.HandleFunc(web.APIPath("health"), func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{
-			"status":  "ok",
-			"version": config.AppVersion,
+			"status":     "ok",
+			"version":    config.AppVersion,
+			"started_at": boottime.StartedAtRFC3339Nano(),
 		})
 	})
 

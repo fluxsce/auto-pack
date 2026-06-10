@@ -3,7 +3,6 @@ package packrun
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"auto-pack/backend/pkg/redact"
 	"auto-pack/backend/pkg/shell"
 )
 
@@ -27,7 +27,13 @@ func (l *buildLogger) blank() {
 }
 
 func (l *buildLogger) line(format string, args ...any) {
-	_, _ = fmt.Fprintf(l.f, format+"\n", args...)
+	var msg string
+	if len(args) == 0 {
+		msg = format
+	} else {
+		msg = fmt.Sprintf(format, args...)
+	}
+	_, _ = fmt.Fprintln(l.f, redact.Redact(msg))
 }
 
 func (l *buildLogger) step(format string, args ...any) {
@@ -40,19 +46,24 @@ func (l *buildLogger) section(title string) {
 }
 
 func (l *buildLogger) cmd(name string, args []string) {
-	l.line(" > %s %s", name, strings.Join(args, " "))
+	safe := redact.CommandArgs(args)
+	l.line(" > %s %s", name, strings.Join(safe, " "))
 }
 
 func (l *buildLogger) cmdScript(script string) {
 	l.line(" > %s %s", shell.ShellLabel(), quoteScriptForLog(script))
 }
 
+func (l *buildLogger) println(s string) {
+	_, _ = fmt.Fprintln(l.f, redact.Redact(s))
+}
+
 func (l *buildLogger) emitOutput(res shell.Result) {
 	if out := strings.TrimRight(res.Stdout, "\r\n"); out != "" {
-		_, _ = fmt.Fprintln(l.f, out)
+		l.println(out)
 	}
 	if errOut := strings.TrimRight(res.Stderr, "\r\n"); errOut != "" {
-		_, _ = fmt.Fprintln(l.f, errOut)
+		l.println(errOut)
 	}
 }
 
@@ -110,6 +121,13 @@ func (l *buildLogger) header(projectName string, buildNum int, workDir string) {
 	l.step("Building in workspace %s", filepath.ToSlash(workDir))
 }
 
+func (l *buildLogger) sync() error {
+	if l.f == nil {
+		return nil
+	}
+	return l.f.Sync()
+}
+
 func (l *buildLogger) finished(status string, message string) {
 	l.blank()
 	switch status {
@@ -126,20 +144,7 @@ func (l *buildLogger) finished(status string, message string) {
 }
 
 func sanitizeURLForLog(raw string) string {
-	raw = strings.TrimSpace(raw)
-	u, err := url.Parse(raw)
-	if err != nil || u.User == nil {
-		return raw
-	}
-	host := u.Host
-	if u.User != nil {
-		host = "****@" + host
-	}
-	out := u.Scheme + "://" + host + u.EscapedPath()
-	if u.RawQuery != "" {
-		out += "?" + u.RawQuery
-	}
-	return out
+	return redact.URL(raw)
 }
 
 func quoteScriptForLog(script string) string {

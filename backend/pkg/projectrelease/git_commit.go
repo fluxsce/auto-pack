@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"auto-pack/backend/pkg/envtypes"
+	"auto-pack/backend/pkg/redact"
 	"auto-pack/backend/pkg/shell"
 )
 
@@ -80,9 +81,9 @@ func runGitCommit(ctx context.Context, dir string, env []string, allowEmpty bool
 }
 
 func commitResultErr(subcmd string, res shell.Result, err error) error {
-	detail := strings.TrimSpace(res.Stderr)
+	detail := redact.Redact(strings.TrimSpace(res.Stderr))
 	if detail == "" {
-		detail = strings.TrimSpace(res.Stdout)
+		detail = redact.Redact(strings.TrimSpace(res.Stdout))
 	}
 	if detail == "" && err != nil {
 		return fmt.Errorf("git %s failed (exit %d): %w", subcmd, res.ExitCode, err)

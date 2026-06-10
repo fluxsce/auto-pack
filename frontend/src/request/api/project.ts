@@ -18,6 +18,65 @@ export function fetchProject(recId: string): Promise<PackProject> {
   return http.get(`/projects/${recId}`)
 }
 
+export interface MavenModuleCoords {
+  group_id: string
+  artifact_id: string
+  version?: string
+}
+
+export interface MavenWorkspaceModule {
+  project_rec_id: string
+  project_name: string
+  project_version: string
+  pom_path: string
+  coordinates: MavenModuleCoords
+  dependencies?: MavenModuleCoords[]
+}
+
+export interface MavenDependencyAnalysis {
+  target_rec_id: string
+  build_order: MavenWorkspaceModule[]
+  skipped_installed?: MavenWorkspaceModule[]
+  missing_pom?: string[]
+  warnings?: string[]
+}
+
+export interface MavenInternalEdge {
+  consumer_rec_id: string
+  consumer_name: string
+  provider_rec_id: string
+  provider_name: string
+  dependency: MavenModuleCoords
+}
+
+export interface MavenCyclicGroup {
+  project_rec_ids: string[]
+  project_names?: string[]
+}
+
+export interface MavenWorkspaceAnalysis {
+  module_count: number
+  full_build_order: MavenWorkspaceModule[]
+  build_order: MavenWorkspaceModule[]
+  skipped_installed?: MavenWorkspaceModule[]
+  internal_edges?: MavenInternalEdge[]
+  cyclic_groups?: MavenCyclicGroup[]
+  missing_pom?: string[]
+  warnings?: string[]
+}
+
+export function fetchMavenDependencyAnalysis(
+  projectRecId: string,
+  params?: { settings_xml?: string },
+): Promise<{
+  analysis: MavenDependencyAnalysis
+  modules: MavenWorkspaceModule[]
+  install_command: string
+  workspace_rec_id: string
+}> {
+  return http.get(`/projects/${projectRecId}/maven-dependency-analysis`, { params })
+}
+
 export function createProject(data: PackProjectPayload): Promise<PackProject> {
   return http.post('/projects', data)
 }
@@ -79,6 +138,42 @@ export function batchUpdatePostBuildEmail(
   return http.post('/projects/batch-post-build-email', data)
 }
 
+export interface BatchBuildStepsPayload {
+  workspace_rec_id: string
+  project_type?: string
+  update_build_cmd: boolean
+  build_cmd?: string
+  update_output_dir: boolean
+  output_dir?: string
+  update_artifact_pattern: boolean
+  artifact_pattern?: string
+  update_log_retention: boolean
+  log_retention_days?: number
+}
+
+export function batchUpdateBuildSteps(
+  data: BatchBuildStepsPayload,
+): Promise<{ updated: number }> {
+  return http.post('/projects/batch-build-steps', data)
+}
+
+export interface BatchReleasePostOptions {
+  auto_build_after_release: boolean
+  auto_ftp_push_after_build: boolean
+  ftp_push_project_ids: string[]
+  ftp_env_rec_id: string
+  push_path: string
+  backup_path: string
+  backup_manual: boolean
+  pusher: string
+  task_ref: string
+  detail: string
+  release_date?: string
+  update_pom_version?: boolean
+  create_target_branch?: boolean
+  target_branch?: string
+}
+
 export interface BatchAutoReleasePayload {
   workspace_rec_id: string
   release_branch: string
@@ -89,6 +184,7 @@ export interface BatchAutoReleasePayload {
   update_pom_version?: boolean
   create_target_branch?: boolean
   target_branch?: string
+  post_options?: BatchReleasePostOptions
 }
 
 export interface BatchAutoReleaseResultItem {
@@ -164,6 +260,7 @@ export interface BatchAutoReleaseStatusResponse {
   total_count?: number
   foreign?: boolean
   active_workspace_name?: string
+  post_options?: BatchReleasePostOptions
 }
 
 /** Starts async auto-release; poll status until completed. No long HTTP timeout. */
@@ -171,6 +268,7 @@ export interface BatchAutoReleaseDefaultsResponse {
   release_branch: string
   tag_branch: string
   tag_source?: 'remote' | 'history' | 'workspace'
+  post_options?: BatchReleasePostOptions
 }
 
 export function fetchBatchAutoReleaseDefaults(
@@ -192,6 +290,16 @@ export function batchAutoReleaseStatus(
 ): Promise<BatchAutoReleaseStatusResponse> {
   return http.get('/projects/batch-auto-release/status', {
     params: { workspace_rec_id: workspaceRecId },
+  })
+}
+
+export function saveBatchAutoReleasePostOptions(
+  workspaceRecId: string,
+  postOptions: BatchReleasePostOptions,
+): Promise<{ release_rec_id: string; status: string }> {
+  return http.put('/projects/batch-auto-release/post-options', {
+    workspace_rec_id: workspaceRecId,
+    post_options: postOptions,
   })
 }
 

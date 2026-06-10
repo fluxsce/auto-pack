@@ -3,13 +3,13 @@ package projectrelease
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"auto-pack/backend/internal/repository"
 	"auto-pack/backend/pkg/git"
+	"auto-pack/backend/pkg/redact"
 )
 
 // EnsureGitRepository clones or initializes git in workDir when it is not yet a repository.
@@ -41,14 +41,14 @@ func (g *GitCommitter) EnsureGitRepository(
 	}
 	if empty {
 		cloneBranch := pickCloneBranch(ctx, cloneURL, shellEnv, releaseBranch, project.RepoBranch, log)
-		log.step("工作区非 Git 仓库，正在克隆 %s", sanitizeRepoURLForLog(cloneURL))
+		log.step("工作区非 Git 仓库，正在克隆 %s", redact.URL(cloneURL))
 		if err := cloneRepository(ctx, cloneURL, workDir, cloneBranch, shellEnv, log); err != nil {
 			return fmt.Errorf("git clone: %w", err)
 		}
 		log.step("克隆完成")
 		return nil
 	}
-	log.step("工作区非 Git 仓库且目录非空，初始化 Git 并关联远程 %s", sanitizeRepoURLForLog(cloneURL))
+	log.step("工作区非 Git 仓库且目录非空，初始化 Git 并关联远程 %s", redact.URL(cloneURL))
 	if err := initRepositoryFromRemote(ctx, workDir, cloneURL, shellEnv, log); err != nil {
 		return fmt.Errorf("git init: %w", err)
 	}
@@ -176,13 +176,4 @@ func isWorkDirEmpty(dir string) (bool, error) {
 		return false, err
 	}
 	return len(entries) == 0, nil
-}
-
-func sanitizeRepoURLForLog(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-	u.User = nil
-	return u.String()
 }

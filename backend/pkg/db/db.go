@@ -63,6 +63,9 @@ func migrate(db *sql.DB) error {
 	if err := ensurePackProjectWorkspaceColumns(ctx, db); err != nil {
 		return fmt.Errorf("pack project workspace migrate: %w", err)
 	}
+	if err := ensureReleasePostOptionsColumn(ctx, db); err != nil {
+		return fmt.Errorf("workspace release migrate: %w", err)
+	}
 	return nil
 }
 

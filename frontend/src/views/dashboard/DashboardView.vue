@@ -30,6 +30,21 @@ const releaseNamingKeys = [
   'dashboardReleaseNamingRevTag',
 ] as const
 
+const releaseRoles = [
+  {
+    titleKey: 'dashboardReleaseRoleCsTitle',
+    actionKeys: ['dashboardReleaseRoleCsAction1', 'dashboardReleaseRoleCsAction2'],
+  },
+  {
+    titleKey: 'dashboardReleaseRoleFixTitle',
+    actionKeys: [
+      'dashboardReleaseRoleFixAction1',
+      'dashboardReleaseRoleFixAction2',
+      'dashboardReleaseRoleFixAction3',
+    ],
+  },
+] as const
+
 const releaseSteps = [
   {
     titleKey: 'dashboardReleaseStep1Title',
@@ -104,6 +119,15 @@ onMounted(() => {
         <ul class="dashboard-view__release-naming-list">
           <li v-for="key in releaseNamingKeys" :key="key">{{ t(key) }}</li>
         </ul>
+      </div>
+      <div class="dashboard-view__release-roles">
+        <h3 class="dashboard-view__release-roles-title">{{ t('dashboardReleaseRolesTitle') }}</h3>
+        <div v-for="role in releaseRoles" :key="role.titleKey" class="dashboard-view__release-role">
+          <h4 class="dashboard-view__release-role-title">{{ t(role.titleKey) }}</h4>
+          <ul class="dashboard-view__release-role-list">
+            <li v-for="actionKey in role.actionKeys" :key="actionKey">{{ t(actionKey) }}</li>
+          </ul>
+        </div>
       </div>
       <ol class="dashboard-view__release-steps">
         <li v-for="(step, index) in releaseSteps" :key="step.titleKey" class="dashboard-view__release-step">
@@ -256,6 +280,48 @@ onMounted(() => {
   }
 
   &__release-naming-list {
+    margin: 0;
+    padding-left: 1.2em;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--shell-content-text-secondary, var(--el-text-color-regular));
+
+    li + li {
+      margin-top: 4px;
+    }
+  }
+
+  &__release-roles {
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    background: var(--shell-prefs-bg, var(--el-fill-color-light));
+    border: 1px dashed var(--shell-card-border, var(--el-border-color-lighter));
+  }
+
+  &__release-roles-title {
+    margin: 0 0 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--shell-content-text, var(--el-text-color-primary));
+  }
+
+  &__release-role {
+    margin-bottom: 10px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  &__release-role-title {
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--shell-content-text, var(--el-text-color-primary));
+  }
+
+  &__release-role-list {
     margin: 0;
     padding-left: 1.2em;
     font-size: 13px;

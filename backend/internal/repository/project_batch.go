@@ -55,3 +55,16 @@ func (r *ProjectRepository) UpdateRepoBranchByWorkspace(workspaceRecID, repoBran
 	}
 	return res.RowsAffected()
 }
+
+// DeleteByWorkspace removes all projects in the workspace.
+func (r *ProjectRepository) DeleteByWorkspace(workspaceRecID string) (int64, error) {
+	workspaceRecID = strings.TrimSpace(workspaceRecID)
+	if workspaceRecID == "" {
+		return 0, nil
+	}
+	res, err := r.db.Exec(`DELETE FROM AP_PACK_PROJECT WHERE workspace_rec_id = ?`, workspaceRecID)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

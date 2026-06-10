@@ -1,6 +1,10 @@
 package projectrelease
 
-import "fmt"
+import (
+	"fmt"
+
+	"auto-pack/backend/pkg/redact"
+)
 
 type publishLogger struct {
 	steps *[]string
@@ -14,5 +18,5 @@ func (l *publishLogger) step(format string, args ...any) {
 	if l == nil || l.steps == nil {
 		return
 	}
-	*l.steps = append(*l.steps, fmt.Sprintf(format, args...))
+	*l.steps = append(*l.steps, redact.Redact(fmt.Sprintf(format, args...)))
 }

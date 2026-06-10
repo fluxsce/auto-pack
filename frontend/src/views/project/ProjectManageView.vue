@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessageBox } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search, Setting } from '@element-plus/icons-vue'
 import { useMessage } from '@/components/feedback/message'
+import { purgeWorkspace } from '@/request/api/workspace'
+import ProjectBulkAutoBuildDialog from './components/ProjectBulkAutoBuildDialog.vue'
 import ProjectBulkAutoReleaseDialog from './components/ProjectBulkAutoReleaseDialog.vue'
+import ProjectBulkBuildStepsDialog from './components/ProjectBulkBuildStepsDialog.vue'
 import ProjectBulkGitBranchDialog from './components/ProjectBulkGitBranchDialog.vue'
 import ProjectBulkVersionDialog from './components/ProjectBulkVersionDialog.vue'
 import ProjectBulkPostBuildEmailDialog from './components/ProjectBulkPostBuildEmailDialog.vue'
+import ProjectMavenDepsDialog from './components/ProjectMavenDepsDialog.vue'
 import type { ProjectBuildStatusFilter } from './useProjects'
 import ProjectDetailView from './components/ProjectDetailView.vue'
 import ProjectEditor from './components/ProjectEditor.vue'
@@ -15,6 +20,7 @@ import WorkspaceManageDialog from './workspace/WorkspaceManageDialog.vue'
 import WorkspacePickerDialog from './workspace/WorkspacePickerDialog.vue'
 import { useProjectDetail } from './useProjectDetail'
 import { useProjects, type WorkspaceManageDialogExpose } from './useProjects'
+import { hasRunningAutoBuildSession } from '@/utils/auto-build-session'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -23,7 +29,14 @@ const workspacePickerOpen = ref(false)
 const bulkGitBranchOpen = ref(false)
 const bulkVersionOpen = ref(false)
 const bulkPostBuildEmailOpen = ref(false)
+const bulkBuildStepsOpen = ref(false)
 const bulkAutoReleaseOpen = ref(false)
+const bulkAutoBuildOpen = ref(false)
+const mavenDepsOpen = ref(false)
+const mavenDepsMode = ref<'workspace' | 'project'>('workspace')
+const mavenDepsTargetId = ref<string | undefined>(undefined)
+const purgingWorkspace = ref(false)
+const autoBuildResumePending = ref(false)
 
 const buildStatusFilterOptions: { value: ProjectBuildStatusFilter; labelKey: string }[] = [
   { value: 'all', labelKey: 'projectFilterBuildAll' },
@@ -107,6 +120,39 @@ const detailOpen = ref(false)
 
 const workspaceProjectCount = computed(() => items.value.length)
 
+const workspaceMavenProjects = computed(() =>
+  items.value.filter((p) => String(p.project_type).toLowerCase() === 'maven'),
+)
+
+async function syncAutoBuildResumeFlag(): Promise<void> {
+  autoBuildResumePending.value = await hasRunningAutoBuildSession(activeWorkspaceRecId.value)
+}
+
+watch(activeWorkspaceRecId, () => void syncAutoBuildResumeFlag(), { immediate: true })
+
+function openAutoBuildResume(): void {
+  bulkAutoBuildOpen.value = true
+}
+
+function openMavenDepsAnalysis(projectRecId?: string): void {
+  if (!activeWorkspaceRecId.value) {
+    message.warning(t('workspaceSelectRequired'))
+    return
+  }
+  if (workspaceMavenProjects.value.length === 0) {
+    message.warning(t('projectMavenDepsNoMaven'))
+    return
+  }
+  if (projectRecId) {
+    mavenDepsMode.value = 'project'
+    mavenDepsTargetId.value = projectRecId
+  } else {
+    mavenDepsMode.value = 'workspace'
+    mavenDepsTargetId.value = undefined
+  }
+  mavenDepsOpen.value = true
+}
+
 function onBulkCommand(command: string): void {
   if (command === 'git-branch') {
     if (!activeWorkspaceRecId.value) {
@@ -132,12 +178,81 @@ function onBulkCommand(command: string): void {
     bulkPostBuildEmailOpen.value = true
     return
   }
+  if (command === 'build-steps') {
+    if (!activeWorkspaceRecId.value) {
+      message.warning(t('workspaceSelectRequired'))
+      return
+    }
+    bulkBuildStepsOpen.value = true
+    return
+  }
+  if (command === 'auto-build') {
+    if (!activeWorkspaceRecId.value) {
+      message.warning(t('workspaceSelectRequired'))
+      return
+    }
+    bulkAutoBuildOpen.value = true
+    return
+  }
   if (command === 'auto-release') {
     if (!activeWorkspaceRecId.value) {
       message.warning(t('workspaceSelectRequired'))
       return
     }
     bulkAutoReleaseOpen.value = true
+    return
+  }
+  if (command === 'maven-deps') {
+    openMavenDepsAnalysis()
+    return
+  }
+  if (command === 'delete-workspace') {
+    void confirmPurgeCurrentWorkspace()
+  }
+}
+
+async function confirmPurgeCurrentWorkspace(): Promise<void> {
+  const ws = activeWorkspace.value
+  if (!activeWorkspaceRecId.value || !ws) {
+    message.warning(t('workspaceSelectRequired'))
+    return
+  }
+  if (ws.is_default === 1) {
+    message.warning(t('workspaceDeleteDefaultHint'))
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('projectBulkDeleteWorkspaceConfirm', {
+        name: ws.workspace_name,
+        count: workspaceProjectCount.value,
+      }),
+      t('projectBulkDeleteWorkspaceTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('delete'),
+        cancelButtonText: t('cancel'),
+        confirmButtonClass: 'el-button--danger',
+      },
+    )
+  } catch {
+    return
+  }
+  purgingWorkspace.value = true
+  try {
+    const res = await purgeWorkspace(ws.rec_id)
+    message.success(
+      t('projectBulkDeleteWorkspaceSuccess', {
+        name: ws.workspace_name,
+        count: res.deleted_projects,
+      }),
+    )
+    if (detailProjectId.value) detailProjectId.value = null
+    await onWorkspacesChanged(workspaceManageRef.value)
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    purgingWorkspace.value = false
   }
 }
 
@@ -203,6 +318,19 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       </div>
     </header>
 
+    <el-alert
+      v-if="!editorOpen && !detailOpen && autoBuildResumePending"
+      :title="$t('projectBulkAutoBuildResumeBanner')"
+      type="warning"
+      :closable="false"
+      show-icon
+      class="project-manage__auto-build-resume"
+    >
+      <el-button type="primary" link @click="openAutoBuildResume">
+        {{ $t('projectBulkAutoBuildResumeOpen') }}
+      </el-button>
+    </el-alert>
+
     <div v-if="!editorOpen && !detailOpen" class="project-manage__toolbar">
       <div class="project-manage__toolbar-workspace">
         <span class="project-manage__toolbar-label">{{ $t('workspaceFilterLabel') }}</span>
@@ -250,23 +378,44 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
           {{ $t('refresh') }}
         </el-button>
         <el-dropdown trigger="click" class="project-manage__bulk-ops" @command="onBulkCommand">
-          <el-button>
+          <el-button :loading="purgingWorkspace">
             {{ $t('projectBulkOps') }}
             <el-icon class="project-manage__bulk-ops-icon"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
+              <li class="el-dropdown-menu__item project-manage__bulk-group" aria-disabled="true">
+                {{ $t('projectBulkGroupConfig') }}
+              </li>
               <el-dropdown-item command="git-branch">
                 {{ $t('projectBulkUpdateGitBranch') }}
               </el-dropdown-item>
               <el-dropdown-item command="project-version">
                 {{ $t('projectBulkUpdateVersion') }}
               </el-dropdown-item>
+              <el-dropdown-item command="build-steps">
+                {{ $t('projectBulkBuildSteps') }}
+              </el-dropdown-item>
               <el-dropdown-item command="post-build-email">
                 {{ $t('projectBulkPostBuildEmail') }}
               </el-dropdown-item>
+              <li
+                class="el-dropdown-menu__item project-manage__bulk-group project-manage__bulk-group--spaced"
+                aria-disabled="true"
+              >
+                {{ $t('projectBulkGroupBuild') }}
+              </li>
+              <el-dropdown-item command="maven-deps">
+                {{ $t('projectBulkMavenDeps') }}
+              </el-dropdown-item>
+              <el-dropdown-item command="auto-build">
+                {{ $t('projectBulkAutoBuild') }}
+              </el-dropdown-item>
               <el-dropdown-item command="auto-release">
                 {{ $t('projectBulkAutoRelease') }}
+              </el-dropdown-item>
+              <el-dropdown-item command="delete-workspace" divided>
+                <span class="project-manage__bulk-danger">{{ $t('projectBulkDeleteWorkspace') }}</span>
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -285,6 +434,7 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       :workspace-name="activeWorkspace?.workspace_name"
       @open="openDetail"
       @build="quickBuild"
+      @analyze-deps="openMavenDepsAnalysis($event.rec_id)"
       @clone="openClone"
       @edit="openEdit"
       @delete="onDelete"
@@ -312,6 +462,7 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
         @back="closeDetail"
         @configure="openConfigureFromDetail"
         @build-now="detailBuildNow()"
+        @analyze-deps="openMavenDepsAnalysis(detailProject?.rec_id)"
         @select-section="detailOpenSection($event)"
         @select-build="detailSelectBuild($event)"
         @workspace-up="detailWorkspaceUp()"
@@ -374,6 +525,31 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       :env-options="envOptions"
       @success="loadList()"
       @reload-envs="loadEnvs()"
+    />
+    <ProjectBulkBuildStepsDialog
+      v-model:open="bulkBuildStepsOpen"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :project-count="workspaceProjectCount"
+      :project-types="projectTypes"
+      :type-label="typeLabel"
+      @success="loadList()"
+    />
+    <ProjectMavenDepsDialog
+      v-model:open="mavenDepsOpen"
+      :mode="mavenDepsMode"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name"
+      :projects="items"
+      :initial-project-rec-id="mavenDepsTargetId"
+    />
+    <ProjectBulkAutoBuildDialog
+      v-model:open="bulkAutoBuildOpen"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :project-count="workspaceProjectCount"
+      @success="loadList()"
+      @session-change="syncAutoBuildResumeFlag()"
     />
     <ProjectBulkAutoReleaseDialog
       v-model:open="bulkAutoReleaseOpen"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Search } from '@element-plus/icons-vue'
 import { previewProjectCron } from '@/request/api/project'
 import type { BuildTriggers } from '@/types/build-triggers'
 import type { PackProject } from '@/types'
@@ -21,15 +22,69 @@ const cronPreviewOk = ref(false)
 const cronPreviewLoading = ref(false)
 
 const cronInputId = 'project-build-cron-expr'
+const depFilterQuery = ref('')
 
-const dependencyOptions = computed(() =>
-  props.workspaceProjects
-    .filter((p) => p.rec_id !== props.editingId)
-    .map((p) => ({
-      value: p.rec_id,
-      label: `${p.project_name} @ ${p.project_version}`,
-    })),
+type DepOption = {
+  value: string
+  label: string
+  searchHay: string
+  deleted: boolean
+}
+
+const knownProjectIds = computed(
+  () => new Set(props.workspaceProjects.map((p) => p.rec_id)),
 )
+
+const allDependencyOptions = computed((): DepOption[] => {
+  const options: DepOption[] = props.workspaceProjects
+    .filter((p) => p.rec_id !== props.editingId)
+    .map((p) => {
+      const label = `${p.project_name} @ ${p.project_version}`
+      const searchHay = [
+        p.project_name,
+        p.project_version,
+        p.project_type,
+        p.repo_branch,
+        label,
+      ]
+        .join(' ')
+        .toLowerCase()
+      return { value: p.rec_id, label, searchHay, deleted: false }
+    })
+
+  const orphanIds = [
+    ...new Set(
+      triggers.value.depends_on.filter(
+        (id) => id !== props.editingId && !knownProjectIds.value.has(id),
+      ),
+    ),
+  ]
+  for (const id of orphanIds) {
+    const label = t('projectBuildDependsOnDeleted', { id })
+    options.unshift({
+      value: id,
+      label,
+      searchHay: `${id} ${label}`.toLowerCase(),
+      deleted: true,
+    })
+  }
+
+  return options
+})
+
+const selectedDepIds = computed(() => new Set(triggers.value.depends_on))
+
+const selectedDepCount = computed(() => triggers.value.depends_on.length)
+
+const filteredDependencyOptions = computed(() => {
+  const needle = depFilterQuery.value.trim().toLowerCase()
+  if (!needle) return allDependencyOptions.value
+  return allDependencyOptions.value.filter(
+    (opt) => selectedDepIds.value.has(opt.value) || opt.searchHay.includes(needle),
+  )
+})
+
+const showDepFilter = computed(() => allDependencyOptions.value.length > 0)
 
 async function runCronPreview(): Promise<void> {
   if (!triggers.value.schedule.enabled) {
@@ -94,24 +149,60 @@ watch(
       <h4 class="build-triggers-panel__block-title">{{ $t('projectBuildDependsOn') }}</h4>
       <p class="build-triggers-panel__hint">{{ $t('projectBuildDependsOnHint') }}</p>
       <el-empty
-        v-if="dependencyOptions.length === 0"
+        v-if="allDependencyOptions.length === 0"
         :description="$t('projectBuildDependsOnEmpty')"
         :image-size="64"
         class="build-triggers-panel__dep-empty"
       />
-      <el-checkbox-group v-else v-model="triggers.depends_on" class="build-triggers-panel__dep-group">
-        <ul class="build-triggers-panel__dep-list">
-          <li
-            v-for="opt in dependencyOptions"
-            :key="opt.value"
-            class="build-triggers-panel__dep-row"
-          >
-            <el-checkbox :value="opt.value" class="build-triggers-panel__dep-checkbox">
-              {{ opt.label }}
-            </el-checkbox>
-          </li>
-        </ul>
-      </el-checkbox-group>
+      <template v-else>
+        <div v-if="showDepFilter" class="build-triggers-panel__dep-toolbar">
+          <el-input
+            v-model="depFilterQuery"
+            clearable
+            :prefix-icon="Search"
+            :placeholder="$t('projectBuildDependsOnFilter')"
+            class="build-triggers-panel__dep-filter"
+          />
+          <span v-if="selectedDepCount > 0" class="build-triggers-panel__dep-selected">
+            {{ $t('projectBuildDependsOnSelected', { n: selectedDepCount }) }}
+          </span>
+        </div>
+        <p v-if="depFilterQuery.trim()" class="build-triggers-panel__dep-filter-meta">
+          {{
+            $t('projectBuildDependsOnFilterMeta', {
+              shown: filteredDependencyOptions.length,
+              total: allDependencyOptions.length,
+            })
+          }}
+        </p>
+        <el-empty
+          v-if="filteredDependencyOptions.length === 0"
+          :description="$t('projectBuildDependsOnFilterEmpty')"
+          :image-size="48"
+          class="build-triggers-panel__dep-empty"
+        />
+        <el-checkbox-group
+          v-else
+          v-model="triggers.depends_on"
+          class="build-triggers-panel__dep-group"
+        >
+          <ul class="build-triggers-panel__dep-list">
+            <li
+              v-for="opt in filteredDependencyOptions"
+              :key="opt.value"
+              class="build-triggers-panel__dep-row"
+              :class="{
+                'build-triggers-panel__dep-row--selected': selectedDepIds.has(opt.value),
+                'build-triggers-panel__dep-row--deleted': opt.deleted,
+              }"
+            >
+              <el-checkbox :value="opt.value" class="build-triggers-panel__dep-checkbox">
+                {{ opt.label }}
+              </el-checkbox>
+            </li>
+          </ul>
+        </el-checkbox-group>
+      </template>
     </section>
 
     <section class="build-triggers-panel__block">

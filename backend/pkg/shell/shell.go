@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"auto-pack/backend/pkg/redact"
 )
 
 // Result holds captured output and process exit status.
@@ -39,7 +41,12 @@ type ExitError struct {
 
 func (e *ExitError) Error() string {
 	label := commandLabel(e.Name, e.Args, e.Script)
-	return fmt.Sprintf("%s: exit %d (stderr: %s)", label, e.Result.ExitCode, trimForError(e.Result.Stderr))
+	return fmt.Sprintf(
+		"%s: exit %d (stderr: %s)",
+		label,
+		e.Result.ExitCode,
+		redact.Redact(trimForError(e.Result.Stderr)),
+	)
 }
 
 // Run executes script through the platform shell (cmd /C on Windows, sh -c elsewhere).
@@ -105,12 +112,13 @@ func run(ctx context.Context, cmd *exec.Cmd, opts Options, name string, args []s
 
 func commandLabel(name string, args []string, script string) string {
 	if script != "" {
-		return shellLabel() + " " + quoteScript(script)
+		return redact.Redact(shellLabel() + " " + quoteScript(script))
 	}
 	if len(args) == 0 {
 		return name
 	}
-	return name + " " + strings.Join(args, " ")
+	safe := redact.CommandArgs(args)
+	return name + " " + strings.Join(safe, " ")
 }
 
 func quoteScript(script string) string {

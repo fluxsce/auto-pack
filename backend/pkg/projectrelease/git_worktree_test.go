@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"auto-pack/backend/pkg/redact"
 )
 
 func TestIsWorkDirEmpty(t *testing.T) {
@@ -22,8 +24,8 @@ func TestIsWorkDirEmpty(t *testing.T) {
 }
 
 func TestSanitizeRepoURLForLog(t *testing.T) {
-	got := sanitizeRepoURLForLog("https://oauth2:secret@git.example.com/a/b.git")
-	if got != "https://git.example.com/a/b.git" {
+	got := redact.URL("https://oauth2:secret@git.example.com/a/b.git")
+	if got != "https://****@git.example.com/a/b.git" {
 		t.Fatalf("got %q", got)
 	}
 }

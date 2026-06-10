@@ -20,7 +20,9 @@ func (r *Runner) runPostBuildActions(
 	project *repository.PackProject,
 	cfg projectcfg.Config,
 	workDir string,
+	build *repository.PackBuild,
 	buildSucceeded bool,
+	resultMessage string,
 	log *buildLogger,
 ) error {
 	actions := projectcfg.EffectivePostBuildActions(cfg.PostBuildActions, project.DeployEnvRecID)
@@ -51,7 +53,7 @@ func (r *Runner) runPostBuildActions(
 		case projectcfg.PostBuildSSHTransfer:
 			err = r.runSSHTransfer(ctx, action, artifactBase, defaultPattern, log)
 		case projectcfg.PostBuildEmailNotify:
-			err = r.runEmailNotify(ctx, project, action, buildSucceeded, log)
+			err = r.runEmailNotify(ctx, project, build, action, buildSucceeded, resultMessage, log)
 		default:
 			err = fmt.Errorf("unsupported post-build type %q", action.Type)
 		}
@@ -274,8 +276,10 @@ func (r *Runner) transferFTP(
 func (r *Runner) runEmailNotify(
 	ctx context.Context,
 	project *repository.PackProject,
+	build *repository.PackBuild,
 	action projectcfg.PostBuildAction,
 	buildSucceeded bool,
+	resultMessage string,
 	log *buildLogger,
 ) error {
 	recipients := splitRecipients(action.Recipients)
@@ -319,17 +323,59 @@ func (r *Runner) runEmailNotify(
 	if subject == "" {
 		subject = fmt.Sprintf("[Auto Pack] %s %s #%s", project.ProjectName, status, project.ProjectVersion)
 	} else {
-		subject = expandNotifyTemplate(subject, project, status)
+		subject = expandNotifyTemplate(subject, project, status, notifyTemplateVars{BuildNum: build.BuildNum})
 	}
-	body := strings.TrimSpace(action.Body)
-	if body == "" {
-		body = fmt.Sprintf("Project: %s\nVersion: %s\nBuild status: %s\n", project.ProjectName, project.ProjectVersion, status)
+	templateBody := strings.TrimSpace(action.Body)
+	vars := notifyTemplateVars{
+		BuildNum: build.BuildNum,
+		Message:  resultMessage,
+	}
+	var attachments []email.Attachment
+	logTruncated := false
+
+	if !buildSucceeded {
+		_ = log.sync()
+		inlineLog, attachLog, truncated := loadBuildLogForNotify(build.LogPath)
+		vars.Log = inlineLog
+		logTruncated = truncated
+		if len(attachLog) > 0 {
+			attachments = append(attachments, email.Attachment{
+				Filename:    fmt.Sprintf("build-%d.log", build.BuildNum),
+				ContentType: "text/plain; charset=utf-8",
+				Data:        attachLog,
+			})
+		}
+	}
+
+	var body string
+	if templateBody == "" {
+		body = fmt.Sprintf(
+			"Project: %s\nVersion: %s\nBuild status: %s\n",
+			project.ProjectName, project.ProjectVersion, status,
+		)
+		if msg := strings.TrimSpace(resultMessage); msg != "" {
+			body += "Message: " + msg + "\n"
+		}
 	} else {
-		body = expandNotifyTemplate(body, project, status)
+		body = expandNotifyTemplate(templateBody, project, status, vars)
+	}
+
+	if !buildSucceeded {
+		usesLogPlaceholder := strings.Contains(templateBody, "{log}")
+		if !usesLogPlaceholder {
+			if vars.Log != "" {
+				body += "\n\n--- Build log ---\n" + vars.Log
+			} else if len(attachments) > 0 {
+				body += "\n\n--- Build log ---\n(完整日志见附件 build-" + fmt.Sprint(build.BuildNum) + ".log)"
+			}
+		}
+		if logTruncated {
+			body += "\n\n[日志超过邮件上限，附件/正文可能截断，请到控制台查看完整构建日志]"
+		}
 	}
 
 	log.step("Sending email to %s", strings.Join(recipients, ", "))
-	msg := email.Message{To: recipients, Subject: subject, Text: body}
+	msg := email.Message{To: recipients, Subject: subject, Text: body, Attachments: attachments}
 	return client.Send(ctx, msg)
 }
 
@@ -345,20 +391,29 @@ func splitRecipients(raw string) []string {
 	return out
 }
 
-func expandNotifyTemplate(s string, project *repository.PackProject, status string) string {
+type notifyTemplateVars struct {
+	BuildNum int
+	Message  string
+	Log      string
+}
+
+func expandNotifyTemplate(s string, project *repository.PackProject, status string, vars notifyTemplateVars) string {
 	r := strings.NewReplacer(
 		"{project}", project.ProjectName,
 		"{version}", project.ProjectVersion,
 		"{status}", status,
+		"{build_num}", fmt.Sprint(vars.BuildNum),
+		"{message}", strings.TrimSpace(vars.Message),
+		"{log}", vars.Log,
 	)
 	return r.Replace(s)
 }
 
 func (l *buildLogger) emitSSHOutput(stdout, stderr string) {
 	if out := strings.TrimRight(stdout, "\r\n"); out != "" {
-		l.line(out)
+		l.println(out)
 	}
 	if errOut := strings.TrimRight(stderr, "\r\n"); errOut != "" {
-		l.line(errOut)
+		l.println(errOut)
 	}
 }

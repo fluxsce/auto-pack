@@ -35,6 +35,7 @@ type BatchReleaseJob struct {
 	TotalCount      int             `json:"total_count"`
 	Foreign         bool            `json:"foreign,omitempty"`
 	ActiveWorkspace string          `json:"active_workspace_name,omitempty"`
+	PostOptions     *PostOptions    `json:"post_options,omitempty"`
 }
 
 // BatchReleaseStatus is the API view for poll / dialog open.

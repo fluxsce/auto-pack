@@ -9,9 +9,10 @@ import (
 )
 
 type batchAutoReleaseDefaultsResponse struct {
-	ReleaseBranch string `json:"release_branch"`
-	TagBranch     string `json:"tag_branch"`
-	TagSource     string `json:"tag_source,omitempty"` // remote | history | workspace
+	ReleaseBranch string                      `json:"release_branch"`
+	TagBranch     string                      `json:"tag_branch"`
+	TagSource     string                      `json:"tag_source,omitempty"` // remote | history | workspace
+	PostOptions   *projectrelease.PostOptions `json:"post_options,omitempty"`
 }
 
 func (h *Handler) batchAutoReleaseDefaults(w http.ResponseWriter, r *http.Request) {

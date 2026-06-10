@@ -13,8 +13,10 @@ import (
 	"auto-pack/backend/pkg/envtypes"
 	"auto-pack/backend/pkg/git"
 	"auto-pack/backend/pkg/logger"
+	"auto-pack/backend/pkg/maven"
 	"auto-pack/backend/pkg/projectcfg"
 	"auto-pack/backend/pkg/projectfs"
+	"auto-pack/backend/pkg/redact"
 	"auto-pack/backend/pkg/shell"
 )
 
@@ -55,13 +57,29 @@ func (r *Runner) executeBuild(buildRecID string, mode TriggerMode) {
 	message := "build finished successfully"
 	finished := time.Now().UTC()
 
-	if err := r.syncSource(ctx, project, workDir, log); err != nil {
+	releaseSync := r.acquireProjectBuild(project.RecID)
+	if err := r.syncSource(ctx, project, workDir, log, nil); err != nil {
+		releaseSync()
 		status = repository.BuildStatusFailed
-		message = err.Error()
+		message = redact.Redact(err.Error())
 		log.finished(status, message)
 		_ = r.builds.UpdateStatus(buildRecID, status, message, nil, &finished)
 		return
 	}
+	releaseSync()
+
+	// Do not hold this project's lock while installing workspace upstream modules;
+	// otherwise parallel pipeline builds on circular Maven deps deadlock forever.
+	if err := r.ensureMavenPrerequisites(ctx, project, ws, workDir, log); err != nil {
+		status = repository.BuildStatusFailed
+		message = redact.Redact(err.Error())
+		log.finished(status, message)
+		_ = r.builds.UpdateStatus(buildRecID, status, message, nil, &finished)
+		return
+	}
+
+	releaseSelf := r.acquireProjectBuildWithLog(project.RecID, project.ProjectName, log.step, log.step)
+	defer releaseSelf()
 
 	cfg, err := projectcfg.ParseConfigJSON(project.ConfigJSON)
 	if err != nil {
@@ -106,6 +124,11 @@ func (r *Runner) executeBuild(buildRecID string, mode TriggerMode) {
 			return
 		}
 
+		if settingsPath := r.mavenSettingsPath(project); settingsPath != "" {
+			buildCmd = maven.InjectSettingsIntoScript(buildCmd, settingsPath)
+			log.step("Maven settings.xml: %s", settingsPath)
+		}
+
 		log.step("Execute shell")
 		res, err := log.runShell(ctx, workDir, shellEnv, buildCmd)
 		if err != nil {
@@ -127,7 +150,7 @@ func (r *Runner) executeBuild(buildRecID string, mode TriggerMode) {
 	}
 
 	buildSucceeded := status == repository.BuildStatusSuccess
-	if err := r.runPostBuildActions(ctx, project, cfg, workDir, buildSucceeded, log); err != nil {
+	if err := r.runPostBuildActions(ctx, project, cfg, workDir, build, buildSucceeded, message, log); err != nil {
 		status = repository.BuildStatusFailed
 		message = err.Error()
 	}
@@ -175,6 +198,11 @@ func (r *Runner) logToolchain(project *repository.PackProject, log *buildLogger)
 			if home := strings.TrimSpace(cfg.MavenHome); home != "" {
 				log.step("MAVEN_HOME=%s", home)
 			}
+			if settings := maven.ResolveSettingsPath(cfg.SettingsXML); settings != "" {
+				log.step("settings.xml=%s", settings)
+			} else if strings.TrimSpace(cfg.SettingsXML) != "" {
+				log.step("settings.xml not found: %s", strings.TrimSpace(cfg.SettingsXML))
+			}
 		case envtypes.TypeNodeJS:
 			var cfg envtypes.NodeJSConfig
 			if err := json.Unmarshal([]byte(item.ConfigJSON), &cfg); err != nil {
@@ -188,23 +216,31 @@ func (r *Runner) logToolchain(project *repository.PackProject, log *buildLogger)
 	return nil
 }
 
-func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject, workDir string, log *buildLogger) error {
+func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject, workDir string, log *buildLogger, opts *syncSourceOpts) error {
+	var o syncSourceOpts
+	if opts != nil {
+		o = *opts
+	}
 	repoURL := strings.TrimSpace(project.RepoURL)
 	if repoURL == "" {
-		log.section("Source")
-		log.step("No Git repository URL configured; using local workspace only.")
+		if !o.compact {
+			log.section("Source")
+			log.step("No Git repository URL configured; using local workspace only.")
+		}
 		return nil
 	}
 
-	log.section("Source")
-	log.step("Fetching changes from the remote Git repository")
+	if !o.compact {
+		log.section("Source")
+		log.step("Fetching changes from the remote Git repository")
+	}
 
 	gitEnv, shellEnv, cloneURL, authLabel, err := r.gitShellEnv(project, repoURL)
 	if err != nil {
 		return err
 	}
 	_ = gitEnv
-	if authLabel != "" {
+	if authLabel != "" && !o.compact {
 		log.step("Using Git credentials: %s", authLabel)
 	}
 	displayURL := sanitizeURLForLog(repoURL)
@@ -217,30 +253,43 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 		return fmt.Errorf("prepare project directory: %w", err)
 	}
 
-	if _, err := log.runGit(ctx, "", shellEnv, "--version"); err != nil {
-		return err
+	if !o.compact {
+		if _, err := log.runGit(ctx, "", shellEnv, "--version"); err != nil {
+			return err
+		}
 	}
 
 	if git.IsRepository(ctx, workDir) {
-		if _, err := log.runGit(ctx, workDir, shellEnv, "rev-parse", "--is-inside-work-tree"); err != nil {
-			return err
+		if o.compact {
+			log.step("  %s -> %s", project.ProjectName, branch)
 		}
-		if _, err := log.runGit(ctx, workDir, shellEnv, "config", "--get", "remote.origin.url"); err != nil {
-			log.step("remote.origin.url not set; continuing with configured URL: %s", displayURL)
+		if !o.compact {
+			if _, err := log.runGit(ctx, workDir, shellEnv, "rev-parse", "--is-inside-work-tree"); err != nil {
+				return err
+			}
+			if _, err := log.runGit(ctx, workDir, shellEnv, "config", "--get", "remote.origin.url"); err != nil {
+				log.step("remote.origin.url not set; continuing with configured URL: %s", displayURL)
+			}
+			log.step("Fetching upstream changes from %s", displayURL)
 		}
-		log.step("Fetching upstream changes from %s", displayURL)
-		if _, err := log.runGit(ctx, workDir, shellEnv, "fetch", "--tags", "--progress", "origin"); err != nil {
-			return err
+		if err := git.FetchOrigin(ctx, workDir, shellEnv, "origin", branch); err != nil {
+			return fmt.Errorf("git fetch %s: %w", project.ProjectName, err)
 		}
 		if err := checkoutProjectRef(ctx, workDir, shellEnv, branch, log); err != nil {
-			return err
+			return fmt.Errorf("checkout %s: %w", project.ProjectName, err)
 		}
-		log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
+		if !o.compact {
+			log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
+		}
 		return nil
 	}
 
-	log.step("Cloning the remote Git repository")
-	log.step("Cloning repository %s", displayURL)
+	if o.compact {
+		log.step("  %s -> %s (clone)", project.ProjectName, branch)
+	} else {
+		log.step("Cloning the remote Git repository")
+		log.step("Cloning repository %s", displayURL)
+	}
 	parent := filepath.Dir(workDir)
 	args := []string{"clone", "--progress"}
 	if branch != "" {
@@ -248,38 +297,88 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 	}
 	logURL := sanitizeURLForLog(cloneURL)
 	args = append(args, logURL, workDir)
-	log.cmd("git", args)
+	if !o.compact {
+		log.cmd("git", args)
+	}
 	runArgs := []string{"clone", "--progress"}
 	if branch != "" {
 		runArgs = append(runArgs, "--branch", branch, "--single-branch")
 	}
 	runArgs = append(runArgs, cloneURL, workDir)
 	res, err := shell.RunArgs(ctx, "git", runArgs, shell.Options{Dir: parent, Env: shellEnv, AllowNonZeroExit: true})
-	log.emitOutput(res)
-	if err != nil {
-		return fmt.Errorf("git clone: %w", err)
+	if o.compact {
+		if err != nil {
+			return fmt.Errorf("git clone %s: %w", project.ProjectName, err)
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("git clone %s: exit %d", project.ProjectName, res.ExitCode)
+		}
+	} else {
+		log.emitOutput(res)
+		if err != nil {
+			return fmt.Errorf("git clone: %w", err)
+		}
+		if res.ExitCode != 0 {
+			return fmt.Errorf("git clone: exit %d", res.ExitCode)
+		}
+		log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
 	}
-	if res.ExitCode != 0 {
-		return fmt.Errorf("git clone: exit %d", res.ExitCode)
-	}
-	log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
 	return nil
+}
+
+// syncSourceOpts controls logging verbosity for git sync.
+type syncSourceOpts struct {
+	compact bool
 }
 
 func checkoutProjectRef(ctx context.Context, workDir string, shellEnv []string, repoBranch string, log *buildLogger) error {
 	repoBranch = strings.TrimSpace(repoBranch)
+	var lastRes shell.Result
+	var lastErr error
+	recordFailure := func(res shell.Result, err error) {
+		lastRes = res
+		lastErr = err
+	}
 	for _, ref := range git.CheckoutRefCandidates(repoBranch) {
-		if _, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", ref); err == nil {
+		res, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", ref)
+		if err == nil {
 			return nil
 		}
+		recordFailure(res, err)
 	}
 	if git.IsTagRef(repoBranch) {
-		return fmt.Errorf("git checkout tag ref %s: tag not found locally (run fetch --tags)", repoBranch)
+		return fmt.Errorf("git checkout tag ref %s: %s", repoBranch, describeCheckoutFailure(lastRes, lastErr, true))
 	}
-	if _, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", "origin/"+repoBranch); err == nil {
+	res, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", "origin/"+repoBranch)
+	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("git checkout %s: branch or tag not found", repoBranch)
+	recordFailure(res, err)
+	return fmt.Errorf("git checkout %s: %s", repoBranch, describeCheckoutFailure(lastRes, lastErr, false))
+}
+
+func describeCheckoutFailure(res shell.Result, err error, isTag bool) string {
+	stderr := strings.TrimSpace(res.Stderr)
+	if strings.Contains(stderr, "index.lock") {
+		return "repository index locked by another git process or parallel build"
+	}
+	if stderr != "" {
+		return gitFirstLine(stderr)
+	}
+	if isTag {
+		return "tag not found locally (run fetch --tags)"
+	}
+	if err != nil {
+		return err.Error()
+	}
+	return "branch or tag not found"
+}
+
+func gitFirstLine(s string) string {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 func (r *Runner) gitShellEnv(

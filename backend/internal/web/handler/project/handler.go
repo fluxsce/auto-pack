@@ -11,6 +11,7 @@ import (
 	"auto-pack/backend/internal/repository"
 	"auto-pack/backend/pkg/audit"
 	"auto-pack/backend/pkg/logger"
+	"auto-pack/backend/pkg/mavendeps"
 	"auto-pack/backend/pkg/packrun"
 	"auto-pack/backend/pkg/projectcfg"
 	"auto-pack/backend/pkg/projectrelease"
@@ -83,6 +84,7 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+base+"/{recID}", requireAuth(http.HandlerFunc(h.get)))
 	mux.Handle("PUT "+base+"/{recID}", requireAuth(http.HandlerFunc(h.update)))
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))
+	mux.Handle("GET "+base+"/{recID}/maven-dependency-analysis", requireAuth(http.HandlerFunc(h.mavenDependencyAnalysis)))
 	mux.Handle("GET "+base+"/{recID}/builds", requireAuth(http.HandlerFunc(h.listBuilds)))
 	mux.Handle("POST "+base+"/{recID}/builds", requireAuth(http.HandlerFunc(h.triggerBuild)))
 	mux.Handle("GET "+base+"/{recID}/builds/{buildID}", requireAuth(http.HandlerFunc(h.getBuild)))
@@ -97,10 +99,12 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("POST "+base+"/batch-repo-branch", requireAuth(http.HandlerFunc(h.batchRepoBranch)))
 	mux.Handle("POST "+base+"/batch-project-version", requireAuth(http.HandlerFunc(h.batchProjectVersion)))
 	mux.Handle("POST "+base+"/batch-post-build-email", requireAuth(http.HandlerFunc(h.batchPostBuildEmail)))
+	mux.Handle("POST "+base+"/batch-build-steps", requireAuth(http.HandlerFunc(h.batchBuildSteps)))
 	mux.Handle("POST "+base+"/cron-preview", requireAuth(http.HandlerFunc(h.previewCron)))
 	mux.Handle("POST "+base+"/batch-auto-release", requireAuth(http.HandlerFunc(h.batchAutoRelease)))
 	mux.Handle("GET "+base+"/batch-auto-release/defaults", requireAuth(http.HandlerFunc(h.batchAutoReleaseDefaults)))
 	mux.Handle("GET "+base+"/batch-auto-release/status", requireAuth(http.HandlerFunc(h.batchAutoReleaseStatus)))
+	mux.Handle("PUT "+base+"/batch-auto-release/post-options", requireAuth(http.HandlerFunc(h.batchAutoReleasePostOptions)))
 	mux.Handle("GET "+base+"/batch-auto-release/history", requireAuth(http.HandlerFunc(h.listBatchAutoReleaseHistory)))
 	mux.Handle("GET "+base+"/batch-auto-release/history/{releaseID}/log", requireAuth(http.HandlerFunc(h.getBatchAutoReleaseLog)))
 }
@@ -111,6 +115,19 @@ func (h *Handler) ReloadBuildScheduler() error {
 		return nil
 	}
 	return h.runner.Scheduler().Reload()
+}
+
+// WorkspaceReleaseActive reports whether an auto-release job is running for the workspace.
+func (h *Handler) WorkspaceReleaseActive(workspaceRecID string) bool {
+	st := h.releaseCoord.Status(workspaceRecID)
+	return st.Status == projectrelease.JobStatusRunning && st.WorkspaceRecID == workspaceRecID
+}
+
+// AnalyzeMavenWorkspaceAll scans all Maven projects in a workspace (for workspace-level analysis API).
+func (h *Handler) AnalyzeMavenWorkspaceAll(
+	workspaceRecID, settingsXML string,
+) (*mavendeps.WorkspaceAnalysisResult, []mavendeps.Module, error) {
+	return h.runner.AnalyzeMavenWorkspaceAll(workspaceRecID, settingsXML)
 }
 
 func (h *Handler) types(w http.ResponseWriter, _ *http.Request) {

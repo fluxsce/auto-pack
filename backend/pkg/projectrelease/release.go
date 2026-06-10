@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"auto-pack/backend/internal/repository"
+	"auto-pack/backend/pkg/redact"
 )
 
 // ReleaseRequest is input for one project release.
@@ -70,7 +71,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 	// Sync from origin before reading or creating resource files — avoid polluted local branches.
 	if r.Git != nil {
 		if err := r.Git.SyncReleaseWorktree(ctx, project, workDir, branch, tag, log); err != nil {
-			res.Message = err.Error()
+			res.Message = redact.Redact(err.Error())
 			res.Steps = steps
 			return res
 		}
@@ -83,7 +84,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		return res
 	}
 	if _, err := EnsureResourceFiles(versionPath, updateNotesPath, log); err != nil {
-		res.Message = err.Error()
+		res.Message = redact.Redact(err.Error())
 		res.Steps = steps
 		return res
 	}
@@ -98,7 +99,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		AllowRepeat: req.AllowRepeat,
 	})
 	if err != nil {
-		res.Message = err.Error()
+		res.Message = redact.Redact(err.Error())
 		res.Steps = steps
 		return res
 	}
@@ -109,7 +110,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		pomPath := PomPath(workDir)
 		pomBytes, skipReason, err := ReadAndUpdatePomOptional(pomPath, tag)
 		if err != nil {
-			res.Message = err.Error()
+			res.Message = redact.Redact(err.Error())
 			res.Steps = steps
 			return res
 		}
@@ -144,7 +145,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 	if err := r.Git.PublishChanges(
 		ctx, project, workDir, branch, tag, targetBranch, req.CreateTargetBranch, commitMsg, req.AllowRepeat, files, &steps,
 	); err != nil {
-		res.Message = err.Error()
+		res.Message = redact.Redact(err.Error())
 		res.Steps = steps
 		return res
 	}

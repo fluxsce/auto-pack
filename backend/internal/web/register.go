@@ -51,7 +51,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 
 	envhandler.Register(mux, envhandler.NewHandler(deps.EnvRepo, auditRec), requireAuth, APIPath())
 	projectH := projecthandler.NewHandler(deps.ProjectRepo, deps.WorkspaceRepo, deps.EnvRepo, deps.BuildRepo, deps.WorkspaceReleaseRepo, deps.DataDir, auditRec)
-	workspacehandler.Register(mux, workspacehandler.NewHandler(deps.WorkspaceRepo, deps.ProjectRepo, projectH, deps.DataDir, auditRec), requireAuth, APIPath())
+	workspacehandler.Register(mux, workspacehandler.NewHandler(deps.WorkspaceRepo, deps.ProjectRepo, deps.BuildRepo, deps.WorkspaceReleaseRepo, projectH, projectH, deps.DataDir, auditRec), requireAuth, APIPath())
 	projecthandler.Register(mux, projectH, requireAuth, APIPath())
 
 	root, err := static.ResolveRoot(deps.FrontendPath)

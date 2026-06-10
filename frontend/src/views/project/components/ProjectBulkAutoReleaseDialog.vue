@@ -7,6 +7,8 @@ import {
   batchAutoRelease,
   batchAutoReleaseStatus,
   fetchBatchAutoReleaseDefaults,
+  saveBatchAutoReleasePostOptions,
+  type BatchReleasePostOptions,
   fetchProjects,
   fetchWorkspaceReleaseHistory,
   fetchWorkspaceReleaseLog,
@@ -21,6 +23,8 @@ import {
   pushProjectWorkspaceFtp,
   triggerProjectBuild,
 } from '@/request/api/build'
+import { fetchWorkspaceMavenDependencyAnalysis } from '@/request/api/workspace'
+import { orderProjectsForBuild, waitForBuildComplete } from '@/utils/ordered-project-build'
 import { fetchEnvSettings } from '@/request/api/env'
 import { APP_DIALOG_POPPER_CLASS } from '@/components/feedback/dialog/constants'
 import FormLabelTip from '@/components/form/FormLabelTip.vue'
@@ -217,6 +221,8 @@ type ReleaseLogParams = {
   updatePom: boolean
 }
 
+let postOptionsSaveTimer: ReturnType<typeof setTimeout> | null = null
+
 function todayISO(): string {
   const d = new Date()
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -297,6 +303,160 @@ function paramsFromStatus(st: BatchAutoReleaseStatusResponse): ReleaseLogParams 
     note: releaseNoteFromTag(tag),
     date: releaseDate.value.trim() || todayISO(),
     updatePom: updatePomVersion.value,
+  }
+}
+
+function applyReleaseFormFromJob(st: BatchAutoReleaseStatusResponse): void {
+  if (st.foreign) return
+  const branch = st.release_branch?.trim()
+  const tag = st.tag?.trim()
+  if (branch) releaseBranch.value = branch
+  if (tag) {
+    tagBranch.value = tag
+    releaseNote.value = releaseNoteFromTag(tag)
+    if (!taskRef.value.trim()) taskRef.value = releaseNoteFromTag(tag)
+  }
+}
+
+function collectPostReleaseOptions(): BatchReleasePostOptions {
+  return {
+    auto_build_after_release: autoBuildAfterRelease.value,
+    auto_ftp_push_after_build: autoFtpPushAfterBuild.value,
+    ftp_push_project_ids: [...ftpPushProjectIds.value],
+    ftp_env_rec_id: ftpEnvRecId.value,
+    push_path: pushPath.value,
+    backup_path: backupPath.value,
+    backup_manual: backupManual.value,
+    pusher: pusher.value,
+    task_ref: taskRef.value,
+    detail: detail.value,
+    release_date: releaseDate.value.trim() || undefined,
+    update_pom_version: updatePomVersion.value,
+    create_target_branch: createTargetBranch.value,
+    target_branch: createTargetBranch.value ? targetBranch.value.trim() : undefined,
+  }
+}
+
+function applyPostReleaseOptions(opts: BatchReleasePostOptions | undefined): void {
+  if (!opts) return
+  autoBuildAfterRelease.value = opts.auto_build_after_release
+  autoFtpPushAfterBuild.value = opts.auto_ftp_push_after_build
+  ftpPushProjectIds.value = [...(opts.ftp_push_project_ids ?? [])]
+  ftpEnvRecId.value = opts.ftp_env_rec_id ?? ''
+  pushPath.value = opts.push_path ?? ''
+  backupPath.value = opts.backup_path ?? ''
+  backupManual.value = Boolean(opts.backup_manual)
+  pusher.value = opts.pusher ?? ''
+  taskRef.value = opts.task_ref ?? ''
+  detail.value = opts.detail ?? ''
+  if (opts.release_date?.trim()) releaseDate.value = opts.release_date.trim()
+  if (opts.update_pom_version != null) updatePomVersion.value = opts.update_pom_version
+  if (opts.create_target_branch != null) {
+    createTargetBranch.value = opts.create_target_branch
+    targetBranch.value = opts.target_branch?.trim() ?? ''
+  }
+  syncFtpPushProjectSelection()
+  scheduleRemoteNoteLoad()
+}
+
+function applyPostOptionsFromStatus(st: BatchAutoReleaseStatusResponse): void {
+  applyPostReleaseOptions(st.post_options)
+}
+
+async function persistPostReleaseOptions(): Promise<void> {
+  if (!props.workspaceRecId) return
+  if (!releasing.value && !postProcessing.value && !activeReleaseRecId.value) {
+    return
+  }
+  try {
+    await saveBatchAutoReleasePostOptions(props.workspaceRecId, collectPostReleaseOptions())
+  } catch {
+    /* ignore background save errors */
+  }
+}
+
+function schedulePersistPostReleaseOptions(): void {
+  if (!open.value || !props.workspaceRecId) return
+  if (!releasing.value && !postProcessing.value && !activeReleaseRecId.value) {
+    return
+  }
+  if (postOptionsSaveTimer) clearTimeout(postOptionsSaveTimer)
+  postOptionsSaveTimer = setTimeout(() => {
+    void persistPostReleaseOptions()
+  }, 400)
+}
+
+function resetPostReleaseForm(): void {
+  autoBuildAfterRelease.value = true
+  autoFtpPushAfterBuild.value = true
+  ftpPushProjectIds.value = []
+  ftpPushPicker.value = ''
+  resetFtpForm()
+}
+
+function applyReleaseFormFromRecord(rec: WorkspaceReleaseRecord): void {
+  if (rec.release_branch?.trim()) releaseBranch.value = rec.release_branch.trim()
+  if (rec.tag_branch?.trim()) {
+    tagBranch.value = rec.tag_branch.trim()
+    releaseNote.value = releaseNoteFromTag(rec.tag_branch)
+    if (!taskRef.value.trim()) taskRef.value = releaseNoteFromTag(rec.tag_branch)
+  }
+  const target = rec.target_branch?.trim()
+  if (target) {
+    createTargetBranch.value = true
+    targetBranch.value = target
+  } else {
+    createTargetBranch.value = false
+    targetBranch.value = ''
+  }
+}
+
+function buildResumeLogHeader(st: BatchAutoReleaseStatusResponse): string {
+  const rec = st.release_rec_id
+    ? releaseHistory.value.find((r) => r.rec_id === st.release_rec_id)
+    : undefined
+  return [
+    `[${formatLogTime()}] ${t('projectAutoReleaseLogResume')}`,
+    t('projectAutoReleaseLogParams', {
+      branch: st.release_branch?.trim() || rec?.release_branch?.trim() || releaseBranch.value || '—',
+      tag: st.tag?.trim() || rec?.tag_branch?.trim() || tagBranch.value || '—',
+      target: rec?.target_branch?.trim() || '—',
+    }),
+  ].join('\n')
+}
+
+function restoreLiveReleaseSession(
+  st: BatchAutoReleaseStatusResponse,
+  opts?: { startPoll?: boolean; runPostOnCompleted?: boolean },
+): void {
+  if (st.foreign) {
+    if (st.status === 'running' && opts?.startPoll !== false) {
+      startPolling(null, false)
+    }
+    return
+  }
+  applyReleaseFormFromJob(st)
+  if (st.release_rec_id) {
+    const rec = releaseHistory.value.find((r) => r.rec_id === st.release_rec_id)
+    if (rec) applyReleaseFormFromRecord(rec)
+  }
+  applyPostOptionsFromStatus(st)
+  const params = paramsFromStatus(st)
+  if (params) activeLogParams.value = params
+  logHeader.value = buildResumeLogHeader(st)
+  if (logViewMode.value === 'live') {
+    syncReleaseLog(st, params, st.status === 'completed')
+  }
+  if (st.status === 'running' && opts?.startPoll !== false) {
+    startPolling(activeLogParams.value, false)
+  } else if (
+    opts?.runPostOnCompleted !== false &&
+    st.status === 'completed' &&
+    params &&
+    (st.released ?? 0) > 0 &&
+    autoBuildAfterRelease.value
+  ) {
+    void runPostReleaseBuildAndFtp(st, params.tag)
   }
 }
 
@@ -400,6 +560,7 @@ async function pollReleaseOnce(
   const params = logParams ?? activeLogParams.value ?? paramsFromStatus(st)
   if (!st.foreign) {
     if (st.release_rec_id) activeReleaseRecId.value = st.release_rec_id
+    if (st.status === 'running' && st.post_options) applyPostReleaseOptions(st.post_options)
     if (logViewMode.value === 'live') {
       syncReleaseLog(st, params, st.status === 'completed')
     }
@@ -462,31 +623,8 @@ async function refreshReleaseStatus(): Promise<void> {
     const st = await batchAutoReleaseStatus(props.workspaceRecId)
     updateReleaseProgress(st)
     if (st.release_rec_id) activeReleaseRecId.value = st.release_rec_id
-    if (st.status === 'running') {
-      if (!st.foreign) {
-        const params = paramsFromStatus(st)
-        if (params) {
-          activeLogParams.value = params
-        }
-        if (!logHeader.value) {
-          logHeader.value = [
-            `[${formatLogTime()}] ${t('projectAutoReleaseLogResume')}`,
-            t('projectAutoReleaseLogParams', {
-              branch: st.release_branch ?? '—',
-              tag: st.tag ?? '—',
-              target: '—',
-            }),
-          ].join('\n')
-        }
-        syncReleaseLog(st, activeLogParams.value, false)
-      }
-      startPolling(activeLogParams.value, false)
-    } else if (st.status === 'completed' && !st.foreign) {
-      const params = activeLogParams.value ?? paramsFromStatus(st)
-      if (params) {
-        activeLogParams.value = params
-        syncReleaseLog(st, params, true)
-      }
+    if (st.status === 'running' && !st.foreign) {
+      restoreLiveReleaseSession(st)
     }
   } catch {
     /* ignore status probe errors */
@@ -503,6 +641,23 @@ watch(tagBranch, (tag) => {
 watch(autoBuildAfterRelease, (on) => {
   if (!on) autoFtpPushAfterBuild.value = false
 })
+
+watch(
+  [
+    autoBuildAfterRelease,
+    autoFtpPushAfterBuild,
+    ftpPushProjectIds,
+    ftpEnvRecId,
+    pushPath,
+    backupPath,
+    backupManual,
+    pusher,
+    taskRef,
+    detail,
+  ],
+  () => schedulePersistPostReleaseOptions(),
+  { deep: true },
+)
 
 watch(pushPath, (v) => {
   if (!backupManual.value) {
@@ -548,10 +703,6 @@ async function loadRemoteNote(): Promise<void> {
   } finally {
     remoteNoteLoading.value = false
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function ftpEnvOptionLabel(item: EnvSetting): string {
@@ -657,15 +808,6 @@ function validateFtpConfig(): boolean {
   return true
 }
 
-async function waitForBuildComplete(projectRecId: string, buildRecId: string): Promise<'success' | 'failed'> {
-  for (;;) {
-    const build = await fetchProjectBuild(projectRecId, buildRecId)
-    if (build.status === 'success') return 'success'
-    if (build.status === 'failed' || build.status === 'cancelled') return 'failed'
-    await sleep(pollIntervalMs)
-  }
-}
-
 async function findDeployArtifact(
   project: PackProject,
 ): Promise<{ entry: ProjectWorkspaceEntry; outputDir: string } | null> {
@@ -751,19 +893,41 @@ async function runPostReleaseBuildAndFtp(
     appendLog([`  ${t('projectBulkAutoReleaseLogFtpTargets', { names: names || '—' })}`])
   }
 
-  try {
-    for (const item of okItems) {
-      const project = projectByName.value.get(item.project_name)
-      if (!project) {
-        appendLog([
-          `[${formatLogTime()}] ${t('projectBulkAutoReleaseBuildFailed', {
-            name: item.project_name,
-            msg: t('projectAutoReleaseLogNoMessage'),
-          })}`,
-        ])
-        continue
-      }
+  const releasedRecIds = okItems
+    .map((item) => projectByName.value.get(item.project_name)?.rec_id)
+    .filter((id): id is string => !!id)
 
+  let buildQueue = releasedRecIds
+    .map((id) => projectByRecId.value.get(id))
+    .filter((p): p is PackProject => !!p)
+
+  try {
+    if (props.workspaceRecId && releasedRecIds.length > 0) {
+      const analysisRes = await fetchWorkspaceMavenDependencyAnalysis(props.workspaceRecId)
+      const ordered = orderProjectsForBuild(
+        workspaceProjects.value,
+        analysisRes.analysis.full_build_order ?? [],
+        {
+          targetRecIds: releasedRecIds,
+          edges: analysisRes.analysis.internal_edges,
+        },
+      )
+      if (ordered.length > 0) {
+        buildQueue = ordered
+        appendLog([
+          `  ${t('projectBulkAutoBuildPlanLine', { count: ordered.length })}`,
+          ...ordered.map((p, i) => `    ${i + 1}. ${p.project_name}`),
+        ])
+      }
+    }
+  } catch {
+    /* fallback: build released projects in release result order */
+  }
+
+  const releasedRecIdSet = new Set(releasedRecIds)
+
+  try {
+    for (const project of buildQueue) {
       appendLog([`[${formatLogTime()}] ${t('projectBulkAutoReleaseBuildProject', { name: project.project_name })}`])
       let buildNum = 0
       try {
@@ -771,10 +935,11 @@ async function runPostReleaseBuildAndFtp(
         buildNum = build.build_num
         const outcome = await waitForBuildComplete(project.rec_id, build.rec_id)
         if (outcome !== 'success') {
+          const latest = await fetchProjectBuild(project.rec_id, build.rec_id)
           appendLog([
             `[${formatLogTime()}] ${t('projectBulkAutoReleaseBuildFailed', {
               name: project.project_name,
-              msg: build.message?.trim() || t('projectAutoReleaseLogNoMessage'),
+              msg: latest.message?.trim() || t('projectAutoReleaseLogNoMessage'),
             })}`,
           ])
           continue
@@ -796,6 +961,7 @@ async function runPostReleaseBuildAndFtp(
       }
 
       if (!ftpPushEnabled.value) continue
+      if (!releasedRecIdSet.has(project.rec_id)) continue
 
       if (!ftpPushProjectSet.value.has(project.rec_id)) {
         appendLog([
@@ -863,38 +1029,66 @@ async function loadFormDefaults(): Promise<void> {
   }
 }
 
+async function initDialogOnOpen(): Promise<void> {
+  releaseDate.value = todayISO()
+  updatePomVersion.value = true
+  createTargetBranch.value = false
+  targetBranch.value = ''
+  remoteNoteContent.value = ''
+  remoteNoteExists.value = false
+  postReleaseHandledFor = null
+  postProcessing.value = false
+  logText.value = ''
+  logHeader.value = ''
+  activeLogParams.value = null
+  activeReleaseRecId.value = null
+  logViewMode.value = 'live'
+  selectedReleaseId.value = null
+  historyLogContent.value = ''
+  historyLogComplete.value = true
+  stopPolling()
+
+  if (!props.workspaceRecId) {
+    await loadFormDefaults()
+    return
+  }
+
+  await Promise.all([loadWorkspaceProjects(), loadFtpEnvs(), loadReleaseHistory()])
+
+  let st: BatchAutoReleaseStatusResponse
+  try {
+    st = await batchAutoReleaseStatus(props.workspaceRecId)
+  } catch {
+    await loadFormDefaults()
+    return
+  }
+
+  updateReleaseProgress(st)
+
+  const resumeSession = !st.foreign && st.status === 'running'
+
+  if (resumeSession) {
+    if (st.release_rec_id) activeReleaseRecId.value = st.release_rec_id
+    restoreLiveReleaseSession(st, { runPostOnCompleted: true })
+    return
+  }
+
+  activeReleaseRecId.value = null
+  releasing.value = false
+  foreignRelease.value = false
+  releaseProgress.value = ''
+  resetPostReleaseForm()
+
+  if (st.foreign && st.status === 'running') {
+    startPolling(null, false)
+  }
+
+  await loadFormDefaults()
+}
+
 watch(open, (v) => {
   if (v) {
-    releaseDate.value = todayISO()
-    updatePomVersion.value = true
-    createTargetBranch.value = false
-    targetBranch.value = ''
-    autoBuildAfterRelease.value = true
-    autoFtpPushAfterBuild.value = true
-    ftpPushProjectIds.value = []
-    ftpPushPicker.value = ''
-    remoteNoteContent.value = ''
-    remoteNoteExists.value = false
-    postReleaseHandledFor = null
-    postProcessing.value = false
-    resetFtpForm()
-    logText.value = ''
-    logHeader.value = ''
-    activeLogParams.value = null
-    activeReleaseRecId.value = null
-    logViewMode.value = 'live'
-    selectedReleaseId.value = null
-    historyLogContent.value = ''
-    historyLogComplete.value = true
-    releasing.value = false
-    foreignRelease.value = false
-    releaseProgress.value = ''
-    stopPolling()
-    void loadFormDefaults()
-    void loadWorkspaceProjects()
-    void loadFtpEnvs()
-    void loadReleaseHistory()
-    void refreshReleaseStatus()
+    void initDialogOnOpen()
   } else {
     stopPolling()
   }
@@ -902,6 +1096,7 @@ watch(open, (v) => {
 
 onUnmounted(() => {
   stopPolling()
+  if (postOptionsSaveTimer) clearTimeout(postOptionsSaveTimer)
 })
 
 async function onSubmit(): Promise<void> {
@@ -970,6 +1165,7 @@ async function onSubmit(): Promise<void> {
       update_pom_version: updatePomVersion.value,
       create_target_branch: createTargetBranch.value,
       target_branch: createTargetBranch.value ? targetBranch.value.trim() : undefined,
+      post_options: collectPostReleaseOptions(),
     })
     activeReleaseRecId.value = start.release_rec_id
     void loadReleaseHistory()

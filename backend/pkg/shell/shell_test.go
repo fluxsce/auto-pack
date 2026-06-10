@@ -31,6 +31,24 @@ func TestRunEmptyScript(t *testing.T) {
 	}
 }
 
+func TestExitErrorRedactsCredentials(t *testing.T) {
+	err := &ExitError{
+		Name: "git",
+		Args: []string{"clone", "https://oauth2:secret@host/repo.git"},
+		Result: Result{
+			ExitCode: 128,
+			Stderr:   "fatal: unable to access 'https://oauth2:secret@host/repo.git': 401",
+		},
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "secret") {
+		t.Fatalf("leaked credential in %q", msg)
+	}
+	if !strings.Contains(msg, "****@host") {
+		t.Fatalf("expected masked URL in %q", msg)
+	}
+}
+
 func TestRunNonZeroExit(t *testing.T) {
 	_, err := Run(context.Background(), "exit 42", Options{})
 	if err == nil {

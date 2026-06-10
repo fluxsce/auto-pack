@@ -36,3 +36,9 @@ export interface EnvProbePayload {
 export function probeEnvSetting(payload: EnvProbePayload): Promise<EnvProbeResult> {
   return http.post('/env/settings/probe', payload)
 }
+
+export function fetchMavenSettingsPaths(mavenHome?: string): Promise<{ items: string[] }> {
+  return http.get('/env/maven-settings-paths', {
+    params: mavenHome?.trim() ? { maven_home: mavenHome.trim() } : undefined,
+  })
+}

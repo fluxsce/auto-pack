@@ -15,6 +15,8 @@ import (
 
 	"auto-pack/backend/internal/repository"
 	"auto-pack/backend/pkg/envtypes"
+	"auto-pack/backend/pkg/maven"
+	"auto-pack/backend/pkg/mavendeps"
 	"auto-pack/backend/pkg/nodejs"
 	"auto-pack/backend/pkg/projectcfg"
 
@@ -23,12 +25,13 @@ import (
 
 // Runner executes project builds asynchronously.
 type Runner struct {
-	projects   *repository.ProjectRepository
-	workspaces *repository.WorkspaceRepository
-	env        *repository.EnvRepository
-	builds     *repository.BuildRepository
-	dataDir    string
-	scheduler  *Scheduler
+	projects     *repository.ProjectRepository
+	workspaces   *repository.WorkspaceRepository
+	env          *repository.EnvRepository
+	builds       *repository.BuildRepository
+	dataDir      string
+	scheduler    *Scheduler
+	projectLocks projectBuildLocker
 
 	mu sync.Mutex
 }
@@ -89,6 +92,10 @@ func (r *Runner) Trigger(projectRecID string, mode TriggerMode) (*repository.Pac
 	if running != nil {
 		return nil, repository.ErrBuildRunning
 	}
+	releaseProject, ok := r.tryAcquireProjectBuild(projectRecID)
+	if !ok {
+		return nil, repository.ErrBuildRunning
+	}
 
 	num, err := r.builds.NextBuildNum(projectRecID)
 	if err != nil {
@@ -113,8 +120,13 @@ func (r *Runner) Trigger(projectRecID string, mode TriggerMode) (*repository.Pac
 		StartedAt:    &now,
 	}
 	if err := r.builds.Insert(build); err != nil {
+		releaseProject()
 		return nil, err
 	}
+	// Release immediately: executeBuild re-acquires the lock only for source sync
+	// and the main build phase. Holding it across Maven upstream installs caused
+	// circular deadlocks when pipeline triggered interdependent projects in parallel.
+	releaseProject()
 
 	go r.executeBuild(build.RecID, mode)
 
@@ -199,6 +211,40 @@ func (r *Runner) buildShellEnv(project *repository.PackProject) ([]string, error
 		return nil, err
 	}
 	return appendUTF8ConsoleEnv(env), nil
+}
+
+func (r *Runner) mavenSettingsPath(project *repository.PackProject) string {
+	if project == nil || strings.TrimSpace(project.MavenEnvRecID) == "" {
+		return ""
+	}
+	item, err := r.env.FindByRecID(project.MavenEnvRecID)
+	if err != nil {
+		return ""
+	}
+	var cfg envtypes.MavenConfig
+	if err := json.Unmarshal([]byte(item.ConfigJSON), &cfg); err != nil {
+		return ""
+	}
+	return maven.ResolveSettingsPath(cfg.SettingsXML)
+}
+
+func (r *Runner) mavenHome(project *repository.PackProject) string {
+	if project == nil || strings.TrimSpace(project.MavenEnvRecID) == "" {
+		return ""
+	}
+	item, err := r.env.FindByRecID(project.MavenEnvRecID)
+	if err != nil {
+		return ""
+	}
+	var cfg envtypes.MavenConfig
+	if err := json.Unmarshal([]byte(item.ConfigJSON), &cfg); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.MavenHome)
+}
+
+func (r *Runner) mavenLocalRepository(project *repository.PackProject) string {
+	return mavendeps.ResolveLocalRepository(r.mavenSettingsPath(project), r.mavenHome(project))
 }
 
 const javaUTF8Flags = "-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8"

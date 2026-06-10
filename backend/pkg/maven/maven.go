@@ -35,6 +35,13 @@ func Verify(ctx context.Context, cfg envtypes.MavenConfig) probe.Result {
 		return probe.Fail(fmt.Sprintf("mvn -version failed: %v", err), details)
 	}
 	details["version"] = combined
+	if settings := strings.TrimSpace(cfg.SettingsXML); settings != "" {
+		resolved := ResolveSettingsPath(settings)
+		if resolved == "" {
+			return probe.Fail("settings.xml not found: "+settings, details)
+		}
+		details["settings_xml"] = resolved
+	}
 	return probe.OK("Maven available", details)
 }
 

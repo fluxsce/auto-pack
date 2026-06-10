@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS AP_PACK_WORKSPACE_RELEASE (
   failed INTEGER NOT NULL DEFAULT 0,
   message TEXT NOT NULL DEFAULT '',
   log_path TEXT NOT NULL DEFAULT '',
+  post_options_json TEXT NOT NULL DEFAULT '',
   started_at TEXT,
   finished_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))

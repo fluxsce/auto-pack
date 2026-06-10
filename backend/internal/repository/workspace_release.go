@@ -18,21 +18,22 @@ var ErrWorkspaceReleaseNotFound = errors.New("workspace release not found")
 
 // PackWorkspaceRelease is a row in AP_PACK_WORKSPACE_RELEASE.
 type PackWorkspaceRelease struct {
-	RecID          string     `json:"rec_id"`
-	WorkspaceRecID string     `json:"workspace_rec_id"`
-	ReleaseNum     int        `json:"release_num"`
-	Status         string     `json:"status"`
-	ReleaseBranch  string     `json:"release_branch"`
-	TagBranch      string     `json:"tag_branch"`
-	TargetBranch   string     `json:"target_branch"`
-	Released       int        `json:"released"`
-	Skipped        int        `json:"skipped"`
-	Failed         int        `json:"failed"`
-	Message        string     `json:"message"`
-	LogPath        string     `json:"log_path"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
+	RecID           string     `json:"rec_id"`
+	WorkspaceRecID  string     `json:"workspace_rec_id"`
+	ReleaseNum      int        `json:"release_num"`
+	Status          string     `json:"status"`
+	ReleaseBranch   string     `json:"release_branch"`
+	TagBranch       string     `json:"tag_branch"`
+	TargetBranch    string     `json:"target_branch"`
+	Released        int        `json:"released"`
+	Skipped         int        `json:"skipped"`
+	Failed          int        `json:"failed"`
+	Message         string     `json:"message"`
+	LogPath         string     `json:"log_path"`
+	PostOptionsJSON string     `json:"post_options_json,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // WorkspaceReleaseRepository provides AP_PACK_WORKSPACE_RELEASE persistence.
@@ -63,22 +64,95 @@ func (r *WorkspaceReleaseRepository) Insert(item *PackWorkspaceRelease) error {
 		INSERT INTO AP_PACK_WORKSPACE_RELEASE(
 			rec_id, workspace_rec_id, release_num, status,
 			release_branch, tag_branch, target_branch,
-			released, skipped, failed, message, log_path,
+			released, skipped, failed, message, log_path, post_options_json,
 			started_at, finished_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.RecID, item.WorkspaceRecID, item.ReleaseNum, item.Status,
 		item.ReleaseBranch, item.TagBranch, item.TargetBranch,
 		item.Released, item.Skipped, item.Failed, item.Message, item.LogPath,
+		item.PostOptionsJSON,
 		nullableTime(item.StartedAt), nullableTime(item.FinishedAt),
 	)
 	return err
+}
+
+func (r *WorkspaceReleaseRepository) UpdatePostOptions(recID, postOptionsJSON string) error {
+	recID = strings.TrimSpace(recID)
+	if recID == "" {
+		return ErrWorkspaceReleaseNotFound
+	}
+	res, err := r.db.Exec(`
+		UPDATE AP_PACK_WORKSPACE_RELEASE SET post_options_json = ? WHERE rec_id = ?`,
+		postOptionsJSON, recID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrWorkspaceReleaseNotFound
+	}
+	return nil
+}
+
+func (r *WorkspaceReleaseRepository) FindRunningByWorkspace(workspaceRecID string) (*PackWorkspaceRelease, error) {
+	workspaceRecID = strings.TrimSpace(workspaceRecID)
+	if workspaceRecID == "" {
+		return nil, nil
+	}
+	row := r.db.QueryRow(`
+		SELECT rec_id, workspace_rec_id, release_num, status,
+			release_branch, tag_branch, target_branch,
+			released, skipped, failed, message, log_path, post_options_json,
+			started_at, finished_at, created_at
+		FROM AP_PACK_WORKSPACE_RELEASE
+		WHERE workspace_rec_id = ? AND status = ?
+		ORDER BY release_num DESC
+		LIMIT 1`, workspaceRecID, ReleaseStatusRunning)
+	item, err := scanWorkspaceReleaseRow(row)
+	if errors.Is(err, ErrWorkspaceReleaseNotFound) {
+		return nil, nil
+	}
+	return item, err
+}
+
+func (r *WorkspaceReleaseRepository) DeleteByWorkspace(workspaceRecID string) error {
+	workspaceRecID = strings.TrimSpace(workspaceRecID)
+	if workspaceRecID == "" {
+		return nil
+	}
+	_, err := r.db.Exec(`DELETE FROM AP_PACK_WORKSPACE_RELEASE WHERE workspace_rec_id = ?`, workspaceRecID)
+	return err
+}
+
+func (r *WorkspaceReleaseRepository) LatestPostOptionsJSON(workspaceRecID string) (string, error) {
+	workspaceRecID = strings.TrimSpace(workspaceRecID)
+	if workspaceRecID == "" {
+		return "", nil
+	}
+	var raw sql.NullString
+	err := r.db.QueryRow(`
+		SELECT post_options_json FROM AP_PACK_WORKSPACE_RELEASE
+		WHERE workspace_rec_id = ? AND TRIM(post_options_json) != ''
+		ORDER BY release_num DESC
+		LIMIT 1`, workspaceRecID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !raw.Valid {
+		return "", nil
+	}
+	return raw.String, nil
 }
 
 func (r *WorkspaceReleaseRepository) FindByRecID(recID string) (*PackWorkspaceRelease, error) {
 	row := r.db.QueryRow(`
 		SELECT rec_id, workspace_rec_id, release_num, status,
 			release_branch, tag_branch, target_branch,
-			released, skipped, failed, message, log_path,
+			released, skipped, failed, message, log_path, post_options_json,
 			started_at, finished_at, created_at
 		FROM AP_PACK_WORKSPACE_RELEASE WHERE rec_id = ?`, recID)
 	return scanWorkspaceReleaseRow(row)
@@ -98,7 +172,7 @@ func (r *WorkspaceReleaseRepository) ListByWorkspace(workspaceRecID string, limi
 	rows, err := r.db.Query(`
 		SELECT rec_id, workspace_rec_id, release_num, status,
 			release_branch, tag_branch, target_branch,
-			released, skipped, failed, message, log_path,
+			released, skipped, failed, message, log_path, post_options_json,
 			started_at, finished_at, created_at
 		FROM AP_PACK_WORKSPACE_RELEASE
 		WHERE workspace_rec_id = ?
@@ -189,6 +263,7 @@ func scanWorkspaceRelease(sc workspaceReleaseScanner) (*PackWorkspaceRelease, er
 		&item.RecID, &item.WorkspaceRecID, &item.ReleaseNum, &item.Status,
 		&item.ReleaseBranch, &item.TagBranch, &item.TargetBranch,
 		&item.Released, &item.Skipped, &item.Failed, &item.Message, &item.LogPath,
+		&item.PostOptionsJSON,
 		&started, &finished, &created,
 	)
 	if err != nil {
