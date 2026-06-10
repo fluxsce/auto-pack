@@ -196,7 +196,7 @@ export const messages = {
     projectBulkAutoBuild: '依赖顺序自动构建',
     projectBulkAutoBuildTitle: '依赖顺序自动构建',
     projectBulkAutoBuildHint:
-      '对「{name}」按 Maven 依赖拓扑顺序依次触发构建：先构建上游缺失依赖，再构建目标工程，避免发版后依赖未就绪。',
+      '对「{name}」按 Maven 依赖拓扑顺序依次触发构建：打开对话框时会自动预同步 Git 源码并解析依赖顺序，先构建上游缺失依赖，再构建目标工程。',
     projectBulkAutoBuildScope: '构建范围',
     projectBulkAutoBuildScopeWorkspace: '工作空间全部工程',
     projectBulkAutoBuildScopeSelected: '仅所选工程（含上游依赖）',
@@ -209,9 +209,17 @@ export const messages = {
     projectBulkAutoBuildPlanDesc: '上游模块优先；与单次构建时自动 install 上游的逻辑一致，此处为完整构建。',
     projectBulkAutoBuildPlanLine: '按依赖顺序构建 {count} 个工程',
     projectBulkAutoBuildPlanEmpty: '无可构建工程',
+    projectBulkAutoBuildSyncStart: '正在预同步 Git 源码…',
+    projectBulkAutoBuildSyncProgress: '预同步 Git 源码 ({done}/{total})：{project}',
+    projectBulkAutoBuildSyncPartial: '源码预同步完成 {synced} 个，{failed} 个失败（依赖分析可能不完整）',
+    projectBulkAutoBuildSyncForeign: '其他工作空间「{name}」正在预同步源码，请稍候',
     projectBulkAutoBuildExecute: '开始构建',
     projectBulkAutoBuildStart: '开始按依赖顺序自动构建…',
     projectBulkAutoBuildLog: '构建日志',
+    projectBulkAutoBuildLogEmpty: '预同步与构建进度将显示在右侧日志区',
+    projectBulkAutoBuildPlanLoading: '正在加载构建计划…',
+    projectBulkAutoBuildRunning: '正在构建 ({done}/{total})…',
+    projectBulkAutoBuildSyncDone: '源码预同步完成：成功 {synced}，跳过 {skipped}，失败 {failed}',
     projectBulkAutoBuildDone: '自动构建结束：成功 {succeeded}，失败 {failed}',
     projectBulkAutoBuildSuccess: '全部构建成功（{count} 个工程）',
     projectBulkAutoBuildPartial: '部分构建失败：成功 {succeeded}，失败 {failed}',
@@ -298,7 +306,7 @@ export const messages = {
     projectBulkAutoReleaseHint:
       '对「{name}」下全部 {count} 个工程：从 UpdateNotes.txt 同步更新说明到 Version.txt，并提交推送到发版分支（与自动打包独立，可重复发版）。正式版补丁流程见任务面板或 docs/release-production-patch.md。',
     projectBulkAutoReleaseNote:
-      '发版说明随版本 Tag 自动生成为「{tag}自动发版说明」（Git 提交说明）；Version / POM 使用版本 Tag。发版分支不存在时从对应 Git 标签检出（如 release/V9.0.0-P01 → V9.0.0-P01）；可选同步 release 目标分支。更新说明取自 UpdateNotes，日期范围：上一版发布时间 < 记录日期 ≤ 本次发布时间。至少一个工程发版成功后，工作空间内各工程的 Git 分支将同步为 refs/tags/{tag}（如 refs/tags/V9.0.0-P01-01）。',
+      '发版说明随版本 Tag 自动生成为「{tag}自动发版说明」（Git 提交说明）；Version.txt 与 Git 版本 Tag 使用 {tag}（不带 -SNAPSHOT）；pom.xml 版本号使用 {tag}-SNAPSHOT 以便 Maven 仓库重复上传。发版分支不存在时从对应 Git 标签检出（如 release/V9.0.0-P01 → V9.0.0-P01）；可选同步 release 目标分支。更新说明取自 UpdateNotes，日期范围：上一版发布时间 < 记录日期 ≤ 本次发布时间。至少一个工程发版成功后，工作空间内各工程的 Git 分支将同步为 refs/tags/{tag}（如 refs/tags/V9.0.0-P01-01）。',
     projectBulkAutoReleaseSuccess: '发版完成：成功 {released} 个，跳过 {skipped} 个（{tag}）',
     projectBulkAutoReleasePartial:
       '部分失败：成功 {released}，跳过 {skipped}，失败 {failed}。{detail}',
@@ -362,7 +370,7 @@ export const messages = {
     projectAutoReleaseBranch: '发版分支',
     projectAutoReleaseBranchPlaceholder: '如 develop、release/V9.0.0',
     projectAutoReleaseTag: '版本 Tag',
-    projectAutoReleaseTagPlaceholder: 'Version.txt / POM 版本号，如 V9.0.0-P08',
+    projectAutoReleaseTagPlaceholder: 'Version.txt / Git Tag，如 V9.0.0-P08（POM 自动加 -SNAPSHOT）',
     projectAutoReleaseTagHint:
       '发版分支不存在时，从 Git 标签检出（如发版分支 release/V9.0.0-P01 对应 tags/V9.0.0-P01），非本字段名',
     projectAutoReleaseDate: '发布时间',
@@ -380,7 +388,7 @@ export const messages = {
     projectAutoReleaseTargetRequired: '请填写目标 release 分支名',
     projectAutoReleaseUpdatePom: '更新 POM',
     projectAutoReleaseUpdatePomHint:
-      '将 pom.xml 的 project version、datahub-utils-parentPom 的 parent version、datahub.core.version 统一为版本 Tag',
+      '将 pom.xml 的 project version、datahub-utils-parentPom 的 parent version、datahub.core.version 统一为「版本 Tag-SNAPSHOT」',
     projectPostBuildRecipientsRequired: '请填写收件人',
     projectBranchRequired: '请填写分支',
     projectFilterSearch: '搜索名称、版本、分支…',
@@ -390,7 +398,7 @@ export const messages = {
     projectFilterEnabled: '启用状态',
     projectFilterEnabledAll: '全部状态',
     projectNameRequired: '请填写工程名称',
-    projectVersionPlaceholder: '如 1.0.0、v2、release-2026',
+    projectVersionPlaceholder: '仅作标记，不参与依赖解析（如 develop、release-2026）',
     projectVersionRequired: '请填写工程版本',
     projectSuggestPath: '生成路径',
     projectWorkDirHint: '未填工作空间根目录时使用 data/workspaces/「空间编码」/；工程目录基于该根：{root}',
@@ -932,7 +940,7 @@ export const messages = {
     projectBulkAutoBuild: 'Auto-build (dependency order)',
     projectBulkAutoBuildTitle: 'Auto-build in dependency order',
     projectBulkAutoBuildHint:
-      'Build projects in «{name}» in Maven topological order: upstream workspace modules first, then targets.',
+      'Build projects in «{name}» in Maven topological order. Opening the dialog pre-syncs Git sources and resolves dependency order; upstream modules first, then targets.',
     projectBulkAutoBuildScope: 'Scope',
     projectBulkAutoBuildScopeWorkspace: 'All projects in workspace',
     projectBulkAutoBuildScopeSelected: 'Selected only (with upstream deps)',
@@ -945,9 +953,19 @@ export const messages = {
     projectBulkAutoBuildPlanDesc: 'Upstream modules first; full builds in the same order as Maven upstream install.',
     projectBulkAutoBuildPlanLine: 'Build {count} project(s) in dependency order',
     projectBulkAutoBuildPlanEmpty: 'No projects to build',
+    projectBulkAutoBuildSyncStart: 'Pre-syncing Git sources…',
+    projectBulkAutoBuildSyncProgress: 'Pre-syncing Git sources ({done}/{total}): {project}',
+    projectBulkAutoBuildSyncPartial:
+      'Source pre-sync: {synced} ok, {failed} failed (dependency order may be incomplete)',
+    projectBulkAutoBuildSyncForeign:
+      'Workspace «{name}» is pre-syncing sources; please wait',
     projectBulkAutoBuildExecute: 'Start build',
     projectBulkAutoBuildStart: 'Starting dependency-ordered auto-build…',
     projectBulkAutoBuildLog: 'Build log',
+    projectBulkAutoBuildLogEmpty: 'Pre-sync and build progress appear in the log panel on the right',
+    projectBulkAutoBuildPlanLoading: 'Loading build plan…',
+    projectBulkAutoBuildRunning: 'Building ({done}/{total})…',
+    projectBulkAutoBuildSyncDone: 'Source pre-sync finished: {synced} ok, {skipped} skipped, {failed} failed',
     projectBulkAutoBuildDone: 'Auto-build finished: {succeeded} succeeded, {failed} failed',
     projectBulkAutoBuildSuccess: 'All builds succeeded ({count} projects)',
     projectBulkAutoBuildPartial: 'Some builds failed: {succeeded} ok, {failed} failed',
@@ -1039,7 +1057,7 @@ export const messages = {
     projectBulkAutoReleaseHint:
       'For all {count} project(s) in «{name}»: sync UpdateNotes.txt into Version.txt and push to the release branch (separate from builds; repeat releases allowed).',
     projectBulkAutoReleaseNote:
-      'Release note is auto-filled as «{tag} auto release» (Git commit message). Version / POM use the version tag. If the release branch is missing, it is created from the matching git tag (e.g. release/V9.0.0-P01 → V9.0.0-P01). Notes from UpdateNotes where previous release date < entry date ≤ this release date. After at least one project releases successfully, every project gets repo_branch set to refs/tags/{tag} (e.g. refs/tags/V9.0.0-P01-01).',
+      'Release note is auto-filled as «{tag} auto release» (Git commit message). Version.txt and the Git version tag use {tag} (no -SNAPSHOT); pom.xml versions use {tag}-SNAPSHOT for Maven redeploy. If the release branch is missing, it is created from the matching git tag (e.g. release/V9.0.0-P01 → V9.0.0-P01). Notes from UpdateNotes where previous release date < entry date ≤ this release date. After at least one project releases successfully, every project gets repo_branch set to refs/tags/{tag} (e.g. refs/tags/V9.0.0-P01-01).',
     projectBulkAutoReleaseSuccess: 'Released {released} project(s), skipped {skipped} ({tag})',
     projectBulkAutoReleasePartial:
       'Partial failure: ok {released}, skipped {skipped}, failed {failed}. {detail}',
@@ -1104,7 +1122,7 @@ export const messages = {
     projectAutoReleaseBranch: 'Release branch',
     projectAutoReleaseBranchPlaceholder: 'e.g. develop, release/V9.0.0',
     projectAutoReleaseTag: 'Version tag',
-    projectAutoReleaseTagPlaceholder: 'Version.txt / POM label, e.g. V9.0.0-P08',
+    projectAutoReleaseTagPlaceholder: 'Version.txt / Git tag, e.g. V9.0.0-P08 (POM gets -SNAPSHOT)',
     projectAutoReleaseTagHint:
       'If the release branch is missing, checkout uses the git tag derived from it (e.g. release/V9.0.0-P01 → tags/V9.0.0-P01), not this field name',
     projectAutoReleaseDate: 'Release date',
@@ -1122,7 +1140,7 @@ export const messages = {
     projectAutoReleaseTargetRequired: 'Target release branch name is required',
     projectAutoReleaseUpdatePom: 'Update POM',
     projectAutoReleaseUpdatePomHint:
-      'Set pom.xml project version, parent version under datahub-utils-parentPom, and datahub.core.version to the version tag',
+      'Set pom.xml project version, parent version under datahub-utils-parentPom, and datahub.core.version to «version tag-SNAPSHOT»',
     projectPostBuildRecipientsRequired: 'Recipients are required',
     projectBranchRequired: 'Branch is required',
     projectFilterSearch: 'Search name, version, branch…',
@@ -1132,7 +1150,7 @@ export const messages = {
     projectFilterEnabled: 'Enabled',
     projectFilterEnabledAll: 'All',
     projectNameRequired: 'Project name is required',
-    projectVersionPlaceholder: 'e.g. 1.0.0, v2, release-2026',
+    projectVersionPlaceholder: 'Label only; Maven deps use pom.xml (e.g. develop, release-2026)',
     projectVersionRequired: 'Version is required',
     projectSuggestPath: 'Suggest path',
     projectWorkDirHint: 'When workspace root is empty, uses data/workspaces/「code」/; project directory is under: {root}',

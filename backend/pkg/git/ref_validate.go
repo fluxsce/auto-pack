@@ -86,7 +86,7 @@ func CheckoutRefCandidates(repoBranch string) []string {
 		name := NormalizeTagName(repoBranch)
 		add(name)
 		add("tags/" + name)
-	} else if !strings.Contains(repoBranch, "/") {
+	} else if IsVersionTagLabel(repoBranch) {
 		add(FormatTagRef(repoBranch))
 	}
 	return out

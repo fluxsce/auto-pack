@@ -50,10 +50,12 @@ func fetchOriginBranch(ctx context.Context, dir string, env []string, branch str
 	return nil
 }
 
-// syncOriginRefs fetches remote branches/tags and prunes deleted remote-tracking refs.
+// syncOriginRefs fetches remote branches and prunes deleted remote-tracking refs.
+// Tags are fetched on demand with force refspec (see ensureGitTagFetched) so a stale
+// local version tag does not make `fetch --tags` fail with "would clobber existing tag".
 func syncOriginRefs(ctx context.Context, dir string, env []string, log *publishLogger) error {
-	log.step("git fetch --prune --tags origin")
-	if _, err := runGit(ctx, dir, env, "fetch", "--prune", "--tags", "--progress", "origin"); err != nil {
+	log.step("git fetch --prune origin")
+	if _, err := runGit(ctx, dir, env, "fetch", "--prune", "--progress", "origin"); err != nil {
 		return err
 	}
 	return nil

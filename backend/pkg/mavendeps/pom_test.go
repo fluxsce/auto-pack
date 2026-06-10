@@ -34,6 +34,51 @@ func TestParsePOM_doesNotReadCoordinatesFromDependencies(t *testing.T) {
 	}
 }
 
+func TestResolveModuleCoordinates_keepsExplicitSnapshotVersion(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	parentPomDir := filepath.Join(repo, "com", "flux", "scev6", "datahub-utils-parentPom", "V10.0.0-P01-SNAPSHOT")
+	if err := os.MkdirAll(parentPomDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	parentPOM := `<project>
+<groupId>com.flux.scev6</groupId>
+<artifactId>datahub-utils-parentPom</artifactId>
+<version>10.0.0-SNAPSHOT</version>
+</project>`
+	if err := os.WriteFile(filepath.Join(parentPomDir, "datahub-utils-parentPom-V10.0.0-P01-SNAPSHOT.pom"), []byte(parentPOM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moduleDir := filepath.Join(dir, "flux-collaboration-datahub01srv")
+	if err := os.MkdirAll(moduleDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modulePOM := `<project>
+<groupId>com.flux.wmsv6</groupId>
+<artifactId>flux-collaboration-datahub01srv</artifactId>
+<version>V10.0.0-P01-SNAPSHOT</version>
+<parent>
+  <groupId>com.flux.scev6</groupId>
+  <artifactId>datahub-utils-parentPom</artifactId>
+  <version>V10.0.0-P01-SNAPSHOT</version>
+</parent>
+<properties>
+  <datahub.core.version>V10.0.0-P01-SNAPSHOT</datahub.core.version>
+</properties>
+</project>`
+	pomPath := filepath.Join(moduleDir, "pom.xml")
+	if err := os.WriteFile(pomPath, []byte(modulePOM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	coord, err := ResolveModuleCoordinates(pomPath, repo, pomLookup{}, "flux-collaboration-datahub01srv", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coord.Version != "V10.0.0-P01-SNAPSHOT" {
+		t.Fatalf("coord version=%q want explicit module snapshot, not parent legacy version", coord.Version)
+	}
+}
+
 func TestResolveModuleCoordinates_aggregatorUsesJarModule(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "flux-collaboration-storage-repeater")

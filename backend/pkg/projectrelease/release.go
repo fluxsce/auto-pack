@@ -107,18 +107,17 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 
 	files := map[string][]byte{versionPath: []byte(content)}
 	if req.UpdatePomVersion {
-		pomPath := PomPath(workDir)
-		pomBytes, skipReason, err := ReadAndUpdatePomOptional(pomPath, tag)
+		pomFiles, pomSteps, err := CollectPomVersionUpdates(workDir, tag)
 		if err != nil {
 			res.Message = redact.Redact(err.Error())
 			res.Steps = steps
 			return res
 		}
-		if skipReason != "" {
-			log.step("跳过 pom.xml 版本更新（%s）", skipReason)
-		} else {
-			files[pomPath] = pomBytes
-			log.step("已更新 pom.xml 版本号为 %s", tag)
+		for path, data := range pomFiles {
+			files[path] = data
+		}
+		for _, msg := range pomSteps {
+			log.step("%s", msg)
 		}
 	}
 

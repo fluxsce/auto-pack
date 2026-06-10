@@ -32,6 +32,7 @@ type Runner struct {
 	dataDir      string
 	scheduler    *Scheduler
 	projectLocks projectBuildLocker
+	syncCoord    workspaceSourceSyncCoordinator
 
 	mu sync.Mutex
 }

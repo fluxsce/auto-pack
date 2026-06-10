@@ -71,6 +71,8 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))
 	mux.Handle("POST "+base+"/{recID}/purge", requireAuth(http.HandlerFunc(h.purge)))
 	mux.Handle("GET "+base+"/{recID}/maven-dependency-analysis", requireAuth(http.HandlerFunc(h.mavenDependencyAnalysis)))
+	mux.Handle("POST "+base+"/{recID}/sync-sources", requireAuth(http.HandlerFunc(h.syncSources)))
+	mux.Handle("GET "+base+"/{recID}/sync-sources/status", requireAuth(http.HandlerFunc(h.syncSourcesStatus)))
 }
 
 func (h *Handler) list(w http.ResponseWriter, _ *http.Request) {

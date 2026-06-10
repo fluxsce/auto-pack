@@ -14,6 +14,10 @@ const props = defineProps<{
   content: string
   loading: boolean
   complete: boolean
+  /** Override empty-state description (defaults to projectLogEmpty). */
+  emptyDescription?: string
+  /** Override console header label (defaults to projectLogConsole). */
+  consoleLabel?: string
 }>()
 
 const { t } = useI18n()
@@ -94,7 +98,9 @@ function onScrollToEndClick(): void {
   <section class="project-build-log-panel">
     <header class="project-build-log-panel__toolbar">
       <div class="project-build-log-panel__toolbar-left">
-        <span class="project-build-log-panel__console-label">{{ $t('projectLogConsole') }}</span>
+        <span class="project-build-log-panel__console-label">{{
+          consoleLabel ?? $t('projectLogConsole')
+        }}</span>
         <span v-if="buildNum != null" class="project-build-log-panel__build-badge">#{{ buildNum }}</span>
         <span v-if="lineCount > 0" class="project-build-log-panel__meta">
           {{ $t('projectLogLines', { count: lineCount }) }}
@@ -128,7 +134,7 @@ function onScrollToEndClick(): void {
         <BuildLogViewer v-if="content" :content="content" />
       </div>
       <div v-else class="project-build-log-panel__empty">
-        <el-empty :description="$t('projectLogEmpty')" :image-size="72" />
+        <el-empty :description="emptyDescription ?? $t('projectLogEmpty')" :image-size="72" />
       </div>
 
       <Transition name="project-build-log-panel-fade">

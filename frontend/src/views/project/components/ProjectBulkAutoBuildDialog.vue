@@ -4,7 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { APP_DIALOG_POPPER_CLASS } from '@/components/feedback/dialog/constants'
 import { useMessage } from '@/components/feedback/message'
 import { fetchProjects } from '@/request/api/project'
-import { fetchWorkspaceMavenDependencyAnalysis } from '@/request/api/workspace'
+import {
+  fetchWorkspaceMavenDependencyAnalysis,
+} from '@/request/api/workspace'
+import { waitWorkspaceSourceSync } from '@/utils/workspace-source-sync'
+import type { WorkspaceSourceSyncStatus } from '@/request/api/workspace'
 import {
   clearAutoBuildSession,
   createAutoBuildSession,
@@ -21,8 +25,9 @@ import {
   runOrderedProjectBuilds,
   type OrderedBuildStepState,
 } from '@/utils/ordered-project-build'
-import type { PackProject } from '@/types'
+import type { PackProject, PackBuildStatus } from '@/types'
 import { formatBuildTime } from '../project-format'
+import { ProjectBuildLogPanel } from './panels'
 
 const open = defineModel<boolean>('open', { required: true })
 
@@ -52,6 +57,8 @@ const warnings = ref<string[]>([])
 const cyclicGroups = ref<MavenCyclicGroup[]>([])
 const fullBuildOrder = ref<MavenWorkspaceModule[]>([])
 const activeSession = ref<AutoBuildSession | null>(null)
+const syncProgress = ref('')
+const lastBuildOutcome = ref<{ succeeded: number; failed: number } | null>(null)
 
 let buildLoopPromise: Promise<void> | null = null
 
@@ -68,6 +75,39 @@ const selectableProjects = computed(() =>
 const selectedModePlanEmpty = computed(
   () => scope.value === 'selected' && selectedRecIds.value.length === 0,
 )
+
+const displayLogContent = computed(() => {
+  const parts: string[] = []
+  if (logText.value) parts.push(logText.value)
+  if (syncProgress.value) parts.push(syncProgress.value)
+  return parts.join('\n')
+})
+
+const logPanelLoading = computed(
+  () => (loadingPlan.value || running.value) && !displayLogContent.value,
+)
+
+const logPanelComplete = computed(() => !loadingPlan.value && !running.value)
+
+const aggregateBuildStatus = computed((): PackBuildStatus | null => {
+  if (loadingPlan.value || running.value) return null
+  const failed = activeSession.value?.failed ?? lastBuildOutcome.value?.failed ?? 0
+  if (failed > 0) return 'failed'
+  if (lastBuildOutcome.value || activeSession.value?.status === 'completed') return 'success'
+  return null
+})
+
+const buildProgressTitle = computed(() => {
+  if (!running.value) return ''
+  const done = activeSession.value?.currentIndex ?? 0
+  const total = plannedProjects.value.length
+  return t('projectBulkAutoBuildRunning', { done, total })
+})
+
+const planLoadingTitle = computed(() => {
+  if (!loadingPlan.value) return ''
+  return syncProgress.value || t('projectBulkAutoBuildPlanLoading')
+})
 
 function appendLog(lines: string[]): void {
   const chunk = lines.join('\n')
@@ -90,6 +130,8 @@ function resetFormState(): void {
   running.value = false
   resuming.value = false
   activeSession.value = null
+  syncProgress.value = ''
+  lastBuildOutcome.value = null
 }
 
 function projectsFromPlanRecIds(recIds: string[]): PackProject[] {
@@ -110,6 +152,41 @@ async function loadWorkspaceProjects(): Promise<void> {
   workspaceProjects.value = res.items ?? []
 }
 
+function formatSyncProgress(st: WorkspaceSourceSyncStatus): string {
+  if (st.status !== 'running') return ''
+  const done = st.done_count ?? 0
+  const total = st.total_count ?? 0
+  const project = st.current_project?.trim() || '—'
+  return t('projectBulkAutoBuildSyncProgress', { done, total, project })
+}
+
+async function preSyncWorkspaceSources(): Promise<void> {
+  if (!props.workspaceRecId) return
+  syncProgress.value = t('projectBulkAutoBuildSyncStart')
+  appendLog([`[${formatBuildTime()}] ${t('projectBulkAutoBuildSyncStart')}`])
+  const st = await waitWorkspaceSourceSync(props.workspaceRecId, (progress) => {
+    syncProgress.value = formatSyncProgress(progress) || t('projectBulkAutoBuildSyncStart')
+  })
+  syncProgress.value = ''
+  appendLog([
+    `[${formatBuildTime()}] ${t('projectBulkAutoBuildSyncDone', {
+      synced: st.synced ?? 0,
+      skipped: st.skipped ?? 0,
+      failed: st.failed ?? 0,
+    })}`,
+  ])
+  if (st.failed_items?.length) {
+    warnings.value = [
+      ...warnings.value,
+      t('projectBulkAutoBuildSyncPartial', {
+        synced: st.synced ?? 0,
+        failed: st.failed ?? st.failed_items.length,
+      }),
+      ...st.failed_items.map((line) => `  - ${line}`),
+    ]
+  }
+}
+
 async function refreshBuildPlan(): Promise<void> {
   if (!props.workspaceRecId || running.value) return
   loadingPlan.value = true
@@ -128,6 +205,7 @@ async function refreshBuildPlan(): Promise<void> {
         scope.value === 'workspace' && includeNonMaven.value ? workspaceProjects.value : []
       return
     }
+    await preSyncWorkspaceSources()
     const res = await fetchWorkspaceMavenDependencyAnalysis(props.workspaceRecId)
     const analysis = res.analysis
     warnings.value = analysis.warnings ?? []
@@ -145,7 +223,11 @@ async function refreshBuildPlan(): Promise<void> {
     )
   } catch (e) {
     plannedProjects.value = []
-    message.error((e as Error).message)
+    if (e instanceof Error && e.name === 'WorkspaceSourceSyncForeign') {
+      message.error(t('projectBulkAutoBuildSyncForeign', { name: e.message || '—' }))
+    } else {
+      message.error((e as Error).message)
+    }
   } finally {
     loadingPlan.value = false
   }
@@ -256,6 +338,7 @@ async function runBuildLoop(startIndex = 0): Promise<void> {
         activeSession.value.succeeded = result.succeeded
         activeSession.value.failed = result.failed
         saveAutoBuildSession(activeSession.value)
+        lastBuildOutcome.value = { succeeded: result.succeeded, failed: result.failed }
         clearAutoBuildSession(props.workspaceRecId)
         activeSession.value = null
       }
@@ -367,7 +450,7 @@ async function onSubmit(): Promise<void> {
   <AppDialog
     v-model="open"
     :title="$t('projectBulkAutoBuildTitle')"
-    width="720px"
+    width="1000px"
     :show-footer="true"
     :confirm-text="$t('projectBulkAutoBuildExecute')"
     :confirm-loading="running"
@@ -376,94 +459,151 @@ async function onSubmit(): Promise<void> {
     "
     @confirm="onSubmit"
   >
-    <el-alert
-      v-if="resuming"
-      :title="$t('projectBulkAutoBuildResuming')"
-      type="info"
-      :closable="false"
-      show-icon
-      class="project-bulk-auto-build__resume-alert"
-    />
+    <div class="project-bulk-auto-build__layout">
+      <div class="project-bulk-auto-build__left">
+        <el-alert
+          v-if="resuming"
+          :title="$t('projectBulkAutoBuildResuming')"
+          type="info"
+          :closable="false"
+          show-icon
+          class="project-bulk-auto-build__running-alert"
+        />
+        <el-alert
+          v-else-if="running"
+          :title="buildProgressTitle || $t('projectBulkAutoBuildStart')"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="project-bulk-auto-build__running-alert"
+        />
+        <el-alert
+          v-else-if="loadingPlan"
+          :title="planLoadingTitle"
+          type="info"
+          :closable="false"
+          show-icon
+          class="project-bulk-auto-build__running-alert"
+        />
 
-    <p class="project-bulk-auto-build__hint">
-      {{ $t('projectBulkAutoBuildHint', { name: workspaceName, count: projectCount }) }}
-    </p>
-
-    <el-form label-width="120px" class="project-bulk-auto-build__form" @submit.prevent="onSubmit">
-      <el-form-item :label="$t('projectBulkAutoBuildScope')">
-        <el-radio-group v-model="scope" :disabled="running">
-          <el-radio value="workspace">{{ $t('projectBulkAutoBuildScopeWorkspace') }}</el-radio>
-          <el-radio value="selected">{{ $t('projectBulkAutoBuildScopeSelected') }}</el-radio>
-        </el-radio-group>
-      </el-form-item>
-
-      <el-form-item v-if="scope === 'selected'" :label="$t('projectBulkAutoBuildTargets')">
-        <el-select
-          v-model="selectedRecIds"
-          multiple
-          filterable
-          collapse-tags
-          collapse-tags-tooltip
-          teleported
-          :popper-class="APP_DIALOG_POPPER_CLASS"
-          class="project-bulk-auto-build__full"
-          :placeholder="$t('projectBulkAutoBuildTargetsPlaceholder')"
-          :disabled="running"
-        >
-          <el-option
-            v-for="p in selectableProjects"
-            :key="p.rec_id"
-            :label="`${p.project_name} @ ${p.project_version}`"
-            :value="p.rec_id"
-          />
-        </el-select>
-        <p v-if="selectedModePlanEmpty" class="project-bulk-auto-build__field-hint">
-          {{ $t('projectBulkAutoBuildSelectRequired') }}
+        <p class="project-bulk-auto-build__hint">
+          {{ $t('projectBulkAutoBuildHint', { name: workspaceName, count: projectCount }) }}
         </p>
-      </el-form-item>
 
-      <el-form-item v-if="scope === 'workspace'" :label="$t('projectBulkAutoBuildNonMaven')">
-        <el-checkbox v-model="includeNonMaven" :disabled="running">
-          {{ $t('projectBulkAutoBuildNonMavenLabel') }}
-        </el-checkbox>
-      </el-form-item>
-    </el-form>
+        <el-form label-width="120px" class="project-bulk-auto-build__form" @submit.prevent="onSubmit">
+          <el-form-item :label="$t('projectBulkAutoBuildScope')">
+            <el-radio-group v-model="scope" :disabled="running || loadingPlan">
+              <el-radio value="workspace">{{ $t('projectBulkAutoBuildScopeWorkspace') }}</el-radio>
+              <el-radio value="selected">{{ $t('projectBulkAutoBuildScopeSelected') }}</el-radio>
+            </el-radio-group>
+          </el-form-item>
 
-    <el-alert
-      v-for="(w, idx) in warnings"
-      :key="idx"
-      :title="w"
-      type="warning"
-      :closable="false"
-      show-icon
-      class="project-bulk-auto-build__alert"
-    />
+          <el-form-item v-if="scope === 'selected'" :label="$t('projectBulkAutoBuildTargets')">
+            <el-select
+              v-model="selectedRecIds"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              teleported
+              :popper-class="APP_DIALOG_POPPER_CLASS"
+              class="project-bulk-auto-build__full"
+              :placeholder="$t('projectBulkAutoBuildTargetsPlaceholder')"
+              :disabled="running || loadingPlan"
+            >
+              <el-option
+                v-for="p in selectableProjects"
+                :key="p.rec_id"
+                :label="`${p.project_name} @ ${p.project_version}`"
+                :value="p.rec_id"
+              />
+            </el-select>
+            <p v-if="selectedModePlanEmpty" class="project-bulk-auto-build__field-hint">
+              {{ $t('projectBulkAutoBuildSelectRequired') }}
+            </p>
+          </el-form-item>
 
-    <section v-loading="loadingPlan" class="project-bulk-auto-build__plan">
-      <h4 class="project-bulk-auto-build__plan-title">
-        {{ $t('projectBulkAutoBuildPlanTitle') }}
-        <span class="project-bulk-auto-build__plan-count">({{ plannedProjects.length }})</span>
-      </h4>
-      <p class="project-bulk-auto-build__plan-desc">{{ $t('projectBulkAutoBuildPlanDesc') }}</p>
-      <ol v-if="plannedProjects.length" class="project-bulk-auto-build__plan-list">
-        <li v-for="p in plannedProjects" :key="p.rec_id">
-          {{ p.project_name }}
-          <span class="project-bulk-auto-build__plan-meta">@ {{ p.project_version }}</span>
-        </li>
-      </ol>
-      <p v-else class="project-bulk-auto-build__plan-empty">{{ $t('projectBulkAutoBuildPlanEmpty') }}</p>
-    </section>
+          <el-form-item v-if="scope === 'workspace'" :label="$t('projectBulkAutoBuildNonMaven')">
+            <el-checkbox v-model="includeNonMaven" :disabled="running || loadingPlan">
+              {{ $t('projectBulkAutoBuildNonMavenLabel') }}
+            </el-checkbox>
+          </el-form-item>
+        </el-form>
 
-    <section v-if="logText" class="project-bulk-auto-build__log">
-      <h4 class="project-bulk-auto-build__log-title">{{ $t('projectBulkAutoBuildLog') }}</h4>
-      <pre class="project-bulk-auto-build__log-body">{{ logText }}</pre>
-    </section>
+        <el-alert
+          v-for="(w, idx) in warnings"
+          :key="idx"
+          :title="w"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="project-bulk-auto-build__alert"
+        />
+
+        <section v-loading="loadingPlan" class="project-bulk-auto-build__plan">
+          <h4 class="project-bulk-auto-build__plan-title">
+            {{ $t('projectBulkAutoBuildPlanTitle') }}
+            <span class="project-bulk-auto-build__plan-count">({{ plannedProjects.length }})</span>
+          </h4>
+          <p class="project-bulk-auto-build__plan-desc">{{ $t('projectBulkAutoBuildPlanDesc') }}</p>
+          <ol v-if="plannedProjects.length" class="project-bulk-auto-build__plan-list">
+            <li v-for="p in plannedProjects" :key="p.rec_id">
+              {{ p.project_name }}
+              <span class="project-bulk-auto-build__plan-meta">@ {{ p.project_version }}</span>
+            </li>
+          </ol>
+          <p v-else class="project-bulk-auto-build__plan-empty">{{ $t('projectBulkAutoBuildPlanEmpty') }}</p>
+        </section>
+      </div>
+
+      <aside class="project-bulk-auto-build__right">
+        <ProjectBuildLogPanel
+          class="project-bulk-auto-build__log-console"
+          :content="displayLogContent"
+          :loading="logPanelLoading"
+          :complete="logPanelComplete"
+          :build-status="aggregateBuildStatus"
+          :console-label="$t('projectBulkAutoBuildLog')"
+          :empty-description="$t('projectBulkAutoBuildLogEmpty')"
+        />
+      </aside>
+    </div>
   </AppDialog>
 </template>
 
 <style scoped lang="scss">
 .project-bulk-auto-build {
-  &__resume-alert {
+  &__layout {
+    display: flex;
+    gap: 16px;
+    min-height: 420px;
+    align-items: stretch;
+  }
+
+  &__left {
+    flex: 0 0 420px;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  &__right {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  &__log-console {
+    flex: 1;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+  }
+
+  &__running-alert {
     margin-bottom: 12px;
   }
 
@@ -493,7 +633,7 @@ async function onSubmit(): Promise<void> {
   }
 
   &__plan {
-    margin-bottom: 16px;
+    margin-bottom: 0;
     padding: 12px 14px;
     border: 1px solid var(--el-border-color-lighter);
     border-radius: var(--el-border-radius-base);
@@ -534,25 +674,28 @@ async function onSubmit(): Promise<void> {
     font-size: 13px;
     color: var(--el-text-color-secondary);
   }
+}
+</style>
 
-  &__log-title {
-    margin: 0 0 8px;
-    font-size: 14px;
-    font-weight: 600;
-  }
+<style lang="scss">
+.app-dialog--windowed.app-dialog--initial-height .app-dialog__body:has(.project-bulk-auto-build__layout) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 
-  &__log-body {
-    margin: 0;
-    max-height: 220px;
-    overflow: auto;
-    padding: 10px 12px;
-    font-size: 12px;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    word-break: break-word;
-    border-radius: var(--el-border-radius-base);
-    background: var(--el-fill-color-light);
-    color: var(--el-text-color-primary);
-  }
+.app-dialog--windowed.app-dialog--initial-height .app-dialog__content:has(.project-bulk-auto-build__layout) {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-dialog--windowed.app-dialog--initial-height
+  .app-dialog__content:has(.project-bulk-auto-build__layout)
+  .project-bulk-auto-build__layout {
+  flex: 1;
+  min-height: 0;
 }
 </style>

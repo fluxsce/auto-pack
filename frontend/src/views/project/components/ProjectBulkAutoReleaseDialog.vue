@@ -24,6 +24,7 @@ import {
   triggerProjectBuild,
 } from '@/request/api/build'
 import { fetchWorkspaceMavenDependencyAnalysis } from '@/request/api/workspace'
+import { waitWorkspaceSourceSync } from '@/utils/workspace-source-sync'
 import { orderProjectsForBuild, waitForBuildComplete } from '@/utils/ordered-project-build'
 import { fetchEnvSettings } from '@/request/api/env'
 import { APP_DIALOG_POPPER_CLASS } from '@/components/feedback/dialog/constants'
@@ -903,6 +904,20 @@ async function runPostReleaseBuildAndFtp(
 
   try {
     if (props.workspaceRecId && releasedRecIds.length > 0) {
+      try {
+        appendLog([`  ${t('projectBulkAutoBuildSyncStart')}`])
+        await waitWorkspaceSourceSync(props.workspaceRecId, (st) => {
+          if (st.status !== 'running') return
+          const done = st.done_count ?? 0
+          const total = st.total_count ?? 0
+          const project = st.current_project?.trim() || '—'
+          appendLog([
+            `  ${t('projectBulkAutoBuildSyncProgress', { done, total, project })}`,
+          ])
+        })
+      } catch {
+        /* continue with best-effort dependency order */
+      }
       const analysisRes = await fetchWorkspaceMavenDependencyAnalysis(props.workspaceRecId)
       const ordered = orderProjectsForBuild(
         workspaceProjects.value,

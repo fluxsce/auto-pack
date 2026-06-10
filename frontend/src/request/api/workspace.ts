@@ -30,6 +30,33 @@ export function cloneWorkspace(data: PackWorkspaceClonePayload): Promise<PackWor
   return http.post('/workspaces/clone', data)
 }
 
+export type WorkspaceSourceSyncStatus = {
+  workspace_rec_id?: string
+  workspace_name?: string
+  status: 'idle' | 'running' | 'completed' | string
+  current_project?: string
+  done_count?: number
+  total_count?: number
+  synced?: number
+  skipped?: number
+  failed?: number
+  failed_items?: string[]
+  foreign?: boolean
+  active_workspace_name?: string
+}
+
+/** Start async git pre-sync for all projects in a workspace. Poll status separately. */
+export function startWorkspaceSourceSync(workspaceRecId: string): Promise<{ status: string }> {
+  return http.post(`/workspaces/${workspaceRecId}/sync-sources`)
+}
+
+/** Poll git pre-sync progress (use after startWorkspaceSourceSync). */
+export function fetchWorkspaceSourceSyncStatus(
+  workspaceRecId: string,
+): Promise<WorkspaceSourceSyncStatus> {
+  return http.get(`/workspaces/${workspaceRecId}/sync-sources/status`)
+}
+
 /** Analyze Maven module order and internal deps for all projects in a workspace. */
 export function fetchWorkspaceMavenDependencyAnalysis(
   workspaceRecId: string,

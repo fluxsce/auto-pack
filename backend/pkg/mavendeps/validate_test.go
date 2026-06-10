@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -333,6 +334,61 @@ func TestAnalyzeTarget_storageUpstreamModules(t *testing.T) {
 	}
 	if len(res.BuildOrder) != 3 {
 		t.Fatalf("build order=%+v", res.BuildOrder)
+	}
+}
+
+func TestAnalyzeTarget_staleProviderSnapshotUsesConsumerRelease(t *testing.T) {
+	dir := t.TempDir()
+	repo := filepath.Join(dir, "repo")
+	legacyDir := filepath.Join(repo, "com", "flux", "wmsv6", "flux-collaboration-servers", "10.0.0-SNAPSHOT")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyJar := filepath.Join(legacyDir, "flux-collaboration-servers-10.0.0-SNAPSHOT.jar")
+	if err := os.WriteFile(legacyJar, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modules := []Module{
+		{
+			ProjectRecID:   "services",
+			ProjectName:    "flux-collaboration-services",
+			ProjectVersion: "develop",
+			Coordinates: Coordinates{
+				GroupID: "com.flux.wmsv6", ArtifactID: "flux-collaboration-servers",
+				Version: "10.0.0-SNAPSHOT",
+			},
+		},
+		{
+			ProjectRecID:   "security",
+			ProjectName:    "flux-collaboration-security",
+			ProjectVersion: "develop",
+			Dependencies: []Coordinates{
+				{GroupID: "com.flux.wmsv6", ArtifactID: "flux-collaboration-servers", Version: "10.0.0-SNAPSHOT"},
+			},
+			Coordinates: Coordinates{
+				GroupID: "com.flux.wmsv6", ArtifactID: "flux-collaboration-security",
+				Version: "V10.0.0-P01-SNAPSHOT",
+			},
+		},
+	}
+	ws := NewWorkspace(modules, repo)
+	coord := RequiredDependencyCoord(&modules[1], modules[1].Dependencies[0], &modules[0])
+	if coord.Version != "V10.0.0-P01-SNAPSHOT" {
+		t.Fatalf("coord version=%q want consumer release line", coord.Version)
+	}
+	res, err := ws.AnalyzeTarget("security")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.BuildOrder) != 1 || res.BuildOrder[0].ProjectRecID != "services" {
+		t.Fatalf("build order=%+v want upstream install", res.BuildOrder)
+	}
+	unsatisfied := ws.ValidateTargetDependencies("security")
+	if len(unsatisfied) != 1 {
+		t.Fatalf("unsatisfied=%+v", unsatisfied)
+	}
+	if strings.Contains(unsatisfied[0].Reason, "版本未对齐") {
+		t.Fatalf("expected missing install, got %q", unsatisfied[0].Reason)
 	}
 }
 

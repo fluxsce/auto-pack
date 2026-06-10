@@ -6,20 +6,35 @@ import (
 	"strings"
 )
 
-func versionMatches(depVer, moduleVer, consumerProjectVer string) bool {
+func versionMatches(depVer, moduleVer, consumerPomVer string) bool {
 	depVer = strings.TrimSpace(depVer)
 	moduleVer = strings.TrimSpace(moduleVer)
-	consumerProjectVer = strings.TrimSpace(consumerProjectVer)
+	consumerPomVer = strings.TrimSpace(consumerPomVer)
 	if depVer == "" {
 		return true
 	}
-	if moduleVer != "" && depVer == moduleVer {
+	if versionsEquivalent(depVer, moduleVer) {
 		return true
 	}
-	if consumerProjectVer != "" && depVer == consumerProjectVer {
+	if versionsEquivalent(depVer, consumerPomVer) {
 		return true
 	}
 	return false
+}
+
+// versionsEquivalent compares Maven versions (exact or SNAPSHOT/release pair).
+func versionsEquivalent(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return a == b
+	}
+	if strings.EqualFold(a, b) {
+		return true
+	}
+	au := strings.TrimSuffix(strings.ToUpper(a), "-SNAPSHOT")
+	bu := strings.TrimSuffix(strings.ToUpper(b), "-SNAPSHOT")
+	return au != "" && au == bu
 }
 
 func isUnresolvedVersion(v string) bool {
@@ -32,44 +47,29 @@ func isSnapshotVersion(v string) bool {
 	return v == "" || strings.Contains(v, "snapshot")
 }
 
-func consumerReleaseVersion(consumer *Module) string {
-	if consumer == nil {
-		return ""
+// isLegacyFluxSnapshot is the placeholder pom version (e.g. 10.0.0-SNAPSHOT) before a V-release line.
+func isLegacyFluxSnapshot(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" || strings.HasPrefix(strings.ToUpper(v), "V") {
+		return false
 	}
-	pomVer := strings.TrimSpace(consumer.Coordinates.Version)
-	dbVer := strings.TrimSpace(consumer.ProjectVersion)
-	if dbVer != "" && !isUnresolvedVersion(dbVer) && !isSnapshotVersion(dbVer) {
-		if pomVer == "" || isUnresolvedVersion(pomVer) || isSnapshotVersion(pomVer) {
-			return dbVer
-		}
-	}
-	if pomVer != "" && !isUnresolvedVersion(pomVer) && !isSnapshotVersion(pomVer) {
-		return pomVer
-	}
-	if dbVer != "" && !isUnresolvedVersion(dbVer) {
-		return dbVer
-	}
-	return pomVer
+	return isSnapshotVersion(v)
 }
 
-func moduleReleaseVersion(m *Module) string {
+// modulePomVersion returns the effective Maven version from pom.xml (project_version is UI label only).
+func modulePomVersion(m *Module) string {
 	if m == nil {
 		return ""
 	}
-	dbVer := strings.TrimSpace(m.ProjectVersion)
-	pomVer := strings.TrimSpace(m.Coordinates.Version)
-	if dbVer != "" && !isUnresolvedVersion(dbVer) && !isSnapshotVersion(dbVer) {
-		if pomVer == "" || isUnresolvedVersion(pomVer) || isSnapshotVersion(pomVer) {
-			return dbVer
-		}
-	}
-	if pomVer != "" && !isUnresolvedVersion(pomVer) && !isSnapshotVersion(pomVer) {
-		return pomVer
-	}
-	if dbVer != "" && !isUnresolvedVersion(dbVer) {
-		return dbVer
-	}
-	return pomVer
+	return strings.TrimSpace(m.Coordinates.Version)
+}
+
+func consumerReleaseVersion(consumer *Module) string {
+	return modulePomVersion(consumer)
+}
+
+func moduleReleaseVersion(m *Module) string {
+	return modulePomVersion(m)
 }
 
 func resolveDependencyVersion(consumer *Module, dep Coordinates) string {
@@ -206,6 +206,28 @@ func (w *Workspace) moduleVersionMatches(consumer *Module, dep Coordinates, cand
 	return false
 }
 
+func legacyUpstreamVersionMatch(consumer *Module, dep Coordinates, candidate *Module) bool {
+	providerVer := moduleReleaseVersion(candidate)
+	if !isLegacyFluxSnapshot(providerVer) {
+		return false
+	}
+	need := resolveDependencyVersion(consumer, dep)
+	if need != "" && versionsEquivalent(need, providerVer) {
+		return true
+	}
+	release := consumerReleaseVersion(consumer)
+	if release != "" && !versionsEquivalent(release, providerVer) {
+		if need != "" && versionsEquivalent(need, release) {
+			return true
+		}
+		// Consumer depends on V-release line while upstream pom still uses legacy snapshot placeholder.
+		if need != "" && !versionsEquivalent(need, providerVer) {
+			return true
+		}
+	}
+	return false
+}
+
 func (w *Workspace) workspaceUpstreamMatch(consumer *Module, dep Coordinates, candidate *Module) bool {
 	if consumer == nil || candidate == nil || candidate.ProjectRecID == consumer.ProjectRecID {
 		return false
@@ -216,6 +238,9 @@ func (w *Workspace) workspaceUpstreamMatch(consumer *Module, dep Coordinates, ca
 	need := resolveDependencyVersion(consumer, dep)
 	release := consumerReleaseVersion(consumer)
 	if need != "" && release != "" && need == release {
+		return true
+	}
+	if legacyUpstreamVersionMatch(consumer, dep, candidate) {
 		return true
 	}
 	return w.moduleVersionMatches(consumer, dep, candidate)
@@ -235,14 +260,24 @@ func (w *Workspace) matchModule(consumer *Module, dep Coordinates) *Module {
 	return candidate
 }
 
-// RequiredDependencyCoord is the GAV used for local-repo checks (provider publish coordinates).
+// RequiredDependencyCoord is the GAV Maven will resolve for local-repo / upstream install checks.
 func RequiredDependencyCoord(consumer *Module, dep Coordinates, provider *Module) Coordinates {
 	ver := resolveDependencyVersion(consumer, dep)
+	release := consumerReleaseVersion(consumer)
+	providerVer := moduleReleaseVersion(provider)
+
 	if ver == "" || isUnresolvedVersion(ver) {
-		ver = moduleReleaseVersion(provider)
+		ver = release
+	}
+	// Upstream pom still on legacy 10.0.0-SNAPSHOT while consumer builds V10.0.0-P01-SNAPSHOT.
+	if release != "" && providerVer != "" && ver == providerVer && !versionsEquivalent(ver, release) {
+		ver = release
 	}
 	if ver == "" || isUnresolvedVersion(ver) {
-		ver = consumerReleaseVersion(consumer)
+		ver = providerVer
+	}
+	if ver == "" || isUnresolvedVersion(ver) {
+		ver = release
 	}
 	artifactID := publishArtifactID(provider, dep)
 	return Coordinates{

@@ -158,15 +158,15 @@ func (w *Workspace) AnalyzeTarget(targetRecID string) (*AnalysisResult, error) {
 		order = w.cycleAwareModuleOrder(needed, targetRecID)
 	}
 	for _, m := range order {
-		coord := m.Coordinates
 		if req, ok := requiredCoord[m.ProjectRecID]; ok {
-			coord = req
-		}
-		if req, ok := requiredCoord[m.ProjectRecID]; ok && w.artifactSatisfied(req) {
-			res.SkippedInstalled = append(res.SkippedInstalled, m)
+			if w.artifactSatisfied(req) {
+				res.SkippedInstalled = append(res.SkippedInstalled, m)
+				continue
+			}
+			res.BuildOrder = append(res.BuildOrder, m)
 			continue
 		}
-		if w.artifactSatisfied(coord) {
+		if w.artifactSatisfied(m.Coordinates) {
 			res.SkippedInstalled = append(res.SkippedInstalled, m)
 			continue
 		}
@@ -253,14 +253,12 @@ func ScanModulesWithMavenHome(entries []ScanEntry, localRepo, mavenHome string) 
 			meta.MissingPOM = append(meta.MissingPOM, e.ProjectName+": "+err.Error())
 			continue
 		}
-		moduleCoords, err := ResolveModuleCoordinates(pomPath, localRepo, lookup, e.ProjectName, e.ProjectVersion)
+		moduleCoords, err := ResolveModuleCoordinates(pomPath, localRepo, lookup, e.ProjectName, "")
 		if err != nil {
 			meta.MissingPOM = append(meta.MissingPOM, e.ProjectName+": "+err.Error())
 			continue
 		}
-		fallbacks := CollectEffectiveProperties(pomPath, localRepo, lookup, map[string]string{
-			"project.version": e.ProjectVersion,
-		})
+		fallbacks := CollectEffectiveProperties(pomPath, localRepo, lookup, nil)
 		deps, err := EffectiveDependencies(pomPath, localRepo, lookup, fallbacks)
 		if err != nil {
 			deps = make([]Coordinates, 0, len(pom.Dependencies))

@@ -259,31 +259,79 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 		}
 	}
 
-	if git.IsRepository(ctx, workDir) {
-		if o.compact {
-			log.step("  %s -> %s", project.ProjectName, branch)
-		}
+	if git.IsRepository(ctx, workDir) && !git.HasResolvableHEAD(ctx, workDir, shellEnv) {
 		if !o.compact {
-			if _, err := log.runGit(ctx, workDir, shellEnv, "rev-parse", "--is-inside-work-tree"); err != nil {
-				return err
-			}
-			if _, err := log.runGit(ctx, workDir, shellEnv, "config", "--get", "remote.origin.url"); err != nil {
-				log.step("remote.origin.url not set; continuing with configured URL: %s", displayURL)
-			}
-			log.step("Fetching upstream changes from %s", displayURL)
+			log.step("Removing incomplete local repository (interrupted sync)")
 		}
-		if err := git.FetchOrigin(ctx, workDir, shellEnv, "origin", branch); err != nil {
-			return fmt.Errorf("git fetch %s: %w", project.ProjectName, err)
-		}
-		if err := checkoutProjectRef(ctx, workDir, shellEnv, branch, log); err != nil {
-			return fmt.Errorf("checkout %s: %w", project.ProjectName, err)
-		}
-		if !o.compact {
-			log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
-		}
-		return nil
+		_ = os.RemoveAll(workDir)
 	}
 
+	if git.IsRepository(ctx, workDir) {
+		err := r.pullProjectSource(ctx, project, workDir, branch, displayURL, shellEnv, log, &o)
+		if err == nil {
+			return nil
+		}
+		if !git.IsRecoverableSyncError(err) {
+			return err
+		}
+		if !o.compact {
+			log.step("Source sync failed on incomplete checkout; removing and re-cloning")
+		}
+		_ = os.RemoveAll(workDir)
+	}
+
+	cloneErr := r.cloneProjectSource(ctx, project, workDir, branch, displayURL, shellEnv, cloneURL, log, &o)
+	if cloneErr != nil {
+		_ = os.RemoveAll(workDir)
+	}
+	return cloneErr
+}
+
+func (r *Runner) pullProjectSource(
+	ctx context.Context,
+	project *repository.PackProject,
+	workDir, branch, displayURL string,
+	shellEnv []string,
+	log *buildLogger,
+	o *syncSourceOpts,
+) error {
+	if o.compact {
+		log.step("  %s -> %s", project.ProjectName, branch)
+	} else {
+		if _, err := log.runGit(ctx, workDir, shellEnv, "rev-parse", "--is-inside-work-tree"); err != nil {
+			return err
+		}
+		if _, err := log.runGit(ctx, workDir, shellEnv, "config", "--get", "remote.origin.url"); err != nil {
+			log.step("remote.origin.url not set; continuing with configured URL: %s", displayURL)
+		}
+		log.step("Fetching upstream changes from %s", displayURL)
+	}
+	fetchArgs := git.FetchOriginArgs("origin", branch)
+	if !o.compact {
+		if _, err := log.runGit(ctx, workDir, shellEnv, fetchArgs...); err != nil {
+			return fmt.Errorf("git fetch %s: %w", project.ProjectName, err)
+		}
+	} else if err := git.FetchOrigin(ctx, workDir, shellEnv, "origin", branch); err != nil {
+		return fmt.Errorf("git fetch %s: %w", project.ProjectName, err)
+	}
+	if err := checkoutProjectRef(ctx, workDir, shellEnv, branch, log); err != nil {
+		return fmt.Errorf("checkout %s: %w", project.ProjectName, err)
+	}
+	if !o.compact {
+		log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
+	}
+	return nil
+}
+
+func (r *Runner) cloneProjectSource(
+	ctx context.Context,
+	project *repository.PackProject,
+	workDir, branch, displayURL string,
+	shellEnv []string,
+	cloneURL string,
+	log *buildLogger,
+	o *syncSourceOpts,
+) error {
 	if o.compact {
 		log.step("  %s -> %s (clone)", project.ProjectName, branch)
 	} else {
@@ -313,16 +361,16 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 		if res.ExitCode != 0 {
 			return fmt.Errorf("git clone %s: exit %d", project.ProjectName, res.ExitCode)
 		}
-	} else {
-		log.emitOutput(res)
-		if err != nil {
-			return fmt.Errorf("git clone: %w", err)
-		}
-		if res.ExitCode != 0 {
-			return fmt.Errorf("git clone: exit %d", res.ExitCode)
-		}
-		log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
+		return nil
 	}
+	log.emitOutput(res)
+	if err != nil {
+		return fmt.Errorf("git clone: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("git clone: exit %d", res.ExitCode)
+	}
+	log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
 	return nil
 }
 
@@ -338,6 +386,16 @@ func checkoutProjectRef(ctx context.Context, workDir string, shellEnv []string, 
 	recordFailure := func(res shell.Result, err error) {
 		lastRes = res
 		lastErr = err
+	}
+	if repoBranch != "" && !git.IsTagRef(repoBranch) {
+		originRef := git.OriginBranchRef(repoBranch)
+		if git.RefExists(ctx, workDir, shellEnv, originRef) {
+			res, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", "-B", repoBranch, originRef)
+			if err == nil {
+				return nil
+			}
+			recordFailure(res, err)
+		}
 	}
 	for _, ref := range git.CheckoutRefCandidates(repoBranch) {
 		res, err := log.runGit(ctx, workDir, shellEnv, "checkout", "-f", ref)
@@ -367,6 +425,9 @@ func describeCheckoutFailure(res shell.Result, err error, isTag bool) string {
 	}
 	if isTag {
 		return "tag not found locally (run fetch --tags)"
+	}
+	if git.IsCheckoutPathspecError(stderr) {
+		return gitFirstLine(stderr) + " (local repository may be incomplete from interrupted sync)"
 	}
 	if err != nil {
 		return err.Error()

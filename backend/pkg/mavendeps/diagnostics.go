@@ -27,9 +27,9 @@ func (w *Workspace) DependencyDiagnostics(targetRecID string) []string {
 		if cand := w.findWorkspaceModule(dep); cand != nil && cand.ProjectRecID != target.ProjectRecID {
 			if !w.workspaceUpstreamMatch(target, dep, cand) {
 				need := resolveDependencyVersion(target, dep)
-				scan := moduleReleaseVersion(cand)
-				lines = append(lines, fmt.Sprintf("  %s version mismatch for %s (need %s, scan %s)",
-					cand.ProjectName, dep.Key(), need, scan))
+				pomVer := modulePomVersion(cand)
+				lines = append(lines, fmt.Sprintf("  %s version mismatch for %s (need %s, pom %s)",
+					cand.ProjectName, dep.Key(), need, pomVer))
 			}
 		}
 	}

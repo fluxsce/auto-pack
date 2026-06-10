@@ -77,8 +77,8 @@ func (w *Workspace) checkDependencySatisfied(consumer *Module, dep Coordinates) 
 			Dependency:       dep,
 			WorkspaceProject: cand.ProjectName,
 			Reason: fmt.Sprintf(
-				"工作空间工程 %s 与依赖 %s 版本未对齐（POM 需求 %s，扫描版本 %s）",
-				cand.ProjectName, dep.Key(), dep.Version, moduleReleaseVersion(cand),
+				"工作空间工程 %s 与依赖 %s 版本未对齐（POM 需求 %s，上游 POM %s）",
+				cand.ProjectName, dep.Key(), dep.Version, modulePomVersion(cand),
 			),
 		}
 	}

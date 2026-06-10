@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -128,6 +129,21 @@ func (h *Handler) AnalyzeMavenWorkspaceAll(
 	workspaceRecID, settingsXML string,
 ) (*mavendeps.WorkspaceAnalysisResult, []mavendeps.Module, error) {
 	return h.runner.AnalyzeMavenWorkspaceAll(workspaceRecID, settingsXML)
+}
+
+// SyncWorkspaceSources clones or updates git worktrees for all projects in a workspace (blocking).
+func (h *Handler) SyncWorkspaceSources(ctx context.Context, workspaceRecID string) (*packrun.WorkspaceSyncResult, error) {
+	return h.runner.SyncWorkspaceSources(ctx, workspaceRecID)
+}
+
+// StartWorkspaceSourceSync begins async git pre-sync for dependency analysis.
+func (h *Handler) StartWorkspaceSourceSync(workspaceRecID, workspaceName string) error {
+	return h.runner.StartWorkspaceSourceSync(workspaceRecID, workspaceName)
+}
+
+// WorkspaceSourceSyncStatus returns async pre-sync progress.
+func (h *Handler) WorkspaceSourceSyncStatus(workspaceRecID string) packrun.WorkspaceSourceSyncJob {
+	return h.runner.WorkspaceSourceSyncStatus(workspaceRecID)
 }
 
 func (h *Handler) types(w http.ResponseWriter, _ *http.Request) {

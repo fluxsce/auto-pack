@@ -251,9 +251,7 @@ func resolveModuleCoordinatesAt(
 		return Coordinates{}, err
 	}
 	content := readPOMContent(pomPath)
-	fallbacks := CollectEffectiveProperties(pomPath, localRepo, lookup, map[string]string{
-		"project.version": projectVersion,
-	})
+	fallbacks := CollectEffectiveProperties(pomPath, localRepo, lookup, nil)
 
 	groupID := strings.TrimSpace(pom.GroupID)
 	artifactID := strings.TrimSpace(pom.ArtifactID)
@@ -286,7 +284,7 @@ func resolveModuleCoordinatesAt(
 				if groupID == "" {
 					groupID = parentCoord.GroupID
 				}
-				if version == "" || isUnresolvedVersion(version) || isSnapshotVersion(version) {
+				if version == "" || isUnresolvedVersion(version) {
 					version = parentCoord.Version
 				}
 			}
@@ -305,11 +303,6 @@ func resolveModuleCoordinatesAt(
 		return Coordinates{}, fmt.Errorf("artifactId missing in %s", pomPath)
 	}
 	version = pom.ResolveVersion(version, fallbacks)
-	if version == "" || isUnresolvedVersion(version) || isSnapshotVersion(version) {
-		if pv := strings.TrimSpace(projectVersion); pv != "" {
-			version = pv
-		}
-	}
 	coord := Coordinates{
 		GroupID:    groupID,
 		ArtifactID: artifactID,
@@ -344,9 +337,7 @@ func resolveAggregatorLeafCoordinates(
 		if !isPublishablePackaging(parsePackaging(childContent)) {
 			continue
 		}
-		fallbacks := CollectEffectiveProperties(childPOM, localRepo, lookup, map[string]string{
-			"project.version": projectVersion,
-		})
+		fallbacks := CollectEffectiveProperties(childPOM, localRepo, lookup, nil)
 		childPOMFile, err := ParsePOMFile(childPOM)
 		if err != nil {
 			continue
@@ -366,7 +357,7 @@ func resolveAggregatorLeafCoordinates(
 			continue
 		}
 		version := childPOMFile.ResolveVersion(childPOMFile.Version, fallbacks)
-		if version == "" || isUnresolvedVersion(version) || isSnapshotVersion(version) {
+		if version == "" || isUnresolvedVersion(version) {
 			version = parentCoord.Version
 		}
 		if groupID == "" {
@@ -512,14 +503,11 @@ func buildPOMLookup(entries []ScanEntry) pomLookup {
 		if err != nil {
 			continue
 		}
-		fb := map[string]string{"project.version": e.ProjectVersion}
+		fb := map[string]string{}
 		for k, v := range pom.Properties {
 			fb[k] = v
 		}
 		ver := pom.ResolveVersion(pom.Version, fb)
-		if ver == "" {
-			ver = strings.TrimSpace(e.ProjectVersion)
-		}
 		gav := pom.GroupID + ":" + pom.ArtifactID + ":" + ver
 		byGAV[gav] = pomPath
 		ga := pom.GroupID + ":" + pom.ArtifactID

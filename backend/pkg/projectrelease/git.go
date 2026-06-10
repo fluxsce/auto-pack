@@ -262,8 +262,8 @@ func ensureGitTagFetched(ctx context.Context, dir string, env []string, tagName 
 	if tagName == "" {
 		return
 	}
-	_, _ = runGitAllow(ctx, dir, env, "fetch", "origin", "refs/tags/"+tagName+":refs/tags/"+tagName)
-	_, _ = runGitAllow(ctx, dir, env, "fetch", "origin", "tag", tagName)
+	refSpec := "+refs/tags/" + tagName + ":refs/tags/" + tagName
+	_, _ = runGitAllow(ctx, dir, env, "fetch", "origin", refSpec)
 }
 
 func gitRefExists(ctx context.Context, dir string, env []string, ref string) bool {
