@@ -94,9 +94,15 @@ type MavenConfig struct {
 
 // NodeJSConfig is used for nodejs env_type.
 type NodeJSConfig struct {
-	NodePath string `json:"node_path,omitempty"`
-	NpmPath  string `json:"npm_path,omitempty"`
-	NpxPath  string `json:"npx_path,omitempty"`
+	NodePath           string `json:"node_path,omitempty"`
+	NpmPath            string `json:"npm_path,omitempty"`
+	NpxPath            string `json:"npx_path,omitempty"`
+	NpmrcPath          string `json:"npmrc_path,omitempty"`
+	Registry           string `json:"registry,omitempty"`
+	AuthToken          string `json:"auth_token,omitempty"`
+	AuthUsername       string `json:"auth_username,omitempty"`
+	AuthPassword       string `json:"auth_password,omitempty"`
+	PnpmAllowAllBuilds *bool  `json:"pnpm_allow_all_builds,omitempty"`
 }
 
 // JDKConfig is used for jdk env_type.

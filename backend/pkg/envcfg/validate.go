@@ -74,8 +74,18 @@ func ValidateMaven(_ MavenConfig) error {
 	return nil
 }
 
-func ValidateNodeJS(_ NodeJSConfig) error {
-	return nil
+func ValidateNodeJS(c NodeJSConfig) error {
+	registry := strings.TrimSpace(c.Registry)
+	if registry == "" {
+		return nil
+	}
+	if strings.TrimSpace(c.AuthToken) != "" || strings.TrimSpace(c.AuthUsername) != "" {
+		return nil
+	}
+	if strings.TrimSpace(c.NpmrcPath) != "" {
+		return nil
+	}
+	return fmt.Errorf("nodejs: registry requires auth_token or auth_username/password (or set npmrc_path)")
 }
 
 func ValidateJDK(_ JDKConfig) error {

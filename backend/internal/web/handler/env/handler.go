@@ -32,6 +32,7 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("POST "+base, requireAuth(http.HandlerFunc(h.create)))
 	mux.Handle("POST "+base+"/probe", requireAuth(http.HandlerFunc(h.probe)))
 	mux.Handle("GET "+apiBase+"/env/maven-settings-paths", requireAuth(http.HandlerFunc(h.mavenSettingsPaths)))
+	mux.Handle("GET "+apiBase+"/env/npmrc-paths", requireAuth(http.HandlerFunc(h.npmrcPaths)))
 	mux.Handle("GET "+base+"/{recID}", requireAuth(http.HandlerFunc(h.get)))
 	mux.Handle("PUT "+base+"/{recID}", requireAuth(http.HandlerFunc(h.update)))
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))

@@ -207,11 +207,18 @@ func (w *Workspace) moduleVersionMatches(consumer *Module, dep Coordinates, cand
 }
 
 func legacyUpstreamVersionMatch(consumer *Module, dep Coordinates, candidate *Module) bool {
+	need := resolveDependencyVersion(consumer, dep)
 	providerVer := moduleReleaseVersion(candidate)
+
+	// Dependency still declares legacy placeholder (9.0.0-SNAPSHOT) while workspace upstream is on V-release line.
+	if isLegacyFluxSnapshot(need) && providerVer != "" && !isLegacyFluxSnapshot(providerVer) {
+		return true
+	}
+
+	// Upstream pom still on legacy placeholder (10.0.0-SNAPSHOT) while consumer uses V-release line.
 	if !isLegacyFluxSnapshot(providerVer) {
 		return false
 	}
-	need := resolveDependencyVersion(consumer, dep)
 	if need != "" && versionsEquivalent(need, providerVer) {
 		return true
 	}
@@ -220,7 +227,6 @@ func legacyUpstreamVersionMatch(consumer *Module, dep Coordinates, candidate *Mo
 		if need != "" && versionsEquivalent(need, release) {
 			return true
 		}
-		// Consumer depends on V-release line while upstream pom still uses legacy snapshot placeholder.
 		if need != "" && !versionsEquivalent(need, providerVer) {
 			return true
 		}

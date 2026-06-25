@@ -43,6 +43,18 @@ func TestValidateVersionTag(t *testing.T) {
 	}
 }
 
+func TestRepoBranchAfterRelease(t *testing.T) {
+	if got := RepoBranchAfterRelease("release/V9.0.0-P01", "main", true); got != "main" {
+		t.Fatalf("target branch: got %q", got)
+	}
+	if got := RepoBranchAfterRelease("release/V9.0.0-P01", "", true); got != "release/V9.0.0-P01" {
+		t.Fatalf("empty target: got %q", got)
+	}
+	if got := RepoBranchAfterRelease("release/V9.0.0-P01", "main", false); got != "release/V9.0.0-P01" {
+		t.Fatalf("no target: got %q", got)
+	}
+}
+
 func TestResolveGitTagRefsForCheckout(t *testing.T) {
 	refs := resolveGitTagRefsForCheckout("release/V9.0.0-P01", "V9.0.0-P01-01")
 	if len(refs) != 3 {

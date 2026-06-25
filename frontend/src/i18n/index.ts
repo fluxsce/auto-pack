@@ -242,6 +242,39 @@ export const messages = {
     projectBulkUpdateVersionSuccess: '已更新 {count} 个工程的版本为 {version}',
     projectBulkUpdateVersionNote:
       '同一工作空间内若存在多个同名工程（仅版本不同），需先处理重名后再批量修改版本。',
+    projectBulkPomVersion: '批量修改 POM 版本',
+    projectBulkPomVersionTitle: '批量修改 POM 版本',
+    projectBulkPomVersionHint:
+      '对当前工作空间「{name}」下全部 Maven 工程：先拉取各工程配置的 Git 分支，按发版规则更新 pom.xml（含子模块与 parent 版本），再提交并推送。',
+    projectBulkPomVersionTag: '版本 Tag',
+    projectBulkPomVersionTagRequired: '请填写版本 Tag',
+    projectBulkPomVersionCommit: '提交说明',
+    projectBulkPomVersionCommitPlaceholder: '留空则自动生成（如：更新 POM 版本号为 …）',
+    projectBulkPomVersionNote:
+      '写入 pom 的版本为 Tag 加 -SNAPSHOT（与自动发版一致）；仅处理已启用且配置了 Git 仓库的 Maven 工程。Git 分支为 Tag 引用的工程将跳过。',
+    projectBulkPomVersionSuccess: '已完成 {updated} 个工程 POM 更新（跳过 {skipped} 个），版本 Tag {tag}',
+    projectBulkPomVersionPartial: '完成 {updated} 个，跳过 {skipped} 个，失败 {failed} 个',
+    projectBulkPomVersionRunning: '正在更新 POM 版本（{done}/{total}）',
+    projectBulkPomVersionRunningDetail: '正在更新 POM 版本（{done}/{total}）— {project}',
+    projectBulkPomVersionRunningForeign: '其他工作空间正在执行批量 POM 更新：{workspace}',
+    projectBulkPomVersionAlreadyRunning: '批量 POM 版本更新正在进行中',
+    projectBulkPomVersionLogStart: '开始批量更新 POM 版本…',
+    projectBulkPomVersionLogResume: '恢复查看进行中的批量 POM 更新',
+    projectBulkPomVersionLogProgress: '更新进度（实时）',
+    projectBulkPomVersionLogDone: '批量更新结束',
+    projectBulkPomVersionLogSummary:
+      '汇总 — 成功 {updated}，跳过 {skipped}，失败 {failed}（{tag}）',
+    projectBulkPomVersionLogParams: '版本 Tag: {tag} · 提交说明: {commit}',
+    projectBulkPomVersionLogInProgress: '正在处理：{project}',
+    projectBulkPomVersionLogNoSteps: '（无步骤明细）',
+    projectBulkPomVersionLogNoMessage: '（无错误详情）',
+    projectBulkPomVersionStatusOk: '成功',
+    projectBulkPomVersionStatusSkipped: '跳过',
+    projectBulkPomVersionStatusFailed: '失败',
+    projectBulkPomVersionHistory: '历史记录',
+    projectBulkPomVersionHistoryEmpty: '暂无记录',
+    projectBulkPomVersionViewLive: '查看当前任务',
+    projectBulkPomVersionCommitAuto: '（自动生成）',
     projectBulkPostBuildEmail: '批量配置构建后邮件',
     projectBulkPostBuildEmailTitle: '批量配置构建后邮件',
     projectBulkPostBuildEmailHint:
@@ -304,9 +337,9 @@ export const messages = {
     projectBulkAutoReleaseTitle: '工作空间自动发版',
     projectBulkAutoReleaseScope: '「{name}」· {count} 个工程',
     projectBulkAutoReleaseHint:
-      '对「{name}」下全部 {count} 个工程：从 UpdateNotes.txt 同步更新说明到 Version.txt，并提交推送到发版分支（与自动打包独立，可重复发版）。正式版补丁流程见任务面板或 docs/release-production-patch.md。',
+      '对「{name}」下全部 {count} 个工程：Maven 工程从 src/main/resources/updatenotes/UpdateNotes.txt 同步到 Version.txt；npm/vue 工程从 src/resources/updateNotes/updateNotes.txt 同步到同目录 Version.txt，并提交推送到发版分支（与自动打包独立，可重复发版）。go/gradle/custom 等类型跳过版本文件同步。正式版补丁流程见任务面板或 docs/release-production-patch.md。',
     projectBulkAutoReleaseNote:
-      '发版说明随版本 Tag 自动生成为「{tag}自动发版说明」（Git 提交说明）；Version.txt 与 Git 版本 Tag 使用 {tag}（不带 -SNAPSHOT）；pom.xml 版本号使用 {tag}-SNAPSHOT 以便 Maven 仓库重复上传。发版分支不存在时从对应 Git 标签检出（如 release/V9.0.0-P01 → V9.0.0-P01）；可选同步 release 目标分支。更新说明取自 UpdateNotes，日期范围：上一版发布时间 < 记录日期 ≤ 本次发布时间。至少一个工程发版成功后，工作空间内各工程的 Git 分支将同步为 refs/tags/{tag}（如 refs/tags/V9.0.0-P01-01）。',
+      '发版说明随版本 Tag 自动生成为「{tag}自动发版说明」（Git 提交说明）；Version.txt 与 Git 版本 Tag 使用 {tag}（不带 -SNAPSHOT）；仅 Maven 工程更新 pom.xml 为 {tag}-SNAPSHOT 以便 Maven 仓库重复上传。发版分支不存在时从对应 Git 标签检出（如 release/V9.0.0-P01 → V9.0.0-P01）；可选同步 release 目标分支。更新说明取自 UpdateNotes，日期范围：上一版发布时间 < 记录日期 ≤ 本次发布时间。至少一个工程发版成功后，工作空间内各工程的 Git 分支将同步为：已配置目标分支时使用目标分支，否则使用发版分支（便于后续 deploy 部署到仓库重复处理）。',
     projectBulkAutoReleaseSuccess: '发版完成：成功 {released} 个，跳过 {skipped} 个（{tag}）',
     projectBulkAutoReleasePartial:
       '部分失败：成功 {released}，跳过 {skipped}，失败 {failed}。{detail}',
@@ -696,6 +729,22 @@ export const messages = {
     envMavenSettingsXmlHint:
       '构建时会自动为 mvn 命令追加 -s 参数。可扫描常用路径（~/.m2/settings.xml、MAVEN_HOME/conf/settings.xml），也可手动输入。',
     envMavenSettingsScan: '扫描常用路径',
+    envNodejsRegistrySection: 'npm / pnpm 私服',
+    envNodejsRegistryDesc:
+      '构建 npm/pnpm 工程时注入 NPM_CONFIG_USERCONFIG，用于私服鉴权（解决 pnpm install 401）。工程需关联此 Node.js 环境。',
+    envNodejsNpmrcPath: '.npmrc 文件',
+    envNodejsNpmrcPathPlaceholder: '选择或输入构建服务器上的 .npmrc 绝对路径',
+    envNodejsNpmrcPathHint:
+      '若服务器已有完整 .npmrc（含账号），可直接指定；也可仅填写下方 registry + 令牌，由平台在构建时生成临时配置。',
+    envNodejsNpmrcScan: '扫描常用路径',
+    envNodejsRegistry: 'registry',
+    envNodejsRegistryPlaceholder: '如 http://219.135.170.44:19081/repository/sce-dev-group/',
+    envNodejsAuthTokenPlaceholder: 'Nexus npm token（推荐）',
+    envNodejsRegistryAuthHint:
+      '填写 registry 时需同时配置 auth_token，或 auth_username + auth_password，或上方 .npmrc 文件路径。',
+    envNodejsPnpmAllowBuilds: '允许 pnpm 依赖构建脚本',
+    envNodejsPnpmAllowBuildsHint:
+      '开启后注入 dangerously-allow-all-builds=true，避免 pnpm 10+ 因 esbuild 等 install 脚本未批准而 ERR_PNPM_IGNORED_BUILDS 失败（内网 CI 推荐开启）。',
     yes: '是',
     enabled: '启用',
     disabled: '禁用',
@@ -990,6 +1039,39 @@ export const messages = {
     projectBulkUpdateVersionSuccess: 'Updated {count} project(s) to version {version}',
     projectBulkUpdateVersionNote:
       'If multiple projects share the same name (different versions only), resolve duplicates before batch update.',
+    projectBulkPomVersion: 'Update POM versions (Git)',
+    projectBulkPomVersionTitle: 'Update POM versions (workspace)',
+    projectBulkPomVersionHint:
+      'For each Maven project in 「{name}」 ({count} total): fetch its configured Git branch, update pom.xml (submodules and parent versions, same rules as auto-release), then commit and push.',
+    projectBulkPomVersionTag: 'Version tag',
+    projectBulkPomVersionTagRequired: 'Version tag is required',
+    projectBulkPomVersionCommit: 'Commit message',
+    projectBulkPomVersionCommitPlaceholder: 'Leave empty for auto-generated message',
+    projectBulkPomVersionNote:
+      'POM version is tag + -SNAPSHOT (same as auto-release). Only enabled Maven projects with a Git URL. Projects using a tag ref as branch are skipped.',
+    projectBulkPomVersionSuccess: 'Updated POM on {updated} project(s) (skipped {skipped}), tag {tag}',
+    projectBulkPomVersionPartial: 'Updated {updated}, skipped {skipped}, failed {failed}',
+    projectBulkPomVersionRunning: 'Updating POM versions ({done}/{total})',
+    projectBulkPomVersionRunningDetail: 'Updating POM versions ({done}/{total}) — {project}',
+    projectBulkPomVersionRunningForeign: 'Another workspace is running a POM batch: {workspace}',
+    projectBulkPomVersionAlreadyRunning: 'A POM version batch is already running',
+    projectBulkPomVersionLogStart: 'Starting batch POM update…',
+    projectBulkPomVersionLogResume: 'Resumed in-progress POM batch',
+    projectBulkPomVersionLogProgress: 'Progress (live)',
+    projectBulkPomVersionLogDone: 'Batch update finished',
+    projectBulkPomVersionLogSummary:
+      'Summary — ok {updated}, skipped {skipped}, failed {failed} ({tag})',
+    projectBulkPomVersionLogParams: 'Tag: {tag} · Commit: {commit}',
+    projectBulkPomVersionLogInProgress: 'Processing: {project}',
+    projectBulkPomVersionLogNoSteps: '(no step details)',
+    projectBulkPomVersionLogNoMessage: '(no error details)',
+    projectBulkPomVersionStatusOk: 'OK',
+    projectBulkPomVersionStatusSkipped: 'Skipped',
+    projectBulkPomVersionStatusFailed: 'Failed',
+    projectBulkPomVersionHistory: 'History',
+    projectBulkPomVersionHistoryEmpty: 'No records yet',
+    projectBulkPomVersionViewLive: 'View live',
+    projectBulkPomVersionCommitAuto: '(auto-generated)',
     projectBulkPostBuildEmail: 'Set post-build email (all projects)',
     projectBulkPostBuildEmailTitle: 'Post-build email (workspace)',
     projectBulkPostBuildEmailHint:
@@ -1055,9 +1137,9 @@ export const messages = {
     projectBulkAutoReleaseTitle: 'Workspace auto release',
     projectBulkAutoReleaseScope: '«{name}» · {count} project(s)',
     projectBulkAutoReleaseHint:
-      'For all {count} project(s) in «{name}»: sync UpdateNotes.txt into Version.txt and push to the release branch (separate from builds; repeat releases allowed).',
+      'For all {count} project(s) in «{name}»: Maven projects sync src/main/resources/updatenotes/UpdateNotes.txt into Version.txt; npm/vue projects sync src/resources/updateNotes/updateNotes.txt into Version.txt in the same folder, then push to the release branch (separate from builds; repeat releases allowed). go/gradle/custom types skip version file sync.',
     projectBulkAutoReleaseNote:
-      'Release note is auto-filled as «{tag} auto release» (Git commit message). Version.txt and the Git version tag use {tag} (no -SNAPSHOT); pom.xml versions use {tag}-SNAPSHOT for Maven redeploy. If the release branch is missing, it is created from the matching git tag (e.g. release/V9.0.0-P01 → V9.0.0-P01). Notes from UpdateNotes where previous release date < entry date ≤ this release date. After at least one project releases successfully, every project gets repo_branch set to refs/tags/{tag} (e.g. refs/tags/V9.0.0-P01-01).',
+      'Release note is auto-filled as «{tag} auto release» (Git commit message). Version.txt and the Git version tag use {tag} (no -SNAPSHOT); only Maven projects update pom.xml to {tag}-SNAPSHOT for Maven redeploy. If the release branch is missing, it is created from the matching git tag (e.g. release/V9.0.0-P01 → V9.0.0-P01). Notes from UpdateNotes where previous release date < entry date ≤ this release date. After at least one project releases successfully, every project gets repo_branch set to the target branch when configured, otherwise the release branch (so deploy can reuse the same branch for Maven redeploy).',
     projectBulkAutoReleaseSuccess: 'Released {released} project(s), skipped {skipped} ({tag})',
     projectBulkAutoReleasePartial:
       'Partial failure: ok {released}, skipped {skipped}, failed {failed}. {detail}',
@@ -1451,6 +1533,22 @@ export const messages = {
     envMavenSettingsXmlHint:
       'Builds automatically append -s to mvn commands. Scan common paths (~/.m2/settings.xml, MAVEN_HOME/conf/settings.xml) or enter a custom path.',
     envMavenSettingsScan: 'Scan common paths',
+    envNodejsRegistrySection: 'npm / pnpm registry',
+    envNodejsRegistryDesc:
+      'Injects NPM_CONFIG_USERCONFIG during npm/pnpm builds for private registry auth (fixes pnpm install 401). Link this Node.js env on the project.',
+    envNodejsNpmrcPath: '.npmrc file',
+    envNodejsNpmrcPathPlaceholder: 'Select or enter absolute path to .npmrc on the build server',
+    envNodejsNpmrcPathHint:
+      'Use an existing server .npmrc with credentials, or set registry + token below to generate a temp userconfig at build time.',
+    envNodejsNpmrcScan: 'Scan common paths',
+    envNodejsRegistry: 'registry',
+    envNodejsRegistryPlaceholder: 'e.g. http://219.135.170.44:19081/repository/sce-dev-group/',
+    envNodejsAuthTokenPlaceholder: 'Nexus npm token (recommended)',
+    envNodejsRegistryAuthHint:
+      'When registry is set, also provide auth_token, or auth_username + auth_password, or a .npmrc path above.',
+    envNodejsPnpmAllowBuilds: 'Allow pnpm dependency build scripts',
+    envNodejsPnpmAllowBuildsHint:
+      'Injects dangerously-allow-all-builds=true to avoid ERR_PNPM_IGNORED_BUILDS on pnpm 10+ (esbuild, vue-demi, etc.). Recommended for internal CI.',
     yes: 'Yes',
     enabled: 'Enabled',
     disabled: 'Disabled',

@@ -79,13 +79,13 @@ func (r *Runner) ensureMavenPrerequisites(
 
 	unsatisfied := wsIndex.ValidateTargetDependencies(project.RecID)
 	if len(unsatisfied) > 0 {
-		log.step("Dependency validation failed (%d unsatisfied):", len(unsatisfied))
+		log.step("Dependency validation warning (%d unsatisfied, build continues):", len(unsatisfied))
 		for _, u := range unsatisfied {
 			log.step("  - %s", u.Reason)
 		}
-		return fmt.Errorf("maven dependencies not satisfied: %s", unsatisfied[0].Reason)
+	} else {
+		log.step("All direct dependencies satisfied in local repository.")
 	}
-	log.step("All direct dependencies satisfied in local repository.")
 
 	_ = targetWorkDir
 	return nil

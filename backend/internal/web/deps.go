@@ -15,19 +15,21 @@ func NewDeps(db *sql.DB, jwtSecret, frontendPath, dataDir string) Deps {
 	projectRepo := repository.NewProject(db)
 	buildRepo := repository.NewBuild(db)
 	releaseRepo := repository.NewWorkspaceRelease(db)
+	pomVersionRepo := repository.NewWorkspacePomVersion(db)
 	workspaceRepo := repository.NewWorkspace(db)
 	tokens := auth.NewTokenIssuer(jwtSecret)
 	return Deps{
-		Auth:                 auth.NewService(userRepo, tokens),
-		Tokens:               tokens,
-		UserRepo:             userRepo,
-		OpLogRepo:            opLogRepo,
-		EnvRepo:              envRepo,
-		ProjectRepo:          projectRepo,
-		BuildRepo:            buildRepo,
-		WorkspaceReleaseRepo: releaseRepo,
-		WorkspaceRepo:        workspaceRepo,
-		FrontendPath:         frontendPath,
-		DataDir:              dataDir,
+		Auth:                    auth.NewService(userRepo, tokens),
+		Tokens:                  tokens,
+		UserRepo:                userRepo,
+		OpLogRepo:               opLogRepo,
+		EnvRepo:                 envRepo,
+		ProjectRepo:             projectRepo,
+		BuildRepo:               buildRepo,
+		WorkspaceReleaseRepo:    releaseRepo,
+		WorkspacePomVersionRepo: pomVersionRepo,
+		WorkspaceRepo:           workspaceRepo,
+		FrontendPath:            frontendPath,
+		DataDir:                 dataDir,
 	}
 }

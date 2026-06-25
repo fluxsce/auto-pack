@@ -10,6 +10,7 @@ import ProjectBulkAutoReleaseDialog from './components/ProjectBulkAutoReleaseDia
 import ProjectBulkBuildStepsDialog from './components/ProjectBulkBuildStepsDialog.vue'
 import ProjectBulkGitBranchDialog from './components/ProjectBulkGitBranchDialog.vue'
 import ProjectBulkVersionDialog from './components/ProjectBulkVersionDialog.vue'
+import ProjectBulkPomVersionDialog from './components/ProjectBulkPomVersionDialog.vue'
 import ProjectBulkPostBuildEmailDialog from './components/ProjectBulkPostBuildEmailDialog.vue'
 import ProjectMavenDepsDialog from './components/ProjectMavenDepsDialog.vue'
 import type { ProjectBuildStatusFilter } from './useProjects'
@@ -28,6 +29,7 @@ const message = useMessage()
 const workspacePickerOpen = ref(false)
 const bulkGitBranchOpen = ref(false)
 const bulkVersionOpen = ref(false)
+const bulkPomVersionOpen = ref(false)
 const bulkPostBuildEmailOpen = ref(false)
 const bulkBuildStepsOpen = ref(false)
 const bulkAutoReleaseOpen = ref(false)
@@ -168,6 +170,14 @@ function onBulkCommand(command: string): void {
       return
     }
     bulkVersionOpen.value = true
+    return
+  }
+  if (command === 'pom-version') {
+    if (!activeWorkspaceRecId.value) {
+      message.warning(t('workspaceSelectRequired'))
+      return
+    }
+    bulkPomVersionOpen.value = true
     return
   }
   if (command === 'post-build-email') {
@@ -393,6 +403,9 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
               <el-dropdown-item command="project-version">
                 {{ $t('projectBulkUpdateVersion') }}
               </el-dropdown-item>
+              <el-dropdown-item command="pom-version">
+                {{ $t('projectBulkPomVersion') }}
+              </el-dropdown-item>
               <el-dropdown-item command="build-steps">
                 {{ $t('projectBulkBuildSteps') }}
               </el-dropdown-item>
@@ -512,6 +525,13 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
     />
     <ProjectBulkVersionDialog
       v-model:open="bulkVersionOpen"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :project-count="workspaceProjectCount"
+      @success="loadList()"
+    />
+    <ProjectBulkPomVersionDialog
+      v-model:open="bulkPomVersionOpen"
       :workspace-rec-id="activeWorkspaceRecId"
       :workspace-name="activeWorkspace?.workspace_name ?? ''"
       :project-count="workspaceProjectCount"

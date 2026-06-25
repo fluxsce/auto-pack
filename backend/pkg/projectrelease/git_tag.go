@@ -41,6 +41,17 @@ func RepoBranchForVersionTag(tag string) string {
 	return git.FormatTagRef(tag)
 }
 
+// RepoBranchAfterRelease picks the repo_branch to sync after a successful batch release:
+// target branch when enabled, otherwise the release branch (for deploy without tag refs).
+func RepoBranchAfterRelease(releaseBranch, targetBranch string, useTarget bool) string {
+	if useTarget {
+		if b := strings.TrimSpace(targetBranch); b != "" {
+			return b
+		}
+	}
+	return strings.TrimSpace(releaseBranch)
+}
+
 // ValidateVersionTag ensures the version tag satisfies git ref naming rules.
 func ValidateVersionTag(tag string) error {
 	tag = normalizeGitTagName(tag)

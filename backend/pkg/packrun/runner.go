@@ -248,6 +248,29 @@ func (r *Runner) mavenLocalRepository(project *repository.PackProject) string {
 	return mavendeps.ResolveLocalRepository(r.mavenSettingsPath(project), r.mavenHome(project))
 }
 
+func (r *Runner) nodejsConfig(project *repository.PackProject) envtypes.NodeJSConfig {
+	if project == nil || strings.TrimSpace(project.NodejsEnvRecID) == "" {
+		return envtypes.NodeJSConfig{}
+	}
+	item, err := r.env.FindByRecID(project.NodejsEnvRecID)
+	if err != nil {
+		return envtypes.NodeJSConfig{}
+	}
+	var cfg envtypes.NodeJSConfig
+	if err := json.Unmarshal([]byte(item.ConfigJSON), &cfg); err != nil {
+		return envtypes.NodeJSConfig{}
+	}
+	return cfg
+}
+
+func (r *Runner) prepareNodeNpmUserConfig(project *repository.PackProject) (path string, cleanup func(), summary string, err error) {
+	cfg := r.nodejsConfig(project)
+	if !nodejs.HasNpmUserConfig(cfg) {
+		return "", func() {}, "", nil
+	}
+	return nodejs.PrepareUserConfig(cfg, r.dataDir)
+}
+
 const javaUTF8Flags = "-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8"
 
 func appendUTF8ConsoleEnv(env []string) []string {

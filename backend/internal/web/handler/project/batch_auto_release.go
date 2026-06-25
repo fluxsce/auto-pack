@@ -292,7 +292,7 @@ func (h *Handler) runBatchAutoRelease(
 
 	branchDetail := ""
 	if released > 0 {
-		repoBranch := projectrelease.RepoBranchForVersionTag(body.TagBranch)
+		repoBranch := projectrelease.RepoBranchAfterRelease(body.ReleaseBranch, body.TargetBranch, createTarget)
 		if n, err := h.projects.UpdateRepoBranchByWorkspace(ws.RecID, repoBranch); err != nil {
 			branchDetail = " repo_branch_sync_error=" + err.Error()
 		} else {

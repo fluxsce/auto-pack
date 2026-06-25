@@ -8,24 +8,57 @@ import (
 )
 
 const (
-	relVersionFile     = "src/main/resources/Version.txt"
-	relUpdateNotesFile = "src/main/resources/updatenotes/UpdateNotes.txt"
+	relMavenVersionFile     = "src/main/resources/Version.txt"
+	relMavenUpdateNotesFile = "src/main/resources/updatenotes/UpdateNotes.txt"
+	relNodeVersionFile      = "src/resources/updateNotes/Version.txt"
+	relNodeUpdateNotesFile  = "src/resources/updateNotes/updateNotes.txt"
 )
 
-// ResolveResourcePaths returns canonical Version.txt and UpdateNotes.txt paths under projectDir.
-func ResolveResourcePaths(projectDir string) (versionPath, updateNotesPath string, ok bool) {
+// IsMavenReleaseProject reports whether project_type uses Maven-style resource paths.
+func IsMavenReleaseProject(projectType string) bool {
+	return strings.ToLower(strings.TrimSpace(projectType)) == "maven"
+}
+
+// IsNodeReleaseProject reports whether project_type uses Node/Vue-style resource paths.
+func IsNodeReleaseProject(projectType string) bool {
+	switch strings.ToLower(strings.TrimSpace(projectType)) {
+	case "npm", "vue":
+		return true
+	default:
+		return false
+	}
+}
+
+// SupportsAutoReleaseVersionSync reports whether auto-release should sync Version/UpdateNotes.
+func SupportsAutoReleaseVersionSync(projectType string) bool {
+	return IsMavenReleaseProject(projectType) || IsNodeReleaseProject(projectType)
+}
+
+// ResolveResourcePaths returns canonical Version.txt and UpdateNotes.txt paths for projectType.
+func ResolveResourcePaths(projectDir, projectType string) (versionPath, updateNotesPath string, ok bool) {
 	projectDir = strings.TrimSpace(projectDir)
 	if projectDir == "" {
 		return "", "", false
 	}
-	versionPath = filepath.Join(projectDir, filepath.FromSlash(relVersionFile))
-	updateNotesPath = filepath.Join(projectDir, filepath.FromSlash(relUpdateNotesFile))
+	if !SupportsAutoReleaseVersionSync(projectType) {
+		return "", "", false
+	}
+	var relVersion, relNotes string
+	if IsNodeReleaseProject(projectType) {
+		relVersion = relNodeVersionFile
+		relNotes = relNodeUpdateNotesFile
+	} else {
+		relVersion = relMavenVersionFile
+		relNotes = relMavenUpdateNotesFile
+	}
+	versionPath = filepath.Join(projectDir, filepath.FromSlash(relVersion))
+	updateNotesPath = filepath.Join(projectDir, filepath.FromSlash(relNotes))
 	return versionPath, updateNotesPath, true
 }
 
 // ResourcePaths locates Version.txt and UpdateNotes.txt when both already exist.
-func ResourcePaths(projectDir string) (versionPath, updateNotesPath string, ok bool) {
-	versionPath, updateNotesPath, ok = ResolveResourcePaths(projectDir)
+func ResourcePaths(projectDir, projectType string) (versionPath, updateNotesPath string, ok bool) {
+	versionPath, updateNotesPath, ok = ResolveResourcePaths(projectDir, projectType)
 	if !ok {
 		return "", "", false
 	}

@@ -29,15 +29,17 @@ type projectListItem struct {
 
 // Handler manages /api/projects CRUD and build/workspace operations.
 type Handler struct {
-	projects     *repository.ProjectRepository
-	workspaces   *repository.WorkspaceRepository
-	env          *repository.EnvRepository
-	builds       *repository.BuildRepository
-	releases     *repository.WorkspaceReleaseRepository
-	runner       *packrun.Runner
-	releaseCoord *projectrelease.Coordinator
-	audit        *audit.Recorder
-	dataDir      string
+	projects        *repository.ProjectRepository
+	workspaces      *repository.WorkspaceRepository
+	env             *repository.EnvRepository
+	builds          *repository.BuildRepository
+	releases        *repository.WorkspaceReleaseRepository
+	pomVersions     *repository.WorkspacePomVersionRepository
+	runner          *packrun.Runner
+	releaseCoord    *projectrelease.Coordinator
+	pomVersionCoord *projectrelease.PomVersionCoordinator
+	audit           *audit.Recorder
+	dataDir         string
 }
 
 func NewHandler(
@@ -46,19 +48,22 @@ func NewHandler(
 	env *repository.EnvRepository,
 	builds *repository.BuildRepository,
 	releases *repository.WorkspaceReleaseRepository,
+	pomVersions *repository.WorkspacePomVersionRepository,
 	dataDir string,
 	rec *audit.Recorder,
 ) *Handler {
 	h := &Handler{
-		projects:     projects,
-		workspaces:   workspaces,
-		env:          env,
-		builds:       builds,
-		releases:     releases,
-		runner:       packrun.NewRunner(projects, workspaces, env, builds, dataDir),
-		releaseCoord: projectrelease.NewCoordinator(),
-		audit:        rec,
-		dataDir:      dataDir,
+		projects:        projects,
+		workspaces:      workspaces,
+		env:             env,
+		builds:          builds,
+		releases:        releases,
+		pomVersions:     pomVersions,
+		runner:          packrun.NewRunner(projects, workspaces, env, builds, dataDir),
+		releaseCoord:    projectrelease.NewCoordinator(),
+		pomVersionCoord: projectrelease.NewPomVersionCoordinator(),
+		audit:           rec,
+		dataDir:         dataDir,
 	}
 	if n, err := builds.RecoverInterrupted(""); err != nil {
 		logger.Warn("recover interrupted builds failed", "err", err.Error())
@@ -69,6 +74,11 @@ func NewHandler(
 		logger.Warn("recover interrupted releases failed", "err", err.Error())
 	} else if n > 0 {
 		logger.Info("recovered interrupted releases", "count", n)
+	}
+	if n, err := pomVersions.RecoverInterrupted(""); err != nil {
+		logger.Warn("recover interrupted pom version batches failed", "err", err.Error())
+	} else if n > 0 {
+		logger.Info("recovered interrupted pom version batches", "count", n)
 	}
 	if err := h.runner.StartScheduler(); err != nil {
 		logger.Warn("build scheduler start failed", "err", err.Error())
@@ -99,6 +109,10 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+apiBase+"/project/types", requireAuth(http.HandlerFunc(h.types)))
 	mux.Handle("POST "+base+"/batch-repo-branch", requireAuth(http.HandlerFunc(h.batchRepoBranch)))
 	mux.Handle("POST "+base+"/batch-project-version", requireAuth(http.HandlerFunc(h.batchProjectVersion)))
+	mux.Handle("POST "+base+"/batch-pom-version", requireAuth(http.HandlerFunc(h.batchPomVersion)))
+	mux.Handle("GET "+base+"/batch-pom-version/status", requireAuth(http.HandlerFunc(h.batchPomVersionStatus)))
+	mux.Handle("GET "+base+"/batch-pom-version/history", requireAuth(http.HandlerFunc(h.listBatchPomVersionHistory)))
+	mux.Handle("GET "+base+"/batch-pom-version/history/{batchID}/log", requireAuth(http.HandlerFunc(h.getBatchPomVersionLog)))
 	mux.Handle("POST "+base+"/batch-post-build-email", requireAuth(http.HandlerFunc(h.batchPostBuildEmail)))
 	mux.Handle("POST "+base+"/batch-build-steps", requireAuth(http.HandlerFunc(h.batchBuildSteps)))
 	mux.Handle("POST "+base+"/cron-preview", requireAuth(http.HandlerFunc(h.previewCron)))

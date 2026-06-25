@@ -35,7 +35,17 @@ export const DEFAULT_ENV_CONFIG: Record<EnvType, Record<string, unknown>> = {
     email: '',
   },
   maven: { maven_home: '', mvn_path: '', settings_xml: '', java_home: '' },
-  nodejs: { node_path: '', npm_path: '', npx_path: '' },
+  nodejs: {
+    node_path: '',
+    npm_path: '',
+    npx_path: '',
+    npmrc_path: '',
+    registry: '',
+    auth_token: '',
+    auth_username: '',
+    auth_password: '',
+    pnpm_allow_all_builds: true,
+  },
   jdk: { java_home: '', java_path: '' },
   smtp: {
     host: '',

@@ -121,6 +121,114 @@ export function batchUpdateProjectVersion(
   return http.post('/projects/batch-project-version', data)
 }
 
+export interface BatchPomVersionPayload {
+  workspace_rec_id: string
+  version_tag: string
+  commit_message?: string
+  allow_repeat?: boolean
+}
+
+export interface BatchPomVersionResultItem {
+  project_name: string
+  status: string
+  message?: string
+  pom_files?: number
+  steps?: string[]
+}
+
+export interface BatchPomVersionStartResponse {
+  status: 'running'
+  batch_rec_id: string
+  workspace_rec_id: string
+  workspace_name?: string
+  tag?: string
+}
+
+export type WorkspacePomVersionStatus = 'running' | 'success' | 'partial' | 'failed'
+
+export interface WorkspacePomVersionRecord {
+  rec_id: string
+  workspace_rec_id: string
+  batch_num: number
+  status: WorkspacePomVersionStatus
+  version_tag: string
+  commit_message?: string
+  updated: number
+  skipped: number
+  failed: number
+  message?: string
+  log_path?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
+}
+
+export interface WorkspacePomVersionLogResponse {
+  content: string
+  offset: number
+  size: number
+  total: number
+  complete: boolean
+  status: WorkspacePomVersionStatus
+  batch: WorkspacePomVersionRecord
+}
+
+export type BatchPomVersionJobStatus = 'idle' | 'running' | 'completed'
+
+export interface BatchPomVersionStatusResponse {
+  status: BatchPomVersionJobStatus
+  batch_rec_id?: string
+  workspace_rec_id?: string
+  workspace_name?: string
+  tag?: string
+  commit_message?: string
+  started_at?: string
+  finished_at?: string
+  updated?: number
+  skipped?: number
+  failed?: number
+  results?: BatchPomVersionResultItem[]
+  current_project?: string
+  done_count?: number
+  total_count?: number
+  foreign?: boolean
+  active_workspace_name?: string
+}
+
+/** Starts async pom version batch; poll status until completed. */
+export function batchUpdatePomVersion(
+  data: BatchPomVersionPayload,
+): Promise<BatchPomVersionStartResponse> {
+  return http.post('/projects/batch-pom-version', data)
+}
+
+export function batchPomVersionStatus(
+  workspaceRecId: string,
+): Promise<BatchPomVersionStatusResponse> {
+  return http.get('/projects/batch-pom-version/status', {
+    params: { workspace_rec_id: workspaceRecId },
+  })
+}
+
+export function fetchWorkspacePomVersionHistory(
+  workspaceRecId: string,
+  limit = 30,
+): Promise<{ items: WorkspacePomVersionRecord[] }> {
+  return http.get('/projects/batch-pom-version/history', {
+    params: { workspace_rec_id: workspaceRecId, limit },
+  })
+}
+
+export function fetchWorkspacePomVersionLog(
+  workspaceRecId: string,
+  batchRecId: string,
+  offset = 0,
+): Promise<WorkspacePomVersionLogResponse> {
+  return http.get(`/projects/batch-pom-version/history/${batchRecId}/log`, {
+    params: { workspace_rec_id: workspaceRecId, offset },
+  })
+}
+
 export interface BatchPostBuildEmailPayload {
   workspace_rec_id: string
   enabled: boolean

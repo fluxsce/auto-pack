@@ -14,6 +14,7 @@ import (
 	"auto-pack/backend/pkg/git"
 	"auto-pack/backend/pkg/logger"
 	"auto-pack/backend/pkg/maven"
+	"auto-pack/backend/pkg/nodejs"
 	"auto-pack/backend/pkg/projectcfg"
 	"auto-pack/backend/pkg/projectfs"
 	"auto-pack/backend/pkg/redact"
@@ -116,12 +117,44 @@ func (r *Runner) executeBuild(buildRecID string, mode TriggerMode) {
 			_ = r.builds.UpdateStatus(buildRecID, status, message, nil, &finished)
 			return
 		}
+		npmrcPath, cleanupNpmrc, npmrcSummary, npmrcErr := r.prepareNodeNpmUserConfig(project)
+		if npmrcErr != nil {
+			status = repository.BuildStatusFailed
+			message = npmrcErr.Error()
+			log.finished(status, message)
+			_ = r.builds.UpdateStatus(buildRecID, status, message, nil, &finished)
+			return
+		}
+		if cleanupNpmrc != nil {
+			defer cleanupNpmrc()
+		}
+		if npmrcPath != "" {
+			shellEnv = append(shellEnv, "NPM_CONFIG_USERCONFIG="+npmrcPath)
+			if npmrcSummary != "" {
+				log.step("npm/pnpm userconfig: %s", npmrcSummary)
+			} else {
+				log.step("npm/pnpm userconfig: %s", npmrcPath)
+			}
+		}
+		nodeCfg := r.nodejsConfig(project)
 		if err := os.MkdirAll(workDir, 0o755); err != nil {
 			status = repository.BuildStatusFailed
 			message = fmt.Sprintf("mkdir work dir: %v", err)
 			log.finished(status, message)
 			_ = r.builds.UpdateStatus(buildRecID, status, message, nil, &finished)
 			return
+		}
+		if nodejs.PnpmAllowAllBuildsEnabled(nodeCfg) {
+			shellEnv = nodejs.AppendPnpmAllowAllBuildsEnv(shellEnv)
+			buildCmd = nodejs.InjectPnpmAllowAllBuilds(buildCmd)
+			if err := nodejs.EnsureWorkdirPnpmAllowBuilds(workDir); err != nil {
+				status = repository.BuildStatusFailed
+				message = err.Error()
+				log.finished(status, message)
+				_ = r.builds.UpdateStatus(buildRecID, status, message, nil, &finished)
+				return
+			}
+			log.step("pnpm: allow all builds (env + CLI + project .npmrc)")
 		}
 
 		if settingsPath := r.mavenSettingsPath(project); settingsPath != "" {
@@ -210,6 +243,15 @@ func (r *Runner) logToolchain(project *repository.PackProject, log *buildLogger)
 			}
 			if p := strings.TrimSpace(cfg.NodePath); p != "" {
 				log.step("Node.js: %s", p)
+			}
+			if p := nodejs.ResolveNpmrcPath(cfg.NpmrcPath); p != "" {
+				log.step("npmrc: %s", p)
+			}
+			if reg := strings.TrimSpace(cfg.Registry); reg != "" {
+				log.step("npm registry: %s", reg)
+			}
+			if nodejs.PnpmAllowAllBuildsEnabled(cfg) {
+				log.step("pnpm: allow all dependency build scripts")
 			}
 		}
 	}

@@ -42,3 +42,7 @@ export function fetchMavenSettingsPaths(mavenHome?: string): Promise<{ items: st
     params: mavenHome?.trim() ? { maven_home: mavenHome.trim() } : undefined,
   })
 }
+
+export function fetchNpmrcPaths(): Promise<{ items: string[] }> {
+  return http.get('/env/npmrc-paths')
+}

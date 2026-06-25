@@ -68,6 +68,19 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 	log := newPublishLogger(&steps)
 	log.step("开始发版（工程 %s）", name)
 
+	projectType := strings.TrimSpace(project.ProjectType)
+	if !SupportsAutoReleaseVersionSync(projectType) {
+		res.Status = "skipped"
+		res.Message = fmt.Sprintf("工程类型 %s 不支持自动发版版本文件同步", projectType)
+		res.Steps = steps
+		return res
+	}
+	if IsNodeReleaseProject(projectType) {
+		log.step("Node/Vue 工程：使用 src/resources/updateNotes/updateNotes.txt → Version.txt")
+	} else {
+		log.step("Maven 工程：使用 src/main/resources/updatenotes/UpdateNotes.txt → Version.txt")
+	}
+
 	// Sync from origin before reading or creating resource files — avoid polluted local branches.
 	if r.Git != nil {
 		if err := r.Git.SyncReleaseWorktree(ctx, project, workDir, branch, tag, log); err != nil {
@@ -77,7 +90,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		}
 	}
 
-	versionPath, updateNotesPath, ok := ResolveResourcePaths(workDir)
+	versionPath, updateNotesPath, ok := ResolveResourcePaths(workDir, projectType)
 	if !ok {
 		res.Message = "invalid project work directory"
 		res.Steps = steps
@@ -106,7 +119,7 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 	log.step("已生成 Version.txt（版本 %s，发布日期 %s）", tag, releaseDate)
 
 	files := map[string][]byte{versionPath: []byte(content)}
-	if req.UpdatePomVersion {
+	if req.UpdatePomVersion && IsMavenReleaseProject(projectType) {
 		pomFiles, pomSteps, err := CollectPomVersionUpdates(workDir, tag)
 		if err != nil {
 			res.Message = redact.Redact(err.Error())
@@ -119,6 +132,8 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		for _, msg := range pomSteps {
 			log.step("%s", msg)
 		}
+	} else if req.UpdatePomVersion {
+		log.step("跳过 pom.xml 版本更新（非 Maven 工程）")
 	}
 
 	if r.Git == nil {

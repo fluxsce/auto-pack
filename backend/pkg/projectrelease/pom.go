@@ -26,6 +26,20 @@ var (
 	rePropertiesOpen = regexp.MustCompile(`(?s)<properties>\s*`)
 )
 
+// projectSectionAnchors bound the project header; version tags below are never project version.
+var projectSectionAnchors = []string{
+	"<dependencies",
+	"<dependencyManagement",
+	"<modules",
+	"<build",
+	"<profiles",
+	"<properties",
+	"<distributionManagement",
+	"<reporting",
+	"<issueManagement",
+	"<ciManagement",
+}
+
 // PomPath returns pom.xml path under the project work tree.
 func PomPath(projectDir string) string {
 	return filepath.Join(projectDir, pomFileName)
@@ -214,22 +228,44 @@ func parentHasArtifactID(parentBlock, artifactID string) bool {
 }
 
 func replaceRootProjectVersion(content, tag string) (string, error) {
-	matches := reVersionTag.FindAllStringSubmatchIndex(content, -1)
+	searchStart, searchEnd := projectVersionSearchBounds(content)
+	searchRegion := content[searchStart:searchEnd]
+
+	matches := reVersionTag.FindAllStringSubmatchIndex(searchRegion, -1)
 	for _, loc := range matches {
 		if len(loc) < 4 {
 			continue
 		}
-		ver := strings.TrimSpace(content[loc[2]:loc[3]])
+		ver := strings.TrimSpace(searchRegion[loc[2]:loc[3]])
 		if ver == "4.0.0" {
 			continue
 		}
-		if isInsideParent(content, loc[0]) {
+		absStart := searchStart + loc[0]
+		absEnd := searchStart + loc[1]
+		if isInsideParent(content, absStart) {
 			continue
 		}
-		updated := content[:loc[0]] + "<version>" + tag + "</version>" + content[loc[1]:]
-		return updated, nil
+		return content[:absStart] + "<version>" + tag + "</version>" + content[absEnd:], nil
 	}
 	return "", fmt.Errorf("pom.xml: project version not found")
+}
+
+// projectVersionSearchBounds returns the slice where Maven project <version> may appear.
+func projectVersionSearchBounds(content string) (start, end int) {
+	start = 0
+	if idx := strings.Index(strings.ToLower(content), "<modelversion>"); idx >= 0 {
+		if close := strings.Index(strings.ToLower(content[idx:]), "</modelversion>"); close >= 0 {
+			start = idx + close + len("</modelVersion>")
+		}
+	}
+	end = len(content)
+	lower := strings.ToLower(content)
+	for _, anchor := range projectSectionAnchors {
+		if idx := strings.Index(lower, anchor); idx >= start && idx < end {
+			end = idx
+		}
+	}
+	return start, end
 }
 
 func isInsideParent(content string, pos int) bool {

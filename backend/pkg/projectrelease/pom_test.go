@@ -135,6 +135,118 @@ func TestUpdatePomVersions_noParentVersion(t *testing.T) {
 	}
 }
 
+func TestUpdatePomVersions_preservesThirdPartyDependencyVersion(t *testing.T) {
+	const pom = `<project>
+<parent>
+<groupId>com.flux.wmsv6</groupId>
+<artifactId>flux-collaboration-storage-repeater-parent</artifactId>
+<version>V9.0.0-P06-02-SNAPSHOT</version>
+</parent>
+<artifactId>moonbox-tools</artifactId>
+<dependencies>
+<dependency>
+<groupId>com.alibaba.jvm.sandbox</groupId>
+<artifactId>sandbox-api</artifactId>
+<version>1.4.0</version>
+<scope>provided</scope>
+</dependency>
+</dependencies>
+</project>`
+	tag := "V9.0.0-P06-03"
+	pomVer := PomVersionForTag(tag)
+	out, skip, err := updatePomVersions(pom, tag, "flux-collaboration-storage-repeater-parent")
+	if err != nil || skip != "" {
+		t.Fatalf("err=%v skip=%q", err, skip)
+	}
+	if !strings.Contains(out, "<version>"+pomVer+"</version>") {
+		t.Fatalf("parent version should update: %s", out)
+	}
+	if !strings.Contains(out, "<version>1.4.0</version>") {
+		t.Fatalf("third-party dependency version must stay 1.4.0: %s", out)
+	}
+	if strings.Contains(out, "sandbox-api</artifactId>\n<version>"+pomVer) {
+		t.Fatalf("must not rewrite dependency version: %s", out)
+	}
+}
+
+func TestUpdatePomVersions_preservesDependencyManagementVersion(t *testing.T) {
+	const pom = `<project>
+<parent>
+<groupId>com.flux.scev6</groupId>
+<artifactId>datahub-utils-parentPom</artifactId>
+<version>V9.0.0-P06-02-SNAPSHOT</version>
+</parent>
+<groupId>com.flux.wmsv6</groupId>
+<artifactId>flux-collaboration-storage-repeater-parent</artifactId>
+<version>V9.0.0-P06-02-SNAPSHOT</version>
+<packaging>pom</packaging>
+<dependencyManagement>
+<dependencies>
+<dependency>
+<groupId>com.alibaba.jvm.sandbox</groupId>
+<artifactId>sandbox-api</artifactId>
+<version>1.4.0</version>
+<scope>provided</scope>
+</dependency>
+</dependencies>
+</dependencyManagement>
+</project>`
+	tag := "V9.0.0-P06-03"
+	pomVer := PomVersionForTag(tag)
+	out, skip, err := updatePomVersions(pom, tag, "flux-collaboration-storage-repeater-parent")
+	if err != nil || skip != "" {
+		t.Fatalf("err=%v skip=%q", err, skip)
+	}
+	if strings.Count(out, "<version>"+pomVer+"</version>") < 2 {
+		t.Fatalf("project and datahub parent version should update: %s", out)
+	}
+	if !strings.Contains(out, "<version>1.4.0</version>") {
+		t.Fatalf("dependencyManagement version must stay 1.4.0: %s", out)
+	}
+}
+
+func TestUpdatePomVersions_preservesPluginVersionWithoutProjectVersion(t *testing.T) {
+	const pom = `<project>
+<parent>
+<groupId>com.flux.wmsv6</groupId>
+<artifactId>flux-collaboration-storage-repeater-parent</artifactId>
+<version>V9.0.0-P06-02-SNAPSHOT</version>
+</parent>
+<artifactId>moonbox-tools</artifactId>
+<build>
+<plugins>
+<plugin>
+<groupId>org.apache.maven.plugins</groupId>
+<artifactId>maven-compiler-plugin</artifactId>
+<version>3.8.1</version>
+</plugin>
+</plugins>
+</build>
+<dependencies>
+<dependency>
+<groupId>com.alibaba.jvm.sandbox</groupId>
+<artifactId>sandbox-api</artifactId>
+<version>1.4.0</version>
+</dependency>
+</dependencies>
+</project>`
+	tag := "V9.0.0-P06-03"
+	pomVer := PomVersionForTag(tag)
+	out, skip, err := updatePomVersions(pom, tag, "flux-collaboration-storage-repeater-parent")
+	if err != nil || skip != "" {
+		t.Fatalf("err=%v skip=%q", err, skip)
+	}
+	if !strings.Contains(out, "<version>"+pomVer+"</version>") {
+		t.Fatalf("parent version should update: %s", out)
+	}
+	if !strings.Contains(out, "<version>3.8.1</version>") {
+		t.Fatalf("plugin version must stay 3.8.1: %s", out)
+	}
+	if !strings.Contains(out, "<version>1.4.0</version>") {
+		t.Fatalf("dependency version must stay 1.4.0: %s", out)
+	}
+}
+
 func TestUpdatePomVersions_childModuleParentVersion(t *testing.T) {
 	const pom = `<project>
 <parent>
@@ -230,6 +342,37 @@ func TestDiscoverPomPaths_skipsTarget(t *testing.T) {
 	}
 	if len(paths) != 1 {
 		t.Fatalf("paths=%v", paths)
+	}
+}
+
+func TestCollectPomVersionUpdates_parentAfterModules(t *testing.T) {
+	dir := t.TempDir()
+	rootPOM := `<project>
+<groupId>com.flux.wmsv6</groupId>
+<artifactId>flux-collaboration-storage-repeater-parent</artifactId>
+<version>V10.0.0-P01-SNAPSHOT</version>
+<packaging>pom</packaging>
+<modules>
+<module>moonbox-tools</module>
+</modules>
+<parent>
+<groupId>com.flux.scev6</groupId>
+<artifactId>datahub-utils-parentPom</artifactId>
+<version>V10.0.0-P01-SNAPSHOT</version>
+</parent>
+</project>`
+	if err := os.WriteFile(filepath.Join(dir, "pom.xml"), []byte(rootPOM), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tag := "V10.0.0-P02"
+	pomVer := PomVersionForTag(tag)
+	files, _, err := CollectPomVersionUpdates(dir, tag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootOut := string(files[filepath.Join(dir, "pom.xml")])
+	if strings.Count(rootOut, "<version>"+pomVer+"</version>") < 2 {
+		t.Fatalf("project and datahub parent version should update: %s", rootOut)
 	}
 }
 
