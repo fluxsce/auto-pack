@@ -57,7 +57,7 @@ func (r *ProjectRepository) List(workspaceRecID, projectType string) ([]PackProj
 		args = append(args, workspaceRecID)
 	}
 	if projectType != "" {
-		q += ` AND project_type = ?`
+		q += ` AND LOWER(project_type) = ?`
 		args = append(args, projectType)
 	}
 	q += ` ORDER BY sort_num ASC, project_name ASC, project_version ASC`

@@ -24,6 +24,7 @@ type Request struct {
 	Pusher       string
 	TaskRef      string
 	Detail       string
+	Logf         func(format string, args ...any)
 }
 
 // Result is returned after a successful push.
@@ -41,6 +42,12 @@ var (
 	ErrTaskRefRequired  = errors.New("task_ref is required")
 	ErrNotFound         = projectfs.ErrNotFound
 )
+
+func (r Request) logf(format string, args ...any) {
+	if r.Logf != nil {
+		r.Logf(format, args...)
+	}
+}
 
 // Push uploads a workspace file or directory to FTP with backup and updateNote.txt.
 func Push(req Request) (Result, error) {
@@ -62,6 +69,7 @@ func Push(req Request) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	req.logf("Resolved local path: %s", abs)
 	info, err := os.Stat(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -82,6 +90,7 @@ func Push(req Request) (Result, error) {
 	var uploadName string
 	var cleanup func()
 	if info.IsDir() {
+		req.logf("Directory detected; packaging as zip before upload")
 		tmp, name, clean, err := zipDirToTemp(abs)
 		if err != nil {
 			return Result{}, err
@@ -89,10 +98,12 @@ func Push(req Request) (Result, error) {
 		uploadLocal = tmp
 		uploadName = name
 		cleanup = clean
+		req.logf("Created temp package: %s", uploadName)
 	} else {
 		uploadLocal = abs
 		uploadName = filepath.Base(abs)
 		cleanup = func() {}
+		req.logf("File detected; uploading directly: %s", uploadName)
 	}
 	defer cleanup()
 
@@ -108,21 +119,29 @@ func Push(req Request) (Result, error) {
 	backupFilePath := UpdateRemotePath(backupDir, uploadName)
 	infoRemote := UpdateRemotePath(layout.PushDir, InfoFileName)
 	manifestBackup := ""
+	req.logf("Resolved remote update path: %s", updatePath)
+	req.logf("Resolved remote backup path: %s", backupFilePath)
 
 	exists, err := ftpclient.RemoteExists(conn, req.FTPConfig, updatePath)
 	if err != nil {
 		return Result{}, fmt.Errorf("check remote: %w", err)
 	}
 	if exists {
+		req.logf("Remote target exists; backing up previous file")
 		if err := ftpclient.BackupRemoteFile(conn, req.FTPConfig, updatePath, backupFilePath); err != nil {
 			return Result{}, fmt.Errorf("backup remote file: %w", err)
 		}
 		manifestBackup = backupFilePath
+		req.logf("Remote backup completed")
+	} else {
+		req.logf("Remote target does not exist; backup skipped")
 	}
 
+	req.logf("Uploading package to remote")
 	if err := ftpclient.UploadLocalFile(conn, req.FTPConfig, updatePath, uploadLocal); err != nil {
 		return Result{}, fmt.Errorf("upload update package: %w", err)
 	}
+	req.logf("Package upload completed")
 
 	manifest := BuildManifestContent(ManifestInput{
 		Pusher:   req.Pusher,
@@ -137,15 +156,19 @@ func Push(req Request) (Result, error) {
 	}
 	noteUpload := manifest
 	if noteExists {
+		req.logf("Remote updateNote.txt exists; appending current record")
 		existing, err := ftpclient.DownloadRemote(conn, req.FTPConfig, infoRemote)
 		if err != nil {
 			return Result{}, fmt.Errorf("read remote note: %w", err)
 		}
 		noteUpload = MergeUpdateNoteContent(string(existing), manifest)
+	} else {
+		req.logf("Remote updateNote.txt not found; creating a new one")
 	}
 	if err := ftpclient.UploadBytes(conn, req.FTPConfig, strings.TrimPrefix(infoRemote, "/"), []byte(noteUpload)); err != nil {
 		return Result{}, fmt.Errorf("upload info file: %w", err)
 	}
+	req.logf("updateNote.txt upload completed")
 
 	return Result{
 		BackupPath:   manifestBackup,

@@ -15,7 +15,8 @@ func TestTagNameForFetch(t *testing.T) {
 		want   string
 	}{
 		{"refs/tags/V9.0.0-P01-01", "V9.0.0-P01-01"},
-		{"V9.0.0-P01-01", "V9.0.0-P01-01"},
+		{"tags/V9.0.0-P06", "V9.0.0-P06"},
+		{"V9.0.0-P01-01", ""},
 		{"release/V9.0.0-P01", ""},
 		{"main", ""},
 		{"", ""},

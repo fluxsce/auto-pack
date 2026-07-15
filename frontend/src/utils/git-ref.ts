@@ -7,10 +7,15 @@ export function formatTagRef(raw: string): string {
 
 export function normalizeGitTagName(raw: string): string {
   let s = raw.trim()
-  for (const prefix of ['refs/tags/', 'tags/', 'tag/']) {
-    if (s.startsWith(prefix)) {
-      s = s.slice(prefix.length).trim()
+  for (let i = 0; i < 8; i++) {
+    const before = s
+    for (const prefix of ['refs/tags/', 'tags/', 'tag/']) {
+      if (s.startsWith(prefix)) {
+        s = s.slice(prefix.length).trim()
+      }
     }
+    if (s.startsWith('/')) s = s.slice(1).trim()
+    if (s === before) break
   }
   return s.trim()
 }

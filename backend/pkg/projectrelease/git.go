@@ -210,21 +210,42 @@ func pushVersionTagToOrigin(ctx context.Context, dir string, env []string, versi
 
 // pushBranchFromHEAD creates or updates targetBranch on origin from current HEAD.
 func pushReleaseBranchToOrigin(ctx context.Context, dir string, env []string, releaseBranch string, allowRepeat bool, log *publishLogger) error {
-	releaseBranch = strings.TrimSpace(releaseBranch)
-	if releaseBranch == "" {
-		return fmt.Errorf("release branch is empty")
+	return pushBranchWithRepeatFallback(ctx, dir, env, releaseBranch, allowRepeat, log)
+}
+
+func pushBranchWithRepeatFallback(ctx context.Context, dir string, env []string, branch string, allowRepeat bool, log *publishLogger) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("branch is empty")
 	}
-	log.step("git push origin %s", releaseBranch)
-	if _, err := runGit(ctx, dir, env, "push", "-u", "origin", releaseBranch); err == nil {
+	log.step("git push origin %s", branch)
+	if _, err := runGit(ctx, dir, env, "push", "-u", "origin", branch); err == nil {
 		return nil
 	} else if !allowRepeat {
-		return fmt.Errorf("git push %s: %w", releaseBranch, err)
+		return fmt.Errorf("git push %s: %w", branch, err)
 	}
-	log.step("git push --force-with-lease origin %s（重复发版）", releaseBranch)
-	if _, err2 := runGit(ctx, dir, env, "push", "-u", "--force-with-lease", "origin", releaseBranch); err2 != nil {
-		return fmt.Errorf("git push %s: %w", releaseBranch, err2)
+	log.step("git push --force-with-lease origin %s（重复发版）", branch)
+	_, err2 := runGit(ctx, dir, env, "push", "-u", "--force-with-lease", "origin", branch)
+	if err2 == nil {
+		return nil
 	}
-	return nil
+	if isUnknownGitPushOption(err2, "force-with-lease") {
+		log.step("git push --force origin %s（旧版 Git，无 force-with-lease）", branch)
+		if _, err3 := runGit(ctx, dir, env, "push", "-u", "--force", "origin", branch); err3 != nil {
+			return fmt.Errorf("git push %s: %w", branch, err3)
+		}
+		return nil
+	}
+	return fmt.Errorf("git push %s: %w", branch, err2)
+}
+
+func isUnknownGitPushOption(err error, option string) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	opt := strings.ToLower(strings.TrimSpace(option))
+	return strings.Contains(msg, "unknown option") && strings.Contains(msg, opt)
 }
 
 func pushBranchFromHEAD(ctx context.Context, dir string, env []string, targetBranch string, log *publishLogger) error {
@@ -232,15 +253,15 @@ func pushBranchFromHEAD(ctx context.Context, dir string, env []string, targetBra
 	if targetBranch == "" {
 		return fmt.Errorf("target branch is empty")
 	}
-	log.step("git branch -f %s HEAD", targetBranch)
-	if _, err := runGit(ctx, dir, env, "branch", "-f", targetBranch, "HEAD"); err != nil {
-		return err
-	}
-	log.step("git push origin %s", targetBranch)
-	if _, err := runGit(ctx, dir, env, "push", "-u", "origin", targetBranch); err != nil {
-		if _, err2 := runGit(ctx, dir, env, "push", "-u", "--force-with-lease", "origin", targetBranch); err2 != nil {
+	// branch -f cannot move the branch that is currently checked out; skip when already on target.
+	if cur := currentGitBranch(ctx, dir, env); !strings.EqualFold(cur, targetBranch) {
+		log.step("git branch -f %s HEAD", targetBranch)
+		if _, err := runGit(ctx, dir, env, "branch", "-f", targetBranch, "HEAD"); err != nil {
 			return err
 		}
+	}
+	if err := pushBranchWithRepeatFallback(ctx, dir, env, targetBranch, true, log); err != nil {
+		return err
 	}
 	log.step("已推送到目标分支 %s", targetBranch)
 	return nil
@@ -273,6 +294,18 @@ func gitRefExists(ctx context.Context, dir string, env []string, ref string) boo
 	}
 	res, err := runGitAllow(ctx, dir, env, "rev-parse", "--verify", ref)
 	return err == nil && res.ExitCode == 0
+}
+
+func currentGitBranch(ctx context.Context, dir string, env []string) string {
+	res, err := runGitAllow(ctx, dir, env, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil || res.ExitCode != 0 {
+		return ""
+	}
+	branch := strings.TrimSpace(res.Stdout)
+	if branch == "HEAD" {
+		return ""
+	}
+	return branch
 }
 
 func runGitAllow(ctx context.Context, dir string, env []string, args ...string) (shell.Result, error) {

@@ -49,7 +49,7 @@ func (r *Runner) executeBuild(buildRecID string, mode TriggerMode) {
 	now := time.Now().UTC()
 	_ = r.builds.UpdateStatus(buildRecID, repository.BuildStatusRunning, "running", &now, nil)
 
-	workDir := projectfs.ResolveProjectAbsDir(project, ws, r.dataDir)
+	workDir := projectfs.ResolveProjectSourceAbsDir(project, ws, r.dataDir)
 	log.header(project.ProjectName, build.BuildNum, workDir)
 	log.line("Trigger: %s", mode.String())
 	log.line("Build started at %s", logTimestamp())
@@ -264,6 +264,20 @@ func (r *Runner) syncSource(ctx context.Context, project *repository.PackProject
 		o = *opts
 	}
 	repoURL := strings.TrimSpace(project.RepoURL)
+	if !projectcfg.UsesGitSource(project) {
+		if !o.compact {
+			log.section("Source")
+			if repoURL != "" {
+				log.step("Local source project; using local directory (remote push only, no pull).")
+			} else {
+				log.step("Using local source directory.")
+			}
+		}
+		if _, err := os.Stat(workDir); err != nil {
+			return fmt.Errorf("local source path: %w", err)
+		}
+		return nil
+	}
 	if repoURL == "" {
 		if !o.compact {
 			log.section("Source")
@@ -379,11 +393,15 @@ func (r *Runner) cloneProjectSource(
 	} else {
 		log.step("Cloning the remote Git repository")
 		log.step("Cloning repository %s", displayURL)
+		if git.IsTagRef(branch) {
+			log.step("Checking out git tag %s", git.NormalizeTagName(branch))
+		}
 	}
 	parent := filepath.Dir(workDir)
+	cloneBranch := git.CloneBranchForSync(branch)
 	args := []string{"clone", "--progress"}
-	if branch != "" {
-		args = append(args, "--branch", branch, "--single-branch")
+	if cloneBranch != "" {
+		args = append(args, "--branch", cloneBranch, "--single-branch")
 	}
 	logURL := sanitizeURLForLog(cloneURL)
 	args = append(args, logURL, workDir)
@@ -391,8 +409,8 @@ func (r *Runner) cloneProjectSource(
 		log.cmd("git", args)
 	}
 	runArgs := []string{"clone", "--progress"}
-	if branch != "" {
-		runArgs = append(runArgs, "--branch", branch, "--single-branch")
+	if cloneBranch != "" {
+		runArgs = append(runArgs, "--branch", cloneBranch, "--single-branch")
 	}
 	runArgs = append(runArgs, cloneURL, workDir)
 	res, err := shell.RunArgs(ctx, "git", runArgs, shell.Options{Dir: parent, Env: shellEnv, AllowNonZeroExit: true})
@@ -401,6 +419,9 @@ func (r *Runner) cloneProjectSource(
 			return fmt.Errorf("git clone %s: %w", project.ProjectName, err)
 		}
 		if res.ExitCode != 0 {
+			if git.IsTagRef(branch) {
+				return r.cloneThenCheckoutTag(ctx, project, workDir, branch, shellEnv, cloneURL, log, o)
+			}
 			return fmt.Errorf("git clone %s: exit %d", project.ProjectName, res.ExitCode)
 		}
 		return nil
@@ -410,9 +431,50 @@ func (r *Runner) cloneProjectSource(
 		return fmt.Errorf("git clone: %w", err)
 	}
 	if res.ExitCode != 0 {
+		if git.IsTagRef(branch) {
+			return r.cloneThenCheckoutTag(ctx, project, workDir, branch, shellEnv, cloneURL, log, o)
+		}
 		return fmt.Errorf("git clone: exit %d", res.ExitCode)
 	}
 	log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
+	return nil
+}
+
+func (r *Runner) cloneThenCheckoutTag(
+	ctx context.Context,
+	project *repository.PackProject,
+	workDir, branch string,
+	shellEnv []string,
+	cloneURL string,
+	log *buildLogger,
+	o *syncSourceOpts,
+) error {
+	parent := filepath.Dir(workDir)
+	_ = os.RemoveAll(workDir)
+	if !o.compact {
+		log.step("Tag clone failed; cloning default branch then fetching tag %s", git.NormalizeTagName(branch))
+	}
+	res, err := shell.RunArgs(ctx, "git", []string{"clone", "--progress", cloneURL, workDir}, shell.Options{
+		Dir: parent, Env: shellEnv, AllowNonZeroExit: true,
+	})
+	if !o.compact {
+		log.emitOutput(res)
+	}
+	if err != nil {
+		return fmt.Errorf("git clone %s: %w", project.ProjectName, err)
+	}
+	if res.ExitCode != 0 {
+		return fmt.Errorf("git clone %s: exit %d", project.ProjectName, res.ExitCode)
+	}
+	if err := git.FetchOrigin(ctx, workDir, shellEnv, "origin", branch); err != nil {
+		return fmt.Errorf("git fetch tag %s: %w", project.ProjectName, err)
+	}
+	if err := checkoutProjectRef(ctx, workDir, shellEnv, branch, log); err != nil {
+		return fmt.Errorf("checkout tag %s: %w", project.ProjectName, err)
+	}
+	if !o.compact {
+		log.logGitCheckoutSummary(ctx, workDir, shellEnv, branch)
+	}
 	return nil
 }
 

@@ -224,9 +224,9 @@ func (h *Handler) resolveProjectDir(projectRecID string) (*repository.PackProjec
 	if err != nil {
 		return nil, nil, "", err
 	}
-	base := projectfs.ResolveProjectAbsDir(project, ws, h.dataDir)
+	base := projectfs.ResolveProjectSourceAbsDir(project, ws, h.dataDir)
 	if base == "" {
-		return nil, nil, "", errors.New("project work directory is empty")
+		return nil, nil, "", errors.New("project source directory is empty")
 	}
 	return project, ws, base, nil
 }

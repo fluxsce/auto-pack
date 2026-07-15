@@ -45,6 +45,15 @@ type FileContent struct {
 	Readable  bool   `json:"readable"`
 }
 
+// ResolveProjectSourceAbsDir returns the directory used for builds and local push.
+func ResolveProjectSourceAbsDir(
+	project *repository.PackProject,
+	ws *repository.PackWorkspace,
+	dataDir string,
+) string {
+	return projectcfg.ResolveProjectSourceAbsDir(project, ws, dataDir)
+}
+
 // ResolveProjectAbsDir returns the absolute project work directory on disk.
 func ResolveProjectAbsDir(
 	project *repository.PackProject,

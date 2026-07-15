@@ -5,6 +5,9 @@
 		},
 		{
 			"path": "../../.."
+		},
+		{
+			"path": "../../../../../idea/datahubv9web"
 		}
 	],
 	"settings": {}

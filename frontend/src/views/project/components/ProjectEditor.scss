@@ -172,6 +172,15 @@
     color: var(--shell-content-text-secondary, var(--el-text-color-secondary));
   }
 
+  &__path-readonly {
+    margin: 0;
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    word-break: break-all;
+    color: var(--shell-content-text, var(--el-text-color-primary));
+  }
+
   &__empty-hint {
     margin: 0;
     font-size: 13px;

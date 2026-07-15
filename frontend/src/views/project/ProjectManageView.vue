@@ -9,6 +9,8 @@ import ProjectBulkAutoBuildDialog from './components/ProjectBulkAutoBuildDialog.
 import ProjectBulkAutoReleaseDialog from './components/ProjectBulkAutoReleaseDialog.vue'
 import ProjectBulkBuildStepsDialog from './components/ProjectBulkBuildStepsDialog.vue'
 import ProjectBulkGitBranchDialog from './components/ProjectBulkGitBranchDialog.vue'
+import ProjectBulkBranchCloneDialog from './components/ProjectBulkBranchCloneDialog.vue'
+import ProjectBulkWorkspaceBundleDialog from './components/ProjectBulkWorkspaceBundleDialog.vue'
 import ProjectBulkVersionDialog from './components/ProjectBulkVersionDialog.vue'
 import ProjectBulkPomVersionDialog from './components/ProjectBulkPomVersionDialog.vue'
 import ProjectBulkPostBuildEmailDialog from './components/ProjectBulkPostBuildEmailDialog.vue'
@@ -28,6 +30,8 @@ const message = useMessage()
 
 const workspacePickerOpen = ref(false)
 const bulkGitBranchOpen = ref(false)
+const bulkBranchCloneOpen = ref(false)
+const bulkWorkspaceBundleOpen = ref(false)
 const bulkVersionOpen = ref(false)
 const bulkPomVersionOpen = ref(false)
 const bulkPostBuildEmailOpen = ref(false)
@@ -126,6 +130,13 @@ const workspaceMavenProjects = computed(() =>
   items.value.filter((p) => String(p.project_type).toLowerCase() === 'maven'),
 )
 
+const workspaceMavenProjectCount = computed(() => workspaceMavenProjects.value.length)
+
+async function onWorkspaceBundleSuccess(): Promise<void> {
+  await handleWorkspacesChanged()
+  await loadList()
+}
+
 async function syncAutoBuildResumeFlag(): Promise<void> {
   autoBuildResumePending.value = await hasRunningAutoBuildSession(activeWorkspaceRecId.value)
 }
@@ -133,7 +144,7 @@ async function syncAutoBuildResumeFlag(): Promise<void> {
 watch(activeWorkspaceRecId, () => void syncAutoBuildResumeFlag(), { immediate: true })
 
 function openAutoBuildResume(): void {
-  bulkAutoBuildOpen.value = true
+  openAutoBuild()
 }
 
 function openMavenDepsAnalysis(projectRecId?: string): void {
@@ -155,6 +166,22 @@ function openMavenDepsAnalysis(projectRecId?: string): void {
   mavenDepsOpen.value = true
 }
 
+function openAutoBuild(): void {
+  if (!activeWorkspaceRecId.value) {
+    message.warning(t('workspaceSelectRequired'))
+    return
+  }
+  bulkAutoBuildOpen.value = true
+}
+
+function openAutoRelease(): void {
+  if (!activeWorkspaceRecId.value) {
+    message.warning(t('workspaceSelectRequired'))
+    return
+  }
+  bulkAutoReleaseOpen.value = true
+}
+
 function onBulkCommand(command: string): void {
   if (command === 'git-branch') {
     if (!activeWorkspaceRecId.value) {
@@ -162,6 +189,22 @@ function onBulkCommand(command: string): void {
       return
     }
     bulkGitBranchOpen.value = true
+    return
+  }
+  if (command === 'branch-clone') {
+    if (!activeWorkspaceRecId.value) {
+      message.warning(t('workspaceSelectRequired'))
+      return
+    }
+    bulkBranchCloneOpen.value = true
+    return
+  }
+  if (command === 'workspace-bundle') {
+    if (!activeWorkspaceRecId.value) {
+      message.warning(t('workspaceSelectRequired'))
+      return
+    }
+    bulkWorkspaceBundleOpen.value = true
     return
   }
   if (command === 'project-version') {
@@ -175,6 +218,10 @@ function onBulkCommand(command: string): void {
   if (command === 'pom-version') {
     if (!activeWorkspaceRecId.value) {
       message.warning(t('workspaceSelectRequired'))
+      return
+    }
+    if (workspaceMavenProjects.value.length === 0) {
+      message.warning(t('projectMavenDepsNoMaven'))
       return
     }
     bulkPomVersionOpen.value = true
@@ -194,22 +241,6 @@ function onBulkCommand(command: string): void {
       return
     }
     bulkBuildStepsOpen.value = true
-    return
-  }
-  if (command === 'auto-build') {
-    if (!activeWorkspaceRecId.value) {
-      message.warning(t('workspaceSelectRequired'))
-      return
-    }
-    bulkAutoBuildOpen.value = true
-    return
-  }
-  if (command === 'auto-release') {
-    if (!activeWorkspaceRecId.value) {
-      message.warning(t('workspaceSelectRequired'))
-      return
-    }
-    bulkAutoReleaseOpen.value = true
     return
   }
   if (command === 'maven-deps') {
@@ -387,52 +418,64 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
           <el-icon><Refresh /></el-icon>
           {{ $t('refresh') }}
         </el-button>
-        <el-dropdown trigger="click" class="project-manage__bulk-ops" @command="onBulkCommand">
-          <el-button :loading="purgingWorkspace">
-            {{ $t('projectBulkOps') }}
-            <el-icon class="project-manage__bulk-ops-icon"><ArrowDown /></el-icon>
+        <div class="project-manage__quick-ops">
+          <el-dropdown trigger="click" class="project-manage__bulk-ops" @command="onBulkCommand">
+            <el-button :loading="purgingWorkspace">
+              {{ $t('projectBulkOps') }}
+              <el-icon class="project-manage__bulk-ops-icon"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <li class="el-dropdown-menu__item project-manage__bulk-group" aria-disabled="true">
+                  {{ $t('projectBulkGroupConfig') }}
+                </li>
+                <el-dropdown-item command="git-branch">
+                  {{ $t('projectBulkUpdateGitBranch') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="branch-clone">
+                  {{ $t('projectBulkBranchClone') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="project-version">
+                  {{ $t('projectBulkUpdateVersion') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="pom-version">
+                  {{ $t('projectBulkPomVersion') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="build-steps">
+                  {{ $t('projectBulkBuildSteps') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="post-build-email">
+                  {{ $t('projectBulkPostBuildEmail') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="workspace-bundle">
+                  {{ $t('projectBulkWorkspaceBundle') }}
+                </el-dropdown-item>
+                <li
+                  class="el-dropdown-menu__item project-manage__bulk-group project-manage__bulk-group--spaced"
+                  aria-disabled="true"
+                >
+                  {{ $t('projectBulkGroupBuild') }}
+                </li>
+                <el-dropdown-item command="maven-deps">
+                  {{ $t('projectBulkMavenDeps') }}
+                </el-dropdown-item>
+                <el-dropdown-item command="delete-workspace" divided>
+                  <span class="project-manage__bulk-danger">{{ $t('projectBulkDeleteWorkspace') }}</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <el-button
+            :type="autoBuildResumePending ? 'warning' : 'primary'"
+            class="project-manage__quick-op"
+            @click="openAutoBuild()"
+          >
+            {{ $t('projectBulkAutoBuild') }}
           </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <li class="el-dropdown-menu__item project-manage__bulk-group" aria-disabled="true">
-                {{ $t('projectBulkGroupConfig') }}
-              </li>
-              <el-dropdown-item command="git-branch">
-                {{ $t('projectBulkUpdateGitBranch') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="project-version">
-                {{ $t('projectBulkUpdateVersion') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="pom-version">
-                {{ $t('projectBulkPomVersion') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="build-steps">
-                {{ $t('projectBulkBuildSteps') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="post-build-email">
-                {{ $t('projectBulkPostBuildEmail') }}
-              </el-dropdown-item>
-              <li
-                class="el-dropdown-menu__item project-manage__bulk-group project-manage__bulk-group--spaced"
-                aria-disabled="true"
-              >
-                {{ $t('projectBulkGroupBuild') }}
-              </li>
-              <el-dropdown-item command="maven-deps">
-                {{ $t('projectBulkMavenDeps') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="auto-build">
-                {{ $t('projectBulkAutoBuild') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="auto-release">
-                {{ $t('projectBulkAutoRelease') }}
-              </el-dropdown-item>
-              <el-dropdown-item command="delete-workspace" divided>
-                <span class="project-manage__bulk-danger">{{ $t('projectBulkDeleteWorkspace') }}</span>
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+          <el-button type="primary" plain class="project-manage__quick-op" @click="openAutoRelease()">
+            {{ $t('projectBulkAutoRelease') }}
+          </el-button>
+        </div>
       </div>
     </div>
 
@@ -523,6 +566,13 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       :project-count="workspaceProjectCount"
       @success="loadList()"
     />
+    <ProjectBulkBranchCloneDialog
+      v-model:open="bulkBranchCloneOpen"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :project-count="workspaceProjectCount"
+      @success="loadList()"
+    />
     <ProjectBulkVersionDialog
       v-model:open="bulkVersionOpen"
       :workspace-rec-id="activeWorkspaceRecId"
@@ -534,7 +584,7 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       v-model:open="bulkPomVersionOpen"
       :workspace-rec-id="activeWorkspaceRecId"
       :workspace-name="activeWorkspace?.workspace_name ?? ''"
-      :project-count="workspaceProjectCount"
+      :project-count="workspaceMavenProjectCount"
       @success="loadList()"
     />
     <ProjectBulkPostBuildEmailDialog
@@ -545,6 +595,14 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       :env-options="envOptions"
       @success="loadList()"
       @reload-envs="loadEnvs()"
+    />
+    <ProjectBulkWorkspaceBundleDialog
+      v-model:open="bulkWorkspaceBundleOpen"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :workspace-code="activeWorkspace?.workspace_code ?? ''"
+      :project-count="workspaceProjectCount"
+      @success="onWorkspaceBundleSuccess()"
     />
     <ProjectBulkBuildStepsDialog
       v-model:open="bulkBuildStepsOpen"

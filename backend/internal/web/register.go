@@ -22,18 +22,19 @@ import (
 
 // Deps holds web-layer HTTP dependencies.
 type Deps struct {
-	Auth                    *auth.Service
-	Tokens                  *auth.TokenIssuer
-	UserRepo                *repository.UserRepository
-	OpLogRepo               *repository.OperationLogRepository
-	EnvRepo                 *repository.EnvRepository
-	ProjectRepo             *repository.ProjectRepository
-	BuildRepo               *repository.BuildRepository
-	WorkspaceReleaseRepo    *repository.WorkspaceReleaseRepository
-	WorkspacePomVersionRepo *repository.WorkspacePomVersionRepository
-	WorkspaceRepo           *repository.WorkspaceRepository
-	FrontendPath            string
-	DataDir                 string
+	Auth                     *auth.Service
+	Tokens                   *auth.TokenIssuer
+	UserRepo                 *repository.UserRepository
+	OpLogRepo                *repository.OperationLogRepository
+	EnvRepo                  *repository.EnvRepository
+	ProjectRepo              *repository.ProjectRepository
+	BuildRepo                *repository.BuildRepository
+	WorkspaceReleaseRepo     *repository.WorkspaceReleaseRepository
+	WorkspacePomVersionRepo  *repository.WorkspacePomVersionRepository
+	WorkspaceBranchCloneRepo *repository.WorkspaceBranchCloneRepository
+	WorkspaceRepo            *repository.WorkspaceRepository
+	FrontendPath             string
+	DataDir                  string
 }
 
 // Register mounts auth API and on-disk SPA routes (gateway-style, under BasePath).
@@ -51,7 +52,7 @@ func Register(mux *http.ServeMux, deps Deps) {
 	operationloghandler.Register(mux, operationloghandler.NewHandler(deps.OpLogRepo), requireAuth, APIPath())
 
 	envhandler.Register(mux, envhandler.NewHandler(deps.EnvRepo, auditRec), requireAuth, APIPath())
-	projectH := projecthandler.NewHandler(deps.ProjectRepo, deps.WorkspaceRepo, deps.EnvRepo, deps.BuildRepo, deps.WorkspaceReleaseRepo, deps.WorkspacePomVersionRepo, deps.DataDir, auditRec)
+	projectH := projecthandler.NewHandler(deps.ProjectRepo, deps.WorkspaceRepo, deps.EnvRepo, deps.BuildRepo, deps.WorkspaceReleaseRepo, deps.WorkspacePomVersionRepo, deps.WorkspaceBranchCloneRepo, deps.DataDir, auditRec)
 	workspacehandler.Register(mux, workspacehandler.NewHandler(deps.WorkspaceRepo, deps.ProjectRepo, deps.BuildRepo, deps.WorkspaceReleaseRepo, projectH, projectH, deps.DataDir, auditRec), requireAuth, APIPath())
 	projecthandler.Register(mux, projectH, requireAuth, APIPath())
 

@@ -18,6 +18,7 @@ import {
 } from '@/request/api/project'
 import {
   fetchProjectBuild,
+  fetchProjectWorkspaceFtpPushStatus,
   fetchProjectWorkspace,
   fetchProjectWorkspaceFtpRemoteNote,
   pushProjectWorkspaceFtp,
@@ -840,7 +841,7 @@ async function pushArtifactFtp(
     ? detail.value
     : `    1.${project.project_name}\n        ${artifact.path}`
   try {
-    const res = await pushProjectWorkspaceFtp(project.rec_id, {
+    const start = await pushProjectWorkspaceFtp(project.rec_id, {
       path: artifact.path,
       ftp_env_rec_id: ftpEnvRecId.value,
       push_path: pushPath.value.trim(),
@@ -849,6 +850,7 @@ async function pushArtifactFtp(
       task_ref: taskRef.value.trim() || `${tag}自动发版`,
       detail: detailLines,
     })
+    const res = await waitForFtpPushTask(project.rec_id, start.task_id)
     appendLog([
       `[${formatLogTime()}] ${t('projectBulkAutoReleaseFtpOk', { name: project.project_name })}`,
       `  ${t('projectFtpPushLogBackupPath', { path: res.backup_path || '—' })}`,
@@ -863,6 +865,23 @@ async function pushArtifactFtp(
         msg,
       })}`,
     ])
+  }
+}
+
+async function waitForFtpPushTask(
+  projectRecId: string,
+  taskId: string,
+): Promise<import('@/request/api/build').WorkspaceFtpPushResult> {
+  for (;;) {
+    const st = await fetchProjectWorkspaceFtpPushStatus(projectRecId, taskId)
+    if (st.status === 'running' || st.status === 'idle') {
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      continue
+    }
+    if (st.status === 'success' && st.result) {
+      return st.result
+    }
+    throw new Error(st.message || 'FTP push failed')
   }
 }
 

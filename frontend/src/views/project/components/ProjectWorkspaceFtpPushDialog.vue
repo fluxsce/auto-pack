@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessage } from '@/components/feedback/message'
 import { APP_DIALOG_POPPER_CLASS } from '@/components/feedback/dialog/constants'
 import { fetchEnvSettings } from '@/request/api/env'
-import { fetchProjectWorkspaceFtpRemoteNote, pushProjectWorkspaceFtp } from '@/request/api/build'
+import {
+  fetchProjectWorkspaceFtpPushStatus,
+  fetchProjectWorkspaceFtpRemoteNote,
+  pushProjectWorkspaceFtp,
+} from '@/request/api/build'
 import type { EnvSetting, PackBuildStatus, ProjectWorkspaceEntry } from '@/types'
 import {
   backupFilePath,
@@ -46,6 +50,7 @@ const remoteNoteContent = ref('')
 const remoteNoteExists = ref(false)
 const remoteNoteLoading = ref(false)
 let remoteNoteTimer: ReturnType<typeof setTimeout> | null = null
+let pushPollTimer: ReturnType<typeof setTimeout> | null = null
 
 const entryLabel = computed(() => {
   const e = props.entry
@@ -113,6 +118,11 @@ watch([ftpEnvRecId, pushPath, uploadName], () => {
   scheduleRemoteNoteLoad()
 })
 
+onUnmounted(() => {
+  if (remoteNoteTimer) clearTimeout(remoteNoteTimer)
+  stopPushPolling()
+})
+
 function scheduleRemoteNoteLoad(): void {
   if (remoteNoteTimer) clearTimeout(remoteNoteTimer)
   remoteNoteTimer = setTimeout(() => {
@@ -155,6 +165,13 @@ function resetForm(): void {
   remoteNoteExists.value = false
   logText.value = t('projectFtpPushLogReady')
   pushStatus.value = null
+}
+
+function stopPushPolling(): void {
+  if (pushPollTimer) {
+    clearTimeout(pushPollTimer)
+    pushPollTimer = null
+  }
 }
 
 function formatLogTime(): string {
@@ -240,8 +257,7 @@ async function onSubmit(): Promise<void> {
 
   saving.value = true
   try {
-    appendLog([`[${formatLogTime()}] ${t('projectFtpPushLogUploading')}`])
-    const res = await pushProjectWorkspaceFtp(props.projectRecId, {
+    const start = await pushProjectWorkspaceFtp(props.projectRecId, {
       path: props.entry.path,
       ftp_env_rec_id: ftpEnvRecId.value,
       push_path: pushPath.value.trim(),
@@ -250,18 +266,7 @@ async function onSubmit(): Promise<void> {
       task_ref: taskRef.value.trim(),
       detail: detail.value.trim(),
     })
-    appendLog([
-      `[${formatLogTime()}] ${t('projectFtpPushLogSuccess')}`,
-      `  ${t('projectFtpPushLogBackupPath', { path: res.backup_path || '—' })}`,
-      `  ${t('projectFtpPushLogUpdatePath', { path: res.update_path })}`,
-      `  ${t('projectFtpPushLogInfoPath', { path: res.info_file_path })}`,
-      '',
-      t('projectFtpPushLogInfoContent'),
-      res.info_content.trimEnd(),
-    ])
-    pushStatus.value = 'success'
-    message.success(t('projectFtpPushSuccess'))
-    emit('success')
+    await pollPushTask(start.task_id)
   } catch (e) {
     const msg = (e as Error).message
     appendLog([`[${formatLogTime()}] ${t('projectFtpPushLogFailed')}`, `  ${msg}`])
@@ -273,6 +278,35 @@ async function onSubmit(): Promise<void> {
     }
   } finally {
     saving.value = false
+  }
+}
+
+async function pollPushTask(taskId: string): Promise<void> {
+  stopPushPolling()
+  for (;;) {
+    const st = await fetchProjectWorkspaceFtpPushStatus(props.projectRecId, taskId)
+    logText.value = st.log_content?.trimEnd() || logText.value
+    if (st.status === 'running' || st.status === 'idle') {
+      pushStatus.value = 'running'
+      await new Promise<void>((resolve) => {
+        pushPollTimer = setTimeout(() => {
+          pushPollTimer = null
+          resolve()
+        }, 1000)
+      })
+      continue
+    }
+    if (st.status === 'success' && st.result) {
+      pushStatus.value = 'success'
+      if (st.result.info_content?.trim()) {
+        logText.value = `${(st.log_content || '').trimEnd()}\n\n${t('projectFtpPushLogInfoContent')}\n${st.result.info_content.trimEnd()}`.trim()
+      }
+      message.success(t('projectFtpPushSuccess'))
+      emit('success')
+      return
+    }
+    pushStatus.value = 'failed'
+    throw new Error(st.message || t('projectFtpPushLogFailed'))
   }
 }
 </script>

@@ -1,5 +1,15 @@
-import type { PackWorkspace, PackWorkspaceClonePayload, PackWorkspaceCloneResult, PackWorkspacePayload } from '@/types'
+import type {
+  PackWorkspace,
+  PackWorkspaceClonePayload,
+  PackWorkspaceCloneResult,
+  PackWorkspacePayload,
+  WorkspaceBundle,
+  WorkspaceImportMode,
+  WorkspaceImportPayload,
+  WorkspaceImportResult,
+} from '@/types'
 import type { MavenInternalEdge, MavenWorkspaceAnalysis, MavenWorkspaceModule } from './project'
+import { buildDownloadUrl, downloadAuthenticated } from '@/components/files/file-download'
 import http from '../utils/http'
 
 export type { MavenInternalEdge, MavenWorkspaceAnalysis }
@@ -69,3 +79,20 @@ export function fetchWorkspaceMavenDependencyAnalysis(
 }> {
   return http.get(`/workspaces/${workspaceRecId}/maven-dependency-analysis`, { params })
 }
+
+export function workspaceBundleExportUrl(workspaceRecId: string): string {
+  return buildDownloadUrl(`/workspaces/${workspaceRecId}/export`)
+}
+
+export async function exportWorkspaceBundle(
+  workspaceRecId: string,
+  filename: string,
+): Promise<void> {
+  await downloadAuthenticated(workspaceBundleExportUrl(workspaceRecId), filename)
+}
+
+export function importWorkspaceBundle(data: WorkspaceImportPayload): Promise<WorkspaceImportResult> {
+  return http.post('/workspaces/import', data)
+}
+
+export type { WorkspaceBundle, WorkspaceImportMode, WorkspaceImportResult }

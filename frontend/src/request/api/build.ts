@@ -67,11 +67,36 @@ export interface WorkspaceFtpPushResult {
   info_content: string
 }
 
+export interface WorkspaceFtpPushStartResponse {
+  task_id: string
+  status: 'running'
+}
+
+export interface WorkspaceFtpPushStatusResponse {
+  task_id: string
+  project_rec_id?: string
+  status: 'idle' | 'running' | 'success' | 'failed'
+  message?: string
+  path?: string
+  push_path?: string
+  started_at?: string
+  finished_at?: string
+  log_content?: string
+  result?: WorkspaceFtpPushResult
+}
+
 export function pushProjectWorkspaceFtp(
   projectRecId: string,
   data: WorkspaceFtpPushPayload,
-): Promise<WorkspaceFtpPushResult> {
+): Promise<WorkspaceFtpPushStartResponse> {
   return http.post(`/projects/${projectRecId}/workspace/ftp-push`, data)
+}
+
+export function fetchProjectWorkspaceFtpPushStatus(
+  projectRecId: string,
+  taskId: string,
+): Promise<WorkspaceFtpPushStatusResponse> {
+  return http.get(`/projects/${projectRecId}/workspace/ftp-push/status`, { params: { task_id: taskId } })
 }
 
 export interface WorkspaceFtpRemoteNote {

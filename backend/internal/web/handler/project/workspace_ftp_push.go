@@ -1,6 +1,7 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,8 +11,9 @@ import (
 	"auto-pack/backend/internal/repository"
 	"auto-pack/backend/pkg/audit"
 	"auto-pack/backend/pkg/envtypes"
-	"auto-pack/backend/pkg/projectfs"
 	"auto-pack/backend/pkg/workspaceftppush"
+
+	"github.com/google/uuid"
 )
 
 type workspaceFtpPushPayload struct {
@@ -22,6 +24,11 @@ type workspaceFtpPushPayload struct {
 	Pusher      string `json:"pusher"`
 	TaskRef     string `json:"task_ref"`
 	Detail      string `json:"detail"`
+}
+
+type workspaceFtpPushStartResponse struct {
+	TaskID string `json:"task_id"`
+	Status string `json:"status"`
 }
 
 func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +44,10 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 	}
 	if running != nil {
 		httpx.WriteError(w, http.StatusConflict, "cannot push while a build is running")
+		return
+	}
+	if active := h.ftpPushCoord.activeTask(projectRecID); active != nil {
+		httpx.WriteError(w, http.StatusConflict, "ftp push already in progress")
 		return
 	}
 
@@ -85,39 +96,50 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := workspaceftppush.Push(workspaceftppush.Request{
-		LocalBase:    base,
-		RelativePath: rel,
-		FTPConfig:    ftpCfg,
-		PushPath:     body.PushPath,
-		BackupPath:   body.BackupPath,
-		Pusher:       body.Pusher,
-		TaskRef:      body.TaskRef,
-		Detail:       body.Detail,
-	})
-	if err != nil {
-		switch {
-		case errors.Is(err, workspaceftppush.ErrNotFound):
-			httpx.WriteError(w, http.StatusNotFound, err.Error())
-		case errors.Is(err, workspaceftppush.ErrPathRequired),
-			errors.Is(err, workspaceftppush.ErrPushPathRequired),
-			errors.Is(err, workspaceftppush.ErrPusherRequired),
-			errors.Is(err, workspaceftppush.ErrTaskRefRequired):
-			httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, projectfs.ErrPathTraversal):
-			httpx.WriteError(w, http.StatusBadRequest, err.Error())
-		default:
-			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+	taskID := uuid.New().String()
+	h.ftpPushCoord.start(taskID, projectRecID, rel, body.PushPath, func(ctx context.Context, appendLog func(format string, args ...any)) (*workspaceftppush.Result, error) {
+		appendLog("开始 FTP 远程推送")
+		appendLog("对象：%s", rel)
+		appendLog("FTP 环境：%s", item.EnvName)
+		appendLog("推送路径：%s", strings.TrimSpace(body.PushPath))
+		result, err := workspaceftppush.Push(workspaceftppush.Request{
+			LocalBase:    base,
+			RelativePath: rel,
+			FTPConfig:    ftpCfg,
+			PushPath:     body.PushPath,
+			BackupPath:   body.BackupPath,
+			Pusher:       body.Pusher,
+			TaskRef:      body.TaskRef,
+			Detail:       body.Detail,
+			Logf:         appendLog,
+		})
+		if err != nil {
+			appendLog("推送失败")
+			appendLog("  %s", err.Error())
+			h.audit.Record(r.Context(), r, audit.Entry{
+				Action: audit.ActionUpdate, Module: audit.ModuleProject, TargetType: "project",
+				TargetID: projectRecID, TargetName: project.ProjectName,
+				Summary: "FTP 远程推送失败 " + rel,
+				Detail:  err.Error(),
+				Success: false,
+			})
+			return nil, err
 		}
-		return
-	}
-
-	h.audit.Record(r.Context(), r, audit.Entry{
-		Action: audit.ActionUpdate, Module: audit.ModuleProject, TargetType: "project",
-		TargetID: projectRecID, TargetName: project.ProjectName,
-		Summary: "FTP 远程推送 " + rel + " → " + result.UpdatePath,
-		Detail:  result.InfoContent,
-		Success: true,
+		appendLog("推送成功")
+		appendLog("  备份路径：%s", result.BackupPath)
+		appendLog("  更新包路径：%s", result.UpdatePath)
+		appendLog("  说明文件：%s", result.InfoFilePath)
+		h.audit.Record(r.Context(), r, audit.Entry{
+			Action: audit.ActionUpdate, Module: audit.ModuleProject, TargetType: "project",
+			TargetID: projectRecID, TargetName: project.ProjectName,
+			Summary: "FTP 远程推送 " + rel + " → " + result.UpdatePath,
+			Detail:  result.InfoContent,
+			Success: true,
+		})
+		return &result, nil
 	})
-	httpx.WriteJSON(w, http.StatusOK, result)
+	httpx.WriteJSON(w, http.StatusAccepted, workspaceFtpPushStartResponse{
+		TaskID: taskID,
+		Status: "running",
+	})
 }

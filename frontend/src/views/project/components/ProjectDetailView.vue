@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { VideoPlay } from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
+import { useMessage } from '@/components/feedback/message'
+import { pushProjectLocalSource } from '@/request/api/project'
 import type { PackBuild, PackProject } from '@/types'
+import { mergeBuildConfig } from '../project-defaults'
+import { effectiveScmMode } from '../project-scm'
 import { projectTypeTagClass } from '../project-meta'
 import { formatBuildTime } from '../project-format'
 import { PROJECT_DETAIL_NAV, buildStatusTagType } from './project-detail-nav'
@@ -44,10 +49,50 @@ const emit = defineEmits<{
   workspaceOpen: [entry: import('@/types').ProjectWorkspaceEntry]
 }>()
 
+const { t } = useI18n()
+const message = useMessage()
+const pushingLocal = ref(false)
+
 const title = computed(() => props.project?.project_name?.trim() ?? '')
 
 const displayRepoBranch = computed(() => props.project?.repo_branch?.trim() || '—')
 const displayRepoUrl = computed(() => props.project?.repo_url?.trim() || '—')
+
+const scmMode = computed(() => {
+  if (!props.project) return 'local' as const
+  const cfg = mergeBuildConfig(props.project.project_type, props.project.config_json)
+  return effectiveScmMode(props.project, cfg)
+})
+
+const buildConfig = computed(() => {
+  if (!props.project) return null
+  return mergeBuildConfig(props.project.project_type, props.project.config_json)
+})
+
+const localSourcePathConfigured = computed(
+  () => buildConfig.value?.local_source_path?.trim() ?? '',
+)
+
+const scmModeLabel = computed(() =>
+  scmMode.value === 'git' ? t('projectScmTypeGit') : t('projectScmTypeLocal'),
+)
+
+const canPushLocalSource = computed(
+  () => scmMode.value === 'local' && !!props.project?.repo_url?.trim(),
+)
+
+async function onPushLocalSource(): Promise<void> {
+  if (!props.project?.rec_id || !canPushLocalSource.value) return
+  pushingLocal.value = true
+  try {
+    await pushProjectLocalSource(props.project.rec_id)
+    message.success(t('projectScmPushSuccess'))
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    pushingLocal.value = false
+  }
+}
 
 const selectedBuildNum = computed(() => {
   if (!props.selectedBuildId) return null
@@ -139,18 +184,49 @@ function onNavClick(id: ProjectDetailSection | 'configure'): void {
           </header>
           <dl v-if="project" class="project-detail__meta">
             <div class="project-detail__meta-row">
-              <dt>{{ $t('projectColBranch') }}</dt>
-              <dd>{{ displayRepoBranch }}</dd>
+              <dt>{{ $t('projectNavScm') }}</dt>
+              <dd>{{ scmModeLabel }}</dd>
             </div>
-            <div class="project-detail__meta-row">
-              <dt>{{ $t('projectColRepoUrl') }}</dt>
-              <dd class="project-detail__mono">{{ displayRepoUrl }}</dd>
-            </div>
-            <div class="project-detail__meta-row">
+            <template v-if="scmMode === 'local'">
+              <div v-if="localSourcePathConfigured" class="project-detail__meta-row">
+                <dt>{{ $t('projectScmLocalPath') }}</dt>
+                <dd class="project-detail__mono">{{ localSourcePathConfigured }}</dd>
+              </div>
+              <div class="project-detail__meta-row">
+                <dt>{{ $t('projectColWorkDir') }}</dt>
+                <dd class="project-detail__mono project-detail__path">{{ workPathPreview || '—' }}</dd>
+              </div>
+            </template>
+            <div v-else class="project-detail__meta-row">
               <dt>{{ $t('projectColWorkDir') }}</dt>
-              <dd class="project-detail__mono">{{ workPathPreview || '—' }}</dd>
+              <dd class="project-detail__mono project-detail__path">{{ workPathPreview || '—' }}</dd>
             </div>
+            <template v-if="scmMode === 'git'">
+              <div class="project-detail__meta-row">
+                <dt>{{ $t('projectColBranch') }}</dt>
+                <dd>{{ displayRepoBranch }}</dd>
+              </div>
+              <div class="project-detail__meta-row">
+                <dt>{{ $t('projectColRepoUrl') }}</dt>
+                <dd class="project-detail__mono">{{ displayRepoUrl }}</dd>
+              </div>
+            </template>
+            <template v-else-if="scmMode === 'local' && project.repo_url?.trim()">
+              <div class="project-detail__meta-row">
+                <dt>{{ $t('projectColBranch') }}</dt>
+                <dd>{{ displayRepoBranch }}</dd>
+              </div>
+              <div class="project-detail__meta-row">
+                <dt>{{ $t('projectColRepoUrl') }}</dt>
+                <dd class="project-detail__mono">{{ displayRepoUrl }}</dd>
+              </div>
+            </template>
           </dl>
+          <div v-if="canPushLocalSource" class="project-detail__push-local">
+            <el-button type="primary" plain :loading="pushingLocal" @click="onPushLocalSource">
+              {{ $t('projectScmPushToRemote') }}
+            </el-button>
+          </div>
 
           <div v-if="lastBuild" class="project-detail__last-build">
             <h4 class="project-detail__sub-title">{{ $t('projectLastBuild') }}</h4>

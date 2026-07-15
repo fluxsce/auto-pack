@@ -335,6 +335,11 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
+// LockProjectBuild blocks until the project build lock is available, then returns unlock.
+func (r *Runner) LockProjectBuild(projectRecID string) func() {
+	return r.acquireProjectBuild(projectRecID)
+}
+
 // ReadLogTail reads log file from offset up to maxBytes.
 func ReadLogTail(logPath string, offset int64, maxBytes int) (content string, total int64, err error) {
 	if maxBytes <= 0 {

@@ -29,17 +29,20 @@ type projectListItem struct {
 
 // Handler manages /api/projects CRUD and build/workspace operations.
 type Handler struct {
-	projects        *repository.ProjectRepository
-	workspaces      *repository.WorkspaceRepository
-	env             *repository.EnvRepository
-	builds          *repository.BuildRepository
-	releases        *repository.WorkspaceReleaseRepository
-	pomVersions     *repository.WorkspacePomVersionRepository
-	runner          *packrun.Runner
-	releaseCoord    *projectrelease.Coordinator
-	pomVersionCoord *projectrelease.PomVersionCoordinator
-	audit           *audit.Recorder
-	dataDir         string
+	projects         *repository.ProjectRepository
+	workspaces       *repository.WorkspaceRepository
+	env              *repository.EnvRepository
+	builds           *repository.BuildRepository
+	releases         *repository.WorkspaceReleaseRepository
+	pomVersions      *repository.WorkspacePomVersionRepository
+	branchClones     *repository.WorkspaceBranchCloneRepository
+	runner           *packrun.Runner
+	releaseCoord     *projectrelease.Coordinator
+	pomVersionCoord  *projectrelease.PomVersionCoordinator
+	branchCloneCoord *projectrelease.BranchCloneCoordinator
+	ftpPushCoord     *workspaceFtpPushCoordinator
+	audit            *audit.Recorder
+	dataDir          string
 }
 
 func NewHandler(
@@ -49,21 +52,25 @@ func NewHandler(
 	builds *repository.BuildRepository,
 	releases *repository.WorkspaceReleaseRepository,
 	pomVersions *repository.WorkspacePomVersionRepository,
+	branchClones *repository.WorkspaceBranchCloneRepository,
 	dataDir string,
 	rec *audit.Recorder,
 ) *Handler {
 	h := &Handler{
-		projects:        projects,
-		workspaces:      workspaces,
-		env:             env,
-		builds:          builds,
-		releases:        releases,
-		pomVersions:     pomVersions,
-		runner:          packrun.NewRunner(projects, workspaces, env, builds, dataDir),
-		releaseCoord:    projectrelease.NewCoordinator(),
-		pomVersionCoord: projectrelease.NewPomVersionCoordinator(),
-		audit:           rec,
-		dataDir:         dataDir,
+		projects:         projects,
+		workspaces:       workspaces,
+		env:              env,
+		builds:           builds,
+		releases:         releases,
+		pomVersions:      pomVersions,
+		branchClones:     branchClones,
+		runner:           packrun.NewRunner(projects, workspaces, env, builds, dataDir),
+		releaseCoord:     projectrelease.NewCoordinator(),
+		pomVersionCoord:  projectrelease.NewPomVersionCoordinator(),
+		branchCloneCoord: projectrelease.NewBranchCloneCoordinator(),
+		ftpPushCoord:     newWorkspaceFtpPushCoordinator(),
+		audit:            rec,
+		dataDir:          dataDir,
 	}
 	if n, err := builds.RecoverInterrupted(""); err != nil {
 		logger.Warn("recover interrupted builds failed", "err", err.Error())
@@ -80,6 +87,11 @@ func NewHandler(
 	} else if n > 0 {
 		logger.Info("recovered interrupted pom version batches", "count", n)
 	}
+	if n, err := branchClones.RecoverInterrupted(""); err != nil {
+		logger.Warn("recover interrupted branch clone batches failed", "err", err.Error())
+	} else if n > 0 {
+		logger.Info("recovered interrupted branch clone batches", "count", n)
+	}
 	if err := h.runner.StartScheduler(); err != nil {
 		logger.Warn("build scheduler start failed", "err", err.Error())
 	}
@@ -95,6 +107,7 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+base+"/{recID}", requireAuth(http.HandlerFunc(h.get)))
 	mux.Handle("PUT "+base+"/{recID}", requireAuth(http.HandlerFunc(h.update)))
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))
+	mux.Handle("POST "+base+"/{recID}/push-local-source", requireAuth(http.HandlerFunc(h.pushLocalSource)))
 	mux.Handle("GET "+base+"/{recID}/maven-dependency-analysis", requireAuth(http.HandlerFunc(h.mavenDependencyAnalysis)))
 	mux.Handle("GET "+base+"/{recID}/builds", requireAuth(http.HandlerFunc(h.listBuilds)))
 	mux.Handle("POST "+base+"/{recID}/builds", requireAuth(http.HandlerFunc(h.triggerBuild)))
@@ -103,6 +116,7 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+base+"/{recID}/workspace", requireAuth(http.HandlerFunc(h.browseWorkspace)))
 	mux.Handle("DELETE "+base+"/{recID}/workspace", requireAuth(http.HandlerFunc(h.deleteWorkspace)))
 	mux.Handle("POST "+base+"/{recID}/workspace/ftp-push", requireAuth(http.HandlerFunc(h.workspaceFtpPush)))
+	mux.Handle("GET "+base+"/{recID}/workspace/ftp-push/status", requireAuth(http.HandlerFunc(h.workspaceFtpPushStatus)))
 	mux.Handle("GET "+base+"/{recID}/workspace/ftp-remote-note", requireAuth(http.HandlerFunc(h.workspaceFtpRemoteNote)))
 	mux.Handle("GET "+base+"/{recID}/workspace/file", requireAuth(http.HandlerFunc(h.readWorkspaceFile)))
 	mux.Handle("GET "+base+"/{recID}/workspace/download", requireAuth(http.HandlerFunc(h.downloadWorkspaceEntry)))
@@ -113,6 +127,10 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+base+"/batch-pom-version/status", requireAuth(http.HandlerFunc(h.batchPomVersionStatus)))
 	mux.Handle("GET "+base+"/batch-pom-version/history", requireAuth(http.HandlerFunc(h.listBatchPomVersionHistory)))
 	mux.Handle("GET "+base+"/batch-pom-version/history/{batchID}/log", requireAuth(http.HandlerFunc(h.getBatchPomVersionLog)))
+	mux.Handle("POST "+base+"/batch-branch-clone", requireAuth(http.HandlerFunc(h.batchBranchClone)))
+	mux.Handle("GET "+base+"/batch-branch-clone/status", requireAuth(http.HandlerFunc(h.batchBranchCloneStatus)))
+	mux.Handle("GET "+base+"/batch-branch-clone/history", requireAuth(http.HandlerFunc(h.listBatchBranchCloneHistory)))
+	mux.Handle("GET "+base+"/batch-branch-clone/history/{batchID}/log", requireAuth(http.HandlerFunc(h.getBatchBranchCloneLog)))
 	mux.Handle("POST "+base+"/batch-post-build-email", requireAuth(http.HandlerFunc(h.batchPostBuildEmail)))
 	mux.Handle("POST "+base+"/batch-build-steps", requireAuth(http.HandlerFunc(h.batchBuildSteps)))
 	mux.Handle("POST "+base+"/cron-preview", requireAuth(http.HandlerFunc(h.previewCron)))
@@ -331,6 +349,19 @@ func (p *projectPayload) toModel(h *Handler, recID string) (*repository.PackProj
 		return nil, err
 	}
 	cfg, err := projectcfg.ParseConfigJSON(cfgJSON)
+	if err != nil {
+		return nil, err
+	}
+	if err := projectcfg.ValidateScmConfig(cfg, repoURL); err != nil {
+		return nil, err
+	}
+	if cfg.ScmMode != "" {
+		cfg.ScmMode = projectcfg.NormalizeScmMode(cfg.ScmMode)
+	}
+	if cfg.LocalSourcePath != "" {
+		cfg.LocalSourcePath = projectcfg.NormalizeLocalSourcePath(cfg.LocalSourcePath)
+	}
+	cfgJSON, err = projectcfg.MarshalConfigJSON(cfg)
 	if err != nil {
 		return nil, err
 	}

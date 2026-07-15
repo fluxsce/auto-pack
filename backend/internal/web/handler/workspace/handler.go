@@ -66,6 +66,8 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("GET "+base, requireAuth(http.HandlerFunc(h.list)))
 	mux.Handle("POST "+base, requireAuth(http.HandlerFunc(h.create)))
 	mux.Handle("POST "+base+"/clone", requireAuth(http.HandlerFunc(h.clone)))
+	mux.Handle("GET "+base+"/{recID}/export", requireAuth(http.HandlerFunc(h.export)))
+	mux.Handle("POST "+base+"/import", requireAuth(http.HandlerFunc(h.importBundle)))
 	mux.Handle("GET "+base+"/{recID}", requireAuth(http.HandlerFunc(h.get)))
 	mux.Handle("PUT "+base+"/{recID}", requireAuth(http.HandlerFunc(h.update)))
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))

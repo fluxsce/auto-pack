@@ -105,6 +105,9 @@ export type {
 export type { BuildSchedule, BuildTriggers } from './build-triggers'
 
 export interface ProjectBuildConfig {
+  scm_mode?: 'local' | 'git'
+  /** Optional override; empty uses workspace work_dir */
+  local_source_path?: string
   build_cmd: string
   output_dir: string
   artifact_pattern: string
@@ -145,6 +148,56 @@ export interface PackWorkspaceClonePayload extends PackWorkspacePayload {
 
 export interface PackWorkspaceCloneResult extends PackWorkspace {
   projects_cloned: number
+}
+
+export interface WorkspaceBundleProject {
+  source_rec_id?: string
+  project_name: string
+  project_version: string
+  project_type: ProjectType
+  repo_url: string
+  repo_branch: string
+  work_dir: string
+  config_json: string
+  git_env_rec_id: string
+  jdk_env_rec_id: string
+  maven_env_rec_id: string
+  nodejs_env_rec_id: string
+  deploy_env_rec_id: string
+  is_enabled: number
+  sort_num: number
+  remark: string
+}
+
+export interface WorkspaceBundle {
+  format_version: number
+  exported_at: string
+  source_workspace_rec_id?: string
+  workspace: {
+    workspace_code: string
+    workspace_name: string
+    root_dir: string
+    is_enabled: number
+    sort_num: number
+    remark: string
+  }
+  projects: WorkspaceBundleProject[]
+}
+
+export type WorkspaceImportMode = 'new' | 'replace'
+
+export interface WorkspaceImportPayload {
+  mode: WorkspaceImportMode
+  target_workspace_rec_id?: string
+  workspace_code?: string
+  workspace_name?: string
+  root_dir?: string
+  bundle: WorkspaceBundle
+}
+
+export interface WorkspaceImportResult extends PackWorkspace {
+  projects_imported: number
+  mode: WorkspaceImportMode
 }
 
 export interface PackProject {

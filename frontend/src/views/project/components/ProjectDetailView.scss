@@ -195,6 +195,10 @@
   }
 
   &__meta {
+    margin: 0 0 12px;
+  }
+
+  &__push-local {
     margin: 0 0 20px;
   }
 
@@ -220,6 +224,11 @@
   &__mono {
     font-family: ui-monospace, monospace;
     font-size: 12px;
+  }
+
+  &__path {
+    line-height: 1.55;
+    user-select: all;
   }
 
   &__last-build {

@@ -29,6 +29,7 @@ import { DEFAULT_BUILD_TRIGGERS } from '@/types/build-triggers'
 import { DEFAULT_BUILD_CONFIG, mergeBuildConfig } from './project-defaults'
 import { FALLBACK_PROJECT_TYPES, normalizeProjectTypes, projectTypeLabel } from './project-meta'
 import { normalizeProjectFormFields, trimProjectFromApi } from './project-form-trim'
+import { effectiveScmMode } from './project-scm'
 import { workspaceOptionLabel } from './workspace/workspace-paths'
 
 export type ProjectPanelMode = 'none' | 'create' | 'edit' | 'clone'
@@ -254,7 +255,11 @@ export function useProjects() {
     form.sort_num = 0
     form.remark = ''
     form.config_json = '{}'
-    buildConfig.value = structuredClone(DEFAULT_BUILD_CONFIG[type])
+    buildConfig.value = {
+      ...structuredClone(DEFAULT_BUILD_CONFIG[type]),
+      scm_mode: 'local',
+      local_source_path: '',
+    }
   }
 
   function openCreate(): void {
@@ -308,6 +313,8 @@ export function useProjects() {
     const defaults = DEFAULT_BUILD_CONFIG[type]
     buildConfig.value = {
       ...structuredClone(defaults),
+      scm_mode: prev.scm_mode ?? 'local',
+      local_source_path: prev.local_source_path ?? '',
       log_retention_days: prev.log_retention_days ?? defaults.log_retention_days,
       post_build_actions: prev.post_build_actions ?? [],
       build_triggers: prev.build_triggers ?? structuredClone(DEFAULT_BUILD_TRIGGERS),
@@ -373,6 +380,10 @@ export function useProjects() {
     }
     if (!form.project_version.trim()) {
       message.warning(t('projectVersionRequired'))
+      return
+    }
+    if (effectiveScmMode(form, buildConfig.value) === 'git' && !form.repo_url.trim()) {
+      message.warning(t('projectScmGitRepoRequired'))
       return
     }
     saving.value = true

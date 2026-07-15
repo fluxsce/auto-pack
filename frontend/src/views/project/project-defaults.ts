@@ -65,10 +65,15 @@ export function mergeBuildConfig(type: ProjectType, raw: string): ProjectBuildCo
   const defaults = DEFAULT_BUILD_CONFIG[type]
   try {
     const stored = JSON.parse(raw || '{}') as Partial<ProjectBuildConfig>
+    const scmMode = stored.scm_mode === 'git' ? 'git' : stored.scm_mode === 'local' ? 'local' : undefined
+    const localSourcePath =
+      typeof stored.local_source_path === 'string' ? stored.local_source_path.trim() : ''
     const rawDays = (stored as Record<string, unknown>).log_retention_days
     const logRetentionDays =
       typeof rawDays === 'number' && rawDays > 0 ? Math.min(365, Math.floor(rawDays)) : defaults.log_retention_days
     return {
+      scm_mode: scmMode,
+      local_source_path: localSourcePath,
       build_cmd: stored.build_cmd?.trim() ? stored.build_cmd : defaults.build_cmd,
       output_dir: stored.output_dir?.trim() ? stored.output_dir : defaults.output_dir,
       artifact_pattern: stored.artifact_pattern?.trim()

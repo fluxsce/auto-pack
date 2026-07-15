@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"auto-pack/backend/internal/repository"
+	"auto-pack/backend/pkg/projectcfg"
 	"auto-pack/backend/pkg/projectfs"
 )
 
@@ -94,10 +95,10 @@ func (r *Runner) listWorkspaceSyncProjects(workspaceRecID string) (*repository.P
 		if p.IsEnabled != 1 {
 			continue
 		}
-		if strings.TrimSpace(p.RepoURL) == "" {
+		if !projectcfg.UsesGitSource(&p) {
 			continue
 		}
-		if projectfs.ResolveProjectAbsDir(&p, ws, r.dataDir) == "" {
+		if projectfs.ResolveProjectSourceAbsDir(&p, ws, r.dataDir) == "" {
 			continue
 		}
 		eligible = append(eligible, p)
@@ -119,7 +120,7 @@ func (r *Runner) syncWorkspaceProjects(
 		if onProgress != nil {
 			onProgress(p.ProjectName, i)
 		}
-		workDir := projectfs.ResolveProjectAbsDir(p, ws, r.dataDir)
+		workDir := projectfs.ResolveProjectSourceAbsDir(p, ws, r.dataDir)
 		release := r.acquireProjectBuild(p.RecID)
 		err := r.syncSource(ctx, p, workDir, log, &syncSourceOpts{compact: true})
 		release()

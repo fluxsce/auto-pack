@@ -12,13 +12,22 @@ import (
 // versionTagLabelPattern matches project version tags like V9.0.0-P08 or V9.0.0-P01-01.
 var versionTagLabelPattern = regexp.MustCompile(`^V[\d.]+-P\d+(-\d+)?$`)
 
-// NormalizeTagName strips refs/tags/ prefixes and surrounding space.
+// NormalizeTagName strips refs/tags/, tags/, tag/ prefixes (repeated) and surrounding space.
 func NormalizeTagName(s string) string {
 	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "refs/tags/")
-	s = strings.TrimPrefix(s, "tags/")
-	s = strings.TrimPrefix(s, "tag/")
-	return strings.TrimSpace(s)
+	for {
+		before := s
+		s = strings.TrimPrefix(s, "refs/tags/")
+		s = strings.TrimPrefix(s, "tags/")
+		s = strings.TrimPrefix(s, "tag/")
+		s = strings.TrimSpace(s)
+		s = strings.TrimPrefix(s, "/")
+		s = strings.TrimSpace(s)
+		if s == before {
+			break
+		}
+	}
+	return s
 }
 
 // FormatTagRef returns the canonical repo_branch value for a version tag (refs/tags/NAME).
@@ -30,9 +39,28 @@ func FormatTagRef(tag string) string {
 	return "refs/tags/" + name
 }
 
-// IsTagRef reports whether repoBranch stores a tag ref.
+// IsTagsPathRef reports tags/NAME shorthand (not refs/tags/).
+func IsTagsPathRef(repoBranch string) bool {
+	repoBranch = strings.TrimSpace(repoBranch)
+	return strings.HasPrefix(repoBranch, "tags/") && !strings.HasPrefix(repoBranch, "refs/tags/")
+}
+
+// IsTagRef reports whether repoBranch uses an explicit tags path (tags/ or refs/tags/).
+// Bare version labels like V9.0.0-P06 are treated as branch names, not tags.
 func IsTagRef(repoBranch string) bool {
-	return strings.HasPrefix(strings.TrimSpace(repoBranch), "refs/tags/")
+	repoBranch = strings.TrimSpace(repoBranch)
+	if repoBranch == "" {
+		return false
+	}
+	if strings.HasPrefix(repoBranch, "refs/tags/") {
+		name := NormalizeTagName(repoBranch)
+		return name != "" && !strings.Contains(name, "/")
+	}
+	if IsTagsPathRef(repoBranch) {
+		name := NormalizeTagName(repoBranch)
+		return name != "" && !strings.Contains(name, "/")
+	}
+	return false
 }
 
 // IsVersionTagLabel reports whether s is a short version tag name (not a git branch path).
@@ -44,7 +72,7 @@ func IsVersionTagLabel(s string) bool {
 	return versionTagLabelPattern.MatchString(s)
 }
 
-// NormalizeRepoBranchForStorage returns canonical repo_branch: version tags become refs/tags/NAME.
+// NormalizeRepoBranchForStorage returns canonical repo_branch: tag refs become refs/tags/NAME.
 func NormalizeRepoBranchForStorage(repoBranch string) string {
 	repoBranch = strings.TrimSpace(repoBranch)
 	if repoBranch == "" {
@@ -53,13 +81,15 @@ func NormalizeRepoBranchForStorage(repoBranch string) string {
 	if IsTagRef(repoBranch) {
 		return FormatTagRef(repoBranch)
 	}
-	if strings.Contains(repoBranch, "/") {
-		return repoBranch
-	}
-	if IsVersionTagLabel(repoBranch) {
-		return FormatTagRef(repoBranch)
-	}
 	return repoBranch
+}
+
+// CloneBranchForSync returns git clone --branch value: tag refs use bare tag name (V9.0.0-P06).
+func CloneBranchForSync(repoBranch string) string {
+	if IsTagRef(repoBranch) {
+		return NormalizeTagName(repoBranch)
+	}
+	return strings.TrimSpace(repoBranch)
 }
 
 // CheckoutRefCandidates returns refs to try with git checkout -f (newest preference first).
@@ -81,14 +111,14 @@ func CheckoutRefCandidates(repoBranch string) []string {
 		seen[s] = struct{}{}
 		out = append(out, s)
 	}
-	add(repoBranch)
 	if IsTagRef(repoBranch) {
 		name := NormalizeTagName(repoBranch)
+		add(FormatTagRef(name))
 		add(name)
 		add("tags/" + name)
-	} else if IsVersionTagLabel(repoBranch) {
-		add(FormatTagRef(repoBranch))
+		return out
 	}
+	add(repoBranch)
 	return out
 }
 

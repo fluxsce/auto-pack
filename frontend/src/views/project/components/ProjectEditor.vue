@@ -15,6 +15,7 @@ import { gitEnvOptionLabel } from '@/views/env/env-git'
 import { projectTypeTagClass, suggestedEnvTypes } from '../project-meta'
 import { derivedProjectWorkDir, resolvedWorkPath } from '../project-paths'
 import { normalizeProjectFormFields } from '../project-form-trim'
+import { effectiveScmMode, resolveProjectSourceDisplay } from '../project-scm'
 import { effectiveWorkspaceRoot, workspaceOptionLabel } from '../workspace/workspace-paths'
 import {
   PROJECT_EDITOR_NAV,
@@ -23,7 +24,8 @@ import {
 } from './project-editor-nav'
 import ProjectBuildTriggersPanel from './panels/ProjectBuildTriggersPanel.vue'
 import ProjectPostBuildPanel from './panels/ProjectPostBuildPanel.vue'
-import WorkspacePickerDialog from '../workspace/WorkspacePickerDialog.vue'
+import { useMessage } from '@/components/feedback/message'
+import { pushProjectLocalSource } from '@/request/api/project'
 
 const props = defineProps<{
   title: string
@@ -48,15 +50,18 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const router = useRouter()
+const message = useMessage()
 
 const projectType = defineModel<ProjectType>('projectType', { required: true })
 const buildConfigModel = defineModel<ProjectBuildConfig>('buildConfig', { required: true })
 
 const activeSection = ref<ProjectEditorSection>('general')
 const workspacePickerOpen = ref(false)
-const scmMode = ref<ScmMode>('none')
+const scmMode = ref<ScmMode>('local')
 const generalAdvancedOpen = ref(false)
 const scmAdvancedOpen = ref(false)
+const remotePushOpen = ref(false)
+const pushingLocal = ref(false)
 
 const repoRefSuggestions = computed(() => [
   t('projectBranchTagMain'),
@@ -78,6 +83,21 @@ const workPathPreview = computed(() => {
   return resolvedWorkPath(editorWorkspace.value, rel)
 })
 
+const localSourceDisplay = computed(() =>
+  resolveProjectSourceDisplay(
+    { project_name: props.form.project_name, project_type: projectType.value, config_json: '{}' },
+    editorWorkspace.value,
+    buildConfigModel.value,
+  ),
+)
+
+const canPushLocalSource = computed(
+  () =>
+    scmMode.value === 'local' &&
+    !!props.editingId &&
+    !!props.form.repo_url.trim(),
+)
+
 const visibleEnvTypes = computed(() => suggestedEnvTypes(projectType.value))
 
 const showJdk = computed(() => visibleEnvTypes.value.includes('jdk'))
@@ -85,10 +105,10 @@ const showMaven = computed(() => visibleEnvTypes.value.includes('maven'))
 const showNodejs = computed(() => visibleEnvTypes.value.includes('nodejs'))
 
 function inferScmMode(): void {
-  scmMode.value =
-    props.form.repo_url.trim() || props.form.git_env_rec_id.trim() ? 'git' : 'none'
+  scmMode.value = effectiveScmMode(props.form, buildConfigModel.value)
   generalAdvancedOpen.value = props.form.remark.trim() !== '' || props.form.sort_num > 0
   scmAdvancedOpen.value = !!props.form.git_env_rec_id.trim()
+  remotePushOpen.value = scmMode.value === 'local' && !!props.form.repo_url.trim()
 }
 
 watch(
@@ -98,16 +118,16 @@ watch(
     props.form.git_env_rec_id,
     props.form.remark,
     props.form.sort_num,
+    buildConfigModel.value.scm_mode,
   ],
   () => inferScmMode(),
   { immediate: true },
 )
 
-watch(scmMode, (mode, prev) => {
-  if (mode === 'none' && prev === 'git') {
-    props.form.repo_url = ''
-    props.form.repo_branch = 'main'
-    props.form.git_env_rec_id = ''
+watch(scmMode, (mode) => {
+  buildConfigModel.value.scm_mode = mode
+  if (mode === 'git') {
+    buildConfigModel.value.local_source_path = ''
   }
 })
 
@@ -116,12 +136,27 @@ watch(
   (id) => {
     if (!id) {
       activeSection.value = 'general'
-      scmMode.value = 'none'
+      scmMode.value = 'local'
+      buildConfigModel.value.scm_mode = 'local'
       generalAdvancedOpen.value = false
       scmAdvancedOpen.value = false
+      remotePushOpen.value = false
     }
   },
 )
+
+async function onPushLocalSource(): Promise<void> {
+  if (!props.editingId || !canPushLocalSource.value) return
+  pushingLocal.value = true
+  try {
+    await pushProjectLocalSource(props.editingId)
+    message.success(t('projectScmPushSuccess'))
+  } catch (e) {
+    message.error((e as Error).message)
+  } finally {
+    pushingLocal.value = false
+  }
+}
 
 function applyRepoRef(ref: string): void {
   props.form.repo_branch = ref
@@ -259,12 +294,83 @@ function trimFormFields(): void {
 
             <el-form-item :label="$t('projectNavScm')" class="project-editor__scm-radio">
               <el-radio-group v-model="scmMode">
-                <el-radio label="none">{{ $t('projectScmNone') }}</el-radio>
+                <el-radio label="local">{{ $t('projectScmLocal') }}</el-radio>
                 <el-radio label="git">Git</el-radio>
               </el-radio-group>
             </el-form-item>
 
-            <template v-if="scmMode === 'git'">
+            <template v-if="scmMode === 'local'">
+              <el-form-item :label="$t('projectScmLocalPath')">
+                <el-input
+                  v-model="buildConfigModel.local_source_path"
+                  :placeholder="$t('projectScmLocalPathPlaceholder')"
+                />
+                <p class="project-editor__hint">{{ $t('projectScmLocalPathHint') }}</p>
+              </el-form-item>
+              <el-form-item :label="$t('projectColWorkDir')">
+                <p class="project-editor__path-readonly">{{ localSourceDisplay || '—' }}</p>
+              </el-form-item>
+
+              <button
+                type="button"
+                class="project-editor__advanced-toggle"
+                @click="remotePushOpen = !remotePushOpen"
+              >
+                <el-icon :class="{ 'project-editor__advanced-chevron--open': remotePushOpen }">
+                  <ArrowRight />
+                </el-icon>
+                {{ $t('projectScmRemotePushSection') }}
+              </button>
+              <div v-show="remotePushOpen" class="project-editor__advanced-body">
+                <p class="project-editor__hint project-editor__hint--block">
+                  {{ $t('projectScmRemotePushHint') }}
+                </p>
+                <el-form-item :label="$t('projectColRepoUrl')">
+                  <el-input
+                    v-model="form.repo_url"
+                    :placeholder="$t('projectRepoUrlPlaceholder')"
+                    @blur="trimFormFields"
+                  />
+                </el-form-item>
+                <el-form-item :label="$t('projectColBranch')">
+                  <el-input
+                    v-model="form.repo_branch"
+                    :placeholder="$t('projectBranchPlaceholder')"
+                    @blur="trimFormFields"
+                  />
+                </el-form-item>
+                <el-form-item :label="$t('projectColGitAuth')">
+                  <el-select
+                    v-model="form.git_env_rec_id"
+                    clearable
+                    filterable
+                    class="project-editor__full"
+                    :placeholder="$t('projectGitAuthPlaceholder')"
+                    @visible-change="onEnvSelectVisible"
+                  >
+                    <el-option
+                      v-for="e in envOptions('git')"
+                      :key="e.rec_id"
+                      :label="gitEnvOptionLabel(t, e.env_name, e.config_json)"
+                      :value="e.rec_id"
+                    />
+                    <template #footer>
+                      <button type="button" class="project-editor__select-add" @click="goAddGitAuth">
+                        <el-icon><Plus /></el-icon>
+                        {{ $t('projectGitAuthAdd') }}
+                      </button>
+                    </template>
+                  </el-select>
+                </el-form-item>
+                <el-form-item v-if="canPushLocalSource">
+                  <el-button type="primary" plain :loading="pushingLocal" @click="onPushLocalSource">
+                    {{ $t('projectScmPushToRemote') }}
+                  </el-button>
+                </el-form-item>
+              </div>
+            </template>
+
+            <template v-else-if="scmMode === 'git'">
               <el-form-item :label="$t('projectColRepoUrl')">
                 <el-input
                   v-model="form.repo_url"

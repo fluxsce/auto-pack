@@ -7,11 +7,14 @@ import (
 	"strings"
 
 	"auto-pack/backend/internal/repository"
+	"auto-pack/backend/pkg/projectcfg"
 )
 
 // PomVersionRequest updates pom.xml versions in a project work tree and optionally publishes to Git.
 type PomVersionRequest struct {
 	WorkDir       string
+	Workspace     *repository.PackWorkspace
+	DataDir       string
 	Branch        string
 	Tag           string
 	CommitMessage string
@@ -52,7 +55,7 @@ func (u *PomVersionUpdater) Run(ctx context.Context, project *repository.PackPro
 		res.Message = err.Error()
 		return res
 	}
-	if strings.ToLower(strings.TrimSpace(project.ProjectType)) != "maven" {
+	if !IsMavenReleaseProject(project.ProjectType) {
 		res.Status = "skipped"
 		res.Message = "not a Maven project"
 		return res
@@ -70,13 +73,19 @@ func (u *PomVersionUpdater) Run(ctx context.Context, project *repository.PackPro
 	log := newPublishLogger(&steps)
 	log.step("开始更新 POM 版本（工程 %s）", name)
 
-	if u.Git != nil && strings.TrimSpace(project.RepoURL) != "" {
-		if err := u.Git.SyncProjectBranchWorktree(ctx, project, workDir, branch, log); err != nil {
+	if u.Git != nil && projectcfg.HasRemotePush(project) {
+		if req.Workspace != nil && strings.TrimSpace(req.DataDir) != "" {
+			if err := u.Git.SyncProjectSourceWorktree(ctx, project, req.Workspace, req.DataDir, branch, log); err != nil {
+				res.Message = err.Error()
+				res.Steps = steps
+				return res
+			}
+		} else if err := u.Git.SyncProjectBranchWorktree(ctx, project, workDir, branch, log); err != nil {
 			res.Message = err.Error()
 			res.Steps = steps
 			return res
 		}
-	} else if strings.TrimSpace(project.RepoURL) == "" {
+	} else if !projectcfg.HasRemotePush(project) {
 		res.Status = "skipped"
 		res.Message = "no Git repository URL configured"
 		res.Steps = steps

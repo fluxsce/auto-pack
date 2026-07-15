@@ -67,12 +67,8 @@ func FetchOrigin(ctx context.Context, dir string, env []string, remote, repoBran
 }
 
 func tagNameForFetch(repoBranch string) string {
-	repoBranch = strings.TrimSpace(repoBranch)
-	if repoBranch == "" {
+	if !IsTagRef(repoBranch) {
 		return ""
 	}
-	if IsTagRef(repoBranch) || IsVersionTagLabel(repoBranch) {
-		return NormalizeTagName(repoBranch)
-	}
-	return ""
+	return NormalizeTagName(repoBranch)
 }

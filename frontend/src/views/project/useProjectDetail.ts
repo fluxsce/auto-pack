@@ -9,7 +9,7 @@ import {
 } from '@/request/api/build'
 import { fetchProject } from '@/request/api/project'
 import type { PackBuild, PackProject, PackWorkspace, ProjectWorkspaceEntry } from '@/types'
-import { derivedProjectWorkDir, resolvedWorkPath } from './project-paths'
+import { resolveProjectSourceDisplay } from './project-scm'
 
 export type ProjectDetailSection = 'status' | 'workspace' | 'log'
 
@@ -25,6 +25,7 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
   const selectedBuildId = ref<string | null>(null)
   const logContent = ref('')
   const logOffset = ref(0)
+  const logTotal = ref(0)
   const logLoading = ref(false)
   const logComplete = ref(true)
 
@@ -46,8 +47,7 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
     const p = project.value
     const ws = getWorkspace()
     if (!p) return ''
-    const rel = derivedProjectWorkDir(p.project_name)
-    return resolvedWorkPath(ws, rel)
+    return resolveProjectSourceDisplay(p, ws)
   })
 
   function stopLogPoll(): void {
@@ -55,6 +55,14 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
       clearInterval(logPollTimer)
       logPollTimer = null
     }
+  }
+
+  function isLogFullyRead(): boolean {
+    return logOffset.value >= logTotal.value
+  }
+
+  function shouldKeepLogPolling(): boolean {
+    return !logComplete.value || !isLogFullyRead()
   }
 
   async function loadProject(recId: string): Promise<void> {
@@ -107,18 +115,33 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
     if (!project.value || !selectedBuildId.value) return
     logLoading.value = true
     try {
-      const offset = reset ? 0 : logOffset.value
-      const res = await fetchProjectBuildLog(project.value.rec_id, selectedBuildId.value, offset)
       if (reset) {
-        logContent.value = res.content
-      } else if (res.content) {
-        logContent.value += res.content
+        logContent.value = ''
+        logOffset.value = 0
+        logTotal.value = 0
       }
-      logOffset.value = res.offset + res.size
-      logComplete.value = res.complete
-      if (res.complete) stopLogPoll()
-      const idx = builds.value.findIndex((b) => b.rec_id === res.build.rec_id)
-      if (idx >= 0) builds.value[idx] = res.build
+
+      for (;;) {
+        const res = await fetchProjectBuildLog(
+          project.value.rec_id,
+          selectedBuildId.value,
+          logOffset.value,
+        )
+        if (res.content) {
+          logContent.value += res.content
+        }
+        logOffset.value = res.offset + res.size
+        logTotal.value = res.total
+        logComplete.value = res.complete
+
+        const idx = builds.value.findIndex((b) => b.rec_id === res.build.rec_id)
+        if (idx >= 0) builds.value[idx] = res.build
+
+        if (!reset) break
+        if (!res.complete || isLogFullyRead()) break
+      }
+
+      if (!shouldKeepLogPolling()) stopLogPoll()
     } catch (e) {
       message.error((e as Error).message)
     } finally {
@@ -129,7 +152,7 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
   function startLogPoll(): void {
     stopLogPoll()
     logPollTimer = setInterval(() => {
-      if (logComplete.value) {
+      if (!shouldKeepLogPolling()) {
         stopLogPoll()
         return
       }
@@ -140,10 +163,8 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
   async function selectBuild(buildId: string): Promise<void> {
     selectedBuildId.value = buildId
     activeSection.value = 'log'
-    logContent.value = ''
-    logOffset.value = 0
     await loadLog(true)
-    if (!logComplete.value) startLogPoll()
+    if (shouldKeepLogPolling()) startLogPoll()
     else stopLogPoll()
   }
 
@@ -176,7 +197,7 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
     }
     if (section === 'log' && selectedBuildId.value) {
       void loadLog(true).then(() => {
-        if (!logComplete.value) startLogPoll()
+        if (shouldKeepLogPolling()) startLogPoll()
       })
     }
   }
@@ -195,6 +216,7 @@ export function useProjectDetail(getWorkspace: () => PackWorkspace | null | unde
     selectedBuildId.value = null
     logContent.value = ''
     logOffset.value = 0
+    logTotal.value = 0
     activeSection.value = 'status'
     workspacePath.value = '.'
     workspaceEntries.value = []

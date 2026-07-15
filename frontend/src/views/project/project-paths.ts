@@ -28,7 +28,7 @@ export function derivedProjectWorkDir(projectName: string): string {
 
 /** Display absolute/resolved path for work directory hint. */
 export function resolvedWorkPath(
-  ws: Pick<PackWorkspace, 'root_dir' | 'effective_root_dir'> | null | undefined,
+  ws: Pick<PackWorkspace, 'root_dir' | 'effective_root_dir' | 'workspace_code'> | null | undefined,
   workDir: string,
 ): string {
   const rel = workDir.trim()

@@ -64,7 +64,7 @@ func (h *Handler) batchPomVersion(w http.ResponseWriter, r *http.Request) {
 		writeWorkspaceLoadError(w, err)
 		return
 	}
-	projects, err := h.projects.List(wsID, "maven")
+	projects, err := h.loadMavenProjects(wsID)
 	if err != nil {
 		httpx.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -173,6 +173,9 @@ func (h *Handler) runBatchPomVersion(
 		h.persistPomVersionLogSnapshot(logPath, body, job.BatchRecID, results, updated, skipped, failed, p.ProjectName)
 
 		var res projectrelease.PomVersionResult
+		if !projectrelease.IsMavenReleaseProject(p.ProjectType) {
+			continue
+		}
 		if p.IsEnabled != 1 {
 			res = projectrelease.PomVersionResult{
 				ProjectName: p.ProjectName,
@@ -181,9 +184,11 @@ func (h *Handler) runBatchPomVersion(
 			}
 			skipped++
 		} else {
-			workDir := projectfs.ResolveProjectAbsDir(p, ws, h.dataDir)
+			workDir := projectfs.ResolveProjectSourceAbsDir(p, ws, h.dataDir)
 			res = updater.Run(ctx, p, projectrelease.PomVersionRequest{
 				WorkDir:       workDir,
+				Workspace:     ws,
+				DataDir:       h.dataDir,
 				Tag:           body.VersionTag,
 				CommitMessage: body.CommitMessage,
 				AllowRepeat:   allowRepeat,
@@ -269,4 +274,18 @@ func (h *Handler) formatPersistedPomVersionLog(
 		Failed:            failed,
 		Results:           projectrelease.PomVersionResultsAsReleaseResults(results),
 	})
+}
+
+func (h *Handler) loadMavenProjects(wsID string) ([]repository.PackProject, error) {
+	all, err := h.projects.List(wsID, "maven")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]repository.PackProject, 0, len(all))
+	for _, p := range all {
+		if projectrelease.IsMavenReleaseProject(p.ProjectType) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }

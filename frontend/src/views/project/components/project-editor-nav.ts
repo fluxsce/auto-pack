@@ -24,4 +24,4 @@ export const PROJECT_EDITOR_NAV: ProjectEditorNavItem[] = [
   { id: 'deploy', labelKey: 'projectNavDeploy', icon: Promotion },
 ]
 
-export type ScmMode = 'none' | 'git'
+export type ScmMode = 'local' | 'git'

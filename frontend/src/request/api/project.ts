@@ -110,6 +110,13 @@ export function batchUpdateRepoBranch(
   return http.post('/projects/batch-repo-branch', data)
 }
 
+export function pushProjectLocalSource(
+  projectRecId: string,
+  data?: { commit_message?: string; allow_repeat?: boolean },
+): Promise<{ steps: string[] }> {
+  return http.post(`/projects/${projectRecId}/push-local-source`, data ?? {})
+}
+
 export interface BatchProjectVersionPayload {
   workspace_rec_id: string
   project_version: string
@@ -225,6 +232,110 @@ export function fetchWorkspacePomVersionLog(
   offset = 0,
 ): Promise<WorkspacePomVersionLogResponse> {
   return http.get(`/projects/batch-pom-version/history/${batchRecId}/log`, {
+    params: { workspace_rec_id: workspaceRecId, offset },
+  })
+}
+
+export interface BatchBranchClonePayload {
+  workspace_rec_id: string
+  source_branch: string
+  target_branch: string
+}
+
+export interface BatchBranchCloneResultItem {
+  project_name: string
+  status: string
+  message?: string
+  steps?: string[]
+}
+
+export interface BatchBranchCloneStartResponse {
+  status: 'running'
+  batch_rec_id: string
+  workspace_rec_id: string
+  workspace_name?: string
+  source_branch?: string
+  target_branch?: string
+}
+
+export type WorkspaceBranchCloneStatus = 'running' | 'success' | 'partial' | 'failed'
+
+export interface WorkspaceBranchCloneRecord {
+  rec_id: string
+  workspace_rec_id: string
+  batch_num: number
+  status: WorkspaceBranchCloneStatus
+  source_branch: string
+  target_branch: string
+  cloned: number
+  skipped: number
+  failed: number
+  message?: string
+  log_path?: string
+  started_at?: string
+  finished_at?: string
+  created_at: string
+}
+
+export interface WorkspaceBranchCloneLogResponse {
+  content: string
+  offset: number
+  size: number
+  total: number
+  complete: boolean
+  status: WorkspaceBranchCloneStatus
+  batch: WorkspaceBranchCloneRecord
+}
+
+export type BatchBranchCloneJobStatus = 'idle' | 'running' | 'completed'
+
+export interface BatchBranchCloneStatusResponse {
+  status: BatchBranchCloneJobStatus
+  batch_rec_id?: string
+  workspace_rec_id?: string
+  workspace_name?: string
+  source_branch?: string
+  target_branch?: string
+  started_at?: string
+  finished_at?: string
+  cloned?: number
+  skipped?: number
+  failed?: number
+  results?: BatchBranchCloneResultItem[]
+  current_project?: string
+  done_count?: number
+  total_count?: number
+  foreign?: boolean
+  active_workspace_name?: string
+}
+
+export function batchBranchClone(data: BatchBranchClonePayload): Promise<BatchBranchCloneStartResponse> {
+  return http.post('/projects/batch-branch-clone', data)
+}
+
+export function batchBranchCloneStatus(
+  workspaceRecId: string,
+): Promise<BatchBranchCloneStatusResponse> {
+  return http.get('/projects/batch-branch-clone/status', {
+    params: { workspace_rec_id: workspaceRecId },
+  })
+}
+
+export function fetchWorkspaceBranchCloneHistory(
+  workspaceRecId: string,
+  limit = 30,
+): Promise<{ items: WorkspaceBranchCloneRecord[] }> {
+  return http.get('/projects/batch-branch-clone/history', {
+    params: { workspace_rec_id: workspaceRecId, limit },
+  })
+}
+
+export function fetchWorkspaceBranchCloneLog(
+  workspaceRecId: string,
+  batchRecId: string,
+  offset = 0,
+): Promise<WorkspaceBranchCloneLogResponse> {
+  return http.get(`/projects/batch-branch-clone/history/${batchRecId}/log`, {
     params: { workspace_rec_id: workspaceRecId, offset },
   })
 }
