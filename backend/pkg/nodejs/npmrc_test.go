@@ -47,8 +47,20 @@ func TestPrepareUserConfig_useExistingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cleanup()
-	if path != npmrc {
-		t.Fatalf("got %q want %q", path, npmrc)
+	// Always overlays minimum-release-age=0 for CI, so a merged temp npmrc is used.
+	if path == "" || path == npmrc {
+		t.Fatalf("expected merged temp npmrc, got %q", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "registry=http://example.com/npm/") {
+		t.Fatalf("missing base registry: %q", content)
+	}
+	if !strings.Contains(content, "minimum-release-age=0") {
+		t.Fatalf("missing minimum-release-age: %q", content)
 	}
 }
 
@@ -72,6 +84,9 @@ func TestPrepareUserConfig_allowAllBuildsOnly(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "dangerously-allow-all-builds=true") {
 		t.Fatalf("missing allow-all-builds: %q", string(data))
+	}
+	if !strings.Contains(string(data), "minimum-release-age=0") {
+		t.Fatalf("missing minimum-release-age: %q", string(data))
 	}
 }
 

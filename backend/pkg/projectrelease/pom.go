@@ -207,7 +207,8 @@ func CollectPomVersionUpdates(projectDir, tag string) (map[string][]byte, []stri
 		if rel == "." {
 			rel = pomFileName
 		}
-		steps = append(steps, fmt.Sprintf("已更新 %s 版本号为 %s（版本 Tag %s）", rel, pomVer, tag))
+		// Memory only — disk is still unchanged until PublishChanges writes these bytes.
+		steps = append(steps, fmt.Sprintf("已生成 %s 版本号 %s（版本 Tag %s，待写入工作区）", rel, pomVer, tag))
 	}
 	if len(files) == 0 {
 		return nil, steps, nil

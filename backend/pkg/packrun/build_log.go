@@ -96,12 +96,15 @@ func (l *buildLogger) runShell(
 	script string,
 ) (shell.Result, error) {
 	l.cmdScript(script)
+	_ = l.sync()
 	res, err := shell.Run(ctx, script, shell.Options{
 		Dir:              dir,
 		Env:              env,
 		AllowNonZeroExit: true,
+		LiveWriter:       l.f,
 	})
-	l.emitOutput(res)
+	_ = l.sync()
+	// Output is already streamed into the log file via LiveWriter.
 	return res, err
 }
 

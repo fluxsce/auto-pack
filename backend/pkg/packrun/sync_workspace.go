@@ -28,6 +28,11 @@ func (r *Runner) WorkspaceSourceSyncStatus(queryWorkspace string) WorkspaceSourc
 	return r.syncCoord.status(queryWorkspace)
 }
 
+// WorkspaceSourceSyncCapacity returns running sync count, max allowed, and active workspace names.
+func (r *Runner) WorkspaceSourceSyncCapacity() (running, max int, names []string) {
+	return r.syncCoord.RunningSyncSummary()
+}
+
 // SyncWorkspaceSources clones or updates every enabled project with a Git remote in the workspace.
 func (r *Runner) SyncWorkspaceSources(ctx context.Context, workspaceRecID string) (*WorkspaceSyncResult, error) {
 	ws, projects, err := r.listWorkspaceSyncProjects(workspaceRecID)
@@ -38,21 +43,22 @@ func (r *Runner) SyncWorkspaceSources(ctx context.Context, workspaceRecID string
 }
 
 func (r *Runner) runWorkspaceSourceSync(ctx context.Context, job *WorkspaceSourceSyncJob) {
-	ws, projects, err := r.listWorkspaceSyncProjects(job.WorkspaceRecID)
+	wsID := job.WorkspaceRecID
+	ws, projects, err := r.listWorkspaceSyncProjects(wsID)
 	if err != nil {
-		r.syncCoord.recordOutcome(false, false, err.Error())
+		r.syncCoord.recordOutcome(wsID, false, false, err.Error())
 		return
 	}
-	all, err := r.projects.List(job.WorkspaceRecID, "")
+	all, err := r.projects.List(wsID, "")
 	if err != nil {
-		r.syncCoord.recordOutcome(false, false, err.Error())
+		r.syncCoord.recordOutcome(wsID, false, false, err.Error())
 		return
 	}
-	r.syncCoord.setInitialSkipped(countWorkspaceSyncSkipped(all, ws, r.dataDir))
+	r.syncCoord.setInitialSkipped(wsID, countWorkspaceSyncSkipped(all, ws, r.dataDir))
 	total := len(projects)
-	r.syncCoord.setProgress("", 0, total)
+	r.syncCoord.setProgress(wsID, "", 0, total)
 	progress := func(current string, done int) {
-		r.syncCoord.setProgress(current, done, total)
+		r.syncCoord.setProgress(wsID, current, done, total)
 	}
 	_, _ = r.syncWorkspaceProjects(ctx, ws, projects, progress)
 }
@@ -115,6 +121,10 @@ func (r *Runner) syncWorkspaceProjects(
 	log, closeLog := discardBuildLogger()
 	defer closeLog()
 	res := &WorkspaceSyncResult{}
+	wsID := ""
+	if ws != nil {
+		wsID = ws.RecID
+	}
 	for i := range projects {
 		p := &projects[i]
 		if onProgress != nil {
@@ -130,11 +140,11 @@ func (r *Runner) syncWorkspaceProjects(
 		if err != nil {
 			msg := fmt.Sprintf("%s: %s", p.ProjectName, err.Error())
 			res.Failed = append(res.Failed, msg)
-			r.syncCoord.recordOutcome(false, false, msg)
+			r.syncCoord.recordOutcome(wsID, false, false, msg)
 			continue
 		}
 		res.Synced++
-		r.syncCoord.recordOutcome(true, false, "")
+		r.syncCoord.recordOutcome(wsID, true, false, "")
 	}
 	return res, nil
 }

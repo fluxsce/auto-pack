@@ -29,6 +29,9 @@ type Options struct {
 	Stdin io.Reader
 	// AllowNonZeroExit when true returns (Result, nil) even if the process exits non-zero.
 	AllowNonZeroExit bool
+	// LiveWriter receives stdout/stderr as the process runs (line-buffered, redacted).
+	// When set, Run also prefers line-buffered stdio on Unix (stdbuf) when available.
+	LiveWriter io.Writer
 }
 
 // ExitError is returned when a command finishes with a non-zero exit code.
@@ -55,7 +58,12 @@ func Run(ctx context.Context, script string, opts Options) (Result, error) {
 	if script == "" {
 		return Result{}, fmt.Errorf("shell: empty script")
 	}
-	cmd := shellCommand(ctx, script)
+	var cmd *exec.Cmd
+	if opts.LiveWriter != nil {
+		cmd = shellCommandForLive(ctx, script)
+	} else {
+		cmd = shellCommand(ctx, script)
+	}
 	return run(ctx, cmd, opts, "", nil, script)
 }
 
@@ -81,8 +89,20 @@ func run(ctx context.Context, cmd *exec.Cmd, opts Options, name string, args []s
 	}
 
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	if opts.LiveWriter != nil {
+		sink := &syncLineSink{w: opts.LiveWriter}
+		liveOut := newLiveLogWriter(sink)
+		liveErr := newLiveLogWriter(sink)
+		cmd.Stdout = io.MultiWriter(&stdout, liveOut)
+		cmd.Stderr = io.MultiWriter(&stderr, liveErr)
+		defer func() {
+			_ = liveOut.Flush()
+			_ = liveErr.Flush()
+		}()
+	} else {
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+	}
 
 	err := cmd.Run()
 	res := Result{

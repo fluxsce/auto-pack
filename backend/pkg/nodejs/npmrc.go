@@ -145,6 +145,8 @@ func renderUserConfigOverlay(cfg envtypes.NodeJSConfig) string {
 	if PnpmAllowAllBuildsEnabled(cfg) {
 		blocks = append(blocks, "dangerously-allow-all-builds=true")
 	}
+	// pnpm 11+ minimumReleaseAge blocks freshly published private packages in CI.
+	blocks = append(blocks, "minimum-release-age=0")
 	if auth := renderRegistryAuthBlock(cfg); auth != "" {
 		blocks = append(blocks, auth)
 	}
@@ -210,26 +212,34 @@ func registryAuthKey(registry string) string {
 	return "//" + u.Host + path
 }
 
-// EnsureWorkdirPnpmAllowBuilds appends dangerously-allow-all-builds to the project .npmrc when missing.
+// EnsureWorkdirPnpmAllowBuilds appends CI-friendly pnpm settings to the project .npmrc when missing.
 func EnsureWorkdirPnpmAllowBuilds(workDir string) error {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
 		return nil
 	}
 	path := filepath.Join(workDir, ".npmrc")
-	const marker = "dangerously-allow-all-builds=true"
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read project .npmrc: %w", err)
 	}
 	content := string(data)
-	if strings.Contains(strings.ToLower(content), "dangerously-allow-all-builds") {
+	changed := false
+	appendLine := func(marker string) {
+		if strings.Contains(strings.ToLower(content), strings.ToLower(strings.SplitN(marker, "=", 2)[0])) {
+			return
+		}
+		if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += marker + "\n"
+		changed = true
+	}
+	appendLine("dangerously-allow-all-builds=true")
+	appendLine("minimum-release-age=0")
+	if !changed {
 		return nil
 	}
-	if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
-		content += "\n"
-	}
-	content += marker + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write project .npmrc: %w", err)
 	}

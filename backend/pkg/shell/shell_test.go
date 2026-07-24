@@ -183,3 +183,17 @@ func TestRunWithEnv(t *testing.T) {
 	}
 	_ = os.Unsetenv(key)
 }
+
+func TestRunLiveWriter(t *testing.T) {
+	var live strings.Builder
+	res, err := Run(context.Background(), "echo live-shell-line", Options{LiveWriter: &live})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.Stdout, "live-shell-line") {
+		t.Fatalf("stdout = %q", res.Stdout)
+	}
+	if !strings.Contains(live.String(), "live-shell-line") {
+		t.Fatalf("live = %q", live.String())
+	}
+}

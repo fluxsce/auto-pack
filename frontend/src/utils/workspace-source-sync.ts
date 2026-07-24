@@ -10,7 +10,13 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-/** Start async git pre-sync and poll until completed (no long HTTP timeout). */
+/**
+ * Start async git pre-sync and poll until completed (no long HTTP timeout).
+ *
+ * Different workspaces may sync in parallel (server git.sync_max_workspaces).
+ * Capacity exhaustion is reported as HTTP 409 from startWorkspaceSourceSync
+ * (message already localized by the API). Status foreign is legacy and ignored.
+ */
 export async function waitWorkspaceSourceSync(
   workspaceRecId: string,
   onProgress?: (status: WorkspaceSourceSyncStatus) => void,
@@ -19,12 +25,6 @@ export async function waitWorkspaceSourceSync(
   for (;;) {
     const st = await fetchWorkspaceSourceSyncStatus(workspaceRecId)
     onProgress?.(st)
-    if (st.foreign) {
-      const name = st.active_workspace_name?.trim() || ''
-      const err = new Error(name)
-      err.name = 'WorkspaceSourceSyncForeign'
-      throw err
-    }
     if (st.status === 'completed') {
       return st
     }

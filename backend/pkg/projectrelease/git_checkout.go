@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"auto-pack/backend/pkg/git"
 )
 
 func originBranchRef(branch string) string {
@@ -40,10 +42,12 @@ func fetchOriginBranch(ctx context.Context, dir string, env []string, branch str
 		return fmt.Errorf("branch is empty")
 	}
 	refSpec := "refs/heads/" + branch + ":" + originRemoteBranchRef(branch)
-	log.step("git fetch origin %s", refSpec)
-	if _, err := runGit(ctx, dir, env, "fetch", "origin", refSpec); err != nil {
+	args := git.AppendFetchDepthArgs([]string{"fetch", "origin", refSpec})
+	log.step("git %s", strings.Join(args, " "))
+	if _, err := runGit(ctx, dir, env, args...); err != nil {
+		fallback := git.AppendFetchDepthArgs([]string{"fetch", "origin", branch})
 		log.step("git fetch origin %s（简写）", branch)
-		if _, err2 := runGit(ctx, dir, env, "fetch", "origin", branch); err2 != nil {
+		if _, err2 := runGit(ctx, dir, env, fallback...); err2 != nil {
 			return err2
 		}
 	}
@@ -53,9 +57,11 @@ func fetchOriginBranch(ctx context.Context, dir string, env []string, branch str
 // syncOriginRefs fetches remote branches and prunes deleted remote-tracking refs.
 // Tags are fetched on demand with force refspec (see ensureGitTagFetched) so a stale
 // local version tag does not make `fetch --tags` fail with "would clobber existing tag".
+// Branch fetch uses global shallow depth; tag on-demand fetch does not.
 func syncOriginRefs(ctx context.Context, dir string, env []string, log *publishLogger) error {
-	log.step("git fetch --prune origin")
-	if _, err := runGit(ctx, dir, env, "fetch", "--prune", "--progress", "origin"); err != nil {
+	args := git.AppendFetchDepthArgs([]string{"fetch", "--prune", "--progress", "origin"})
+	log.step("git %s", strings.Join(args, " "))
+	if _, err := runGit(ctx, dir, env, args...); err != nil {
 		return err
 	}
 	return nil

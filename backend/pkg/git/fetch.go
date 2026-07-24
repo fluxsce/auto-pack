@@ -30,6 +30,9 @@ func OriginBranchRef(branch string) string {
 }
 
 // FetchOriginArgs builds git fetch arguments for the configured repo branch.
+// Branch tip sync respects GlobalCloneDepth (app.yaml git.clone_depth).
+// Tag refspecs intentionally omit --depth so release checkouts can still reach
+// version tags that sit outside the shallow window of the branch tip.
 func FetchOriginArgs(remote, repoBranch string) []string {
 	remote = strings.TrimSpace(remote)
 	if remote == "" {
@@ -38,9 +41,11 @@ func FetchOriginArgs(remote, repoBranch string) []string {
 	repoBranch = strings.TrimSpace(repoBranch)
 	if tagName := tagNameForFetch(repoBranch); tagName != "" {
 		refspec := "+refs/tags/" + tagName + ":refs/tags/" + tagName
+		// No AppendFetchDepthArgs: old release tags must remain fetchable.
 		return []string{"fetch", "--progress", remote, refspec}
 	}
 	args := []string{"fetch", "--prune", "--progress", remote}
+	args = AppendFetchDepthArgs(args)
 	if repoBranch != "" && !IsTagRef(repoBranch) {
 		args = append(args, "refs/heads/"+repoBranch+":"+RemoteTrackingRef(remote, repoBranch))
 	}
@@ -62,7 +67,8 @@ func FetchOrigin(ctx context.Context, dir string, env []string, remote, repoBran
 	if err == nil || repoBranch == "" || tagNameForFetch(repoBranch) != "" {
 		return err
 	}
-	_, err2 := run(ctx, dir, []string{"fetch", "--prune", "--progress", remote, repoBranch}, shell.Options{Env: env})
+	fallback := AppendFetchDepthArgs([]string{"fetch", "--prune", "--progress", remote, repoBranch})
+	_, err2 := run(ctx, dir, fallback, shell.Options{Env: env})
 	return err2
 }
 

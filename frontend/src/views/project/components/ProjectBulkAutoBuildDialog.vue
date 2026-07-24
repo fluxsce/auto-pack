@@ -223,11 +223,8 @@ async function refreshBuildPlan(): Promise<void> {
     )
   } catch (e) {
     plannedProjects.value = []
-    if (e instanceof Error && e.name === 'WorkspaceSourceSyncForeign') {
-      message.error(t('projectBulkAutoBuildSyncForeign', { name: e.message || '—' }))
-    } else {
-      message.error((e as Error).message)
-    }
+    // Capacity / conflict messages come from the API (e.g. 源码预同步并发已满…).
+    message.error((e as Error).message || t('projectBulkAutoBuildSyncForeign'))
   } finally {
     loadingPlan.value = false
   }

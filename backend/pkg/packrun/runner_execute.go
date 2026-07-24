@@ -403,6 +403,9 @@ func (r *Runner) cloneProjectSource(
 	if cloneBranch != "" {
 		args = append(args, "--branch", cloneBranch, "--single-branch")
 	}
+	// Shallow depth from app.yaml git.clone_depth (default 50). Tag checkouts still
+	// use a dedicated fetch without --depth when the tip window is insufficient.
+	args = git.AppendCloneDepthArgs(args)
 	logURL := sanitizeURLForLog(cloneURL)
 	args = append(args, logURL, workDir)
 	if !o.compact {
@@ -412,6 +415,7 @@ func (r *Runner) cloneProjectSource(
 	if cloneBranch != "" {
 		runArgs = append(runArgs, "--branch", cloneBranch, "--single-branch")
 	}
+	runArgs = git.AppendCloneDepthArgs(runArgs)
 	runArgs = append(runArgs, cloneURL, workDir)
 	res, err := shell.RunArgs(ctx, "git", runArgs, shell.Options{Dir: parent, Env: shellEnv, AllowNonZeroExit: true})
 	if o.compact {
@@ -454,7 +458,11 @@ func (r *Runner) cloneThenCheckoutTag(
 	if !o.compact {
 		log.step("Tag clone failed; cloning default branch then fetching tag %s", git.NormalizeTagName(branch))
 	}
-	res, err := shell.RunArgs(ctx, "git", []string{"clone", "--progress", cloneURL, workDir}, shell.Options{
+	// Default-branch shallow clone, then FetchOrigin pulls the tag without --depth
+	// so old version tags remain reachable for release/pack checkout.
+	fallbackClone := git.AppendCloneDepthArgs([]string{"clone", "--progress"})
+	fallbackClone = append(fallbackClone, cloneURL, workDir)
+	res, err := shell.RunArgs(ctx, "git", fallbackClone, shell.Options{
 		Dir: parent, Env: shellEnv, AllowNonZeroExit: true,
 	})
 	if !o.compact {

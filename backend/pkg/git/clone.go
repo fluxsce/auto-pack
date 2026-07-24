@@ -12,7 +12,9 @@ import (
 
 // CloneOptions configures git clone.
 type CloneOptions struct {
-	Branch       string
+	Branch string
+	// Depth, when > 0, adds --depth. Unlike pack sync / release paths, this helper
+	// does not auto-apply GlobalCloneDepth; pass git.GlobalCloneDepth() when needed.
 	Depth        int
 	SingleBranch bool
 	Quiet        bool

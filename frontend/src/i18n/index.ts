@@ -223,7 +223,7 @@ export const messages = {
     projectBulkAutoBuildSyncStart: '正在预同步 Git 源码…',
     projectBulkAutoBuildSyncProgress: '预同步 Git 源码 ({done}/{total})：{project}',
     projectBulkAutoBuildSyncPartial: '源码预同步完成 {synced} 个，{failed} 个失败（依赖分析可能不完整）',
-    projectBulkAutoBuildSyncForeign: '其他工作空间「{name}」正在预同步源码，请稍候',
+    projectBulkAutoBuildSyncForeign: '源码预同步并发已满，请稍候重试',
     projectBulkAutoBuildExecute: '开始构建',
     projectBulkAutoBuildStart: '开始按依赖顺序自动构建…',
     projectBulkAutoBuildLog: '构建日志',
@@ -1084,8 +1084,7 @@ export const messages = {
     projectBulkAutoBuildSyncProgress: 'Pre-syncing Git sources ({done}/{total}): {project}',
     projectBulkAutoBuildSyncPartial:
       'Source pre-sync: {synced} ok, {failed} failed (dependency order may be incomplete)',
-    projectBulkAutoBuildSyncForeign:
-      'Workspace «{name}» is pre-syncing sources; please wait',
+    projectBulkAutoBuildSyncForeign: 'Source pre-sync concurrency is full; please retry shortly',
     projectBulkAutoBuildExecute: 'Start build',
     projectBulkAutoBuildStart: 'Starting dependency-ordered auto-build…',
     projectBulkAutoBuildLog: 'Build log',

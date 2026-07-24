@@ -178,6 +178,11 @@ func (h *Handler) WorkspaceSourceSyncStatus(workspaceRecID string) packrun.Works
 	return h.runner.WorkspaceSourceSyncStatus(workspaceRecID)
 }
 
+// WorkspaceSourceSyncCapacity returns global pre-sync concurrency usage.
+func (h *Handler) WorkspaceSourceSyncCapacity() (running, max int, names []string) {
+	return h.runner.WorkspaceSourceSyncCapacity()
+}
+
 func (h *Handler) types(w http.ResponseWriter, _ *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"types": projectcfg.AllTypes})
 }

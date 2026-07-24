@@ -21,7 +21,13 @@ type Config struct {
 	JWTSecret    string
 	FrontendPath string
 	Log          LogConfig
-	ConfigDir    string
+	// GitCloneDepth is shallow clone/fetch depth for workspace sync and release
+	// clones (from git.clone_depth). 0 = full history; default 50.
+	GitCloneDepth int
+	// GitSyncMaxWorkspaces caps how many workspaces may pre-sync in parallel
+	// (from git.sync_max_workspaces). Default 2.
+	GitSyncMaxWorkspaces int
+	ConfigDir            string
 }
 
 // LogConfig holds logging settings.
@@ -55,6 +61,12 @@ type fileConfig struct {
 		MaxAgeDays int    `yaml:"max_age_days"`
 		AlsoStdout *bool  `yaml:"also_stdout"`
 	} `yaml:"log"`
+	Git struct {
+		// CloneDepth: see Config.GitCloneDepth / pkg/git.DefaultCloneDepth.
+		CloneDepth *int `yaml:"clone_depth"`
+		// SyncMaxWorkspaces: see Config.GitSyncMaxWorkspaces.
+		SyncMaxWorkspaces *int `yaml:"sync_max_workspaces"`
+	} `yaml:"git"`
 }
 
 var configDirFlag string
@@ -105,6 +117,15 @@ func Load() (Config, error) {
 		},
 		ConfigDir: dir,
 	}
+	if fc.Git.CloneDepth != nil {
+		cfg.GitCloneDepth = *fc.Git.CloneDepth
+	} else {
+		// Sentinel so applyDefaults can distinguish "unset" from explicit 0 (full history).
+		cfg.GitCloneDepth = -1
+	}
+	if fc.Git.SyncMaxWorkspaces != nil {
+		cfg.GitSyncMaxWorkspaces = *fc.Git.SyncMaxWorkspaces
+	}
 	cfg.applyDefaults()
 	cfg.resolvePaths()
 
@@ -135,6 +156,14 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Log.MaxBackups <= 0 {
 		c.Log.MaxBackups = 10
+	}
+	// git.clone_depth: unset / negative → 50; explicit 0 keeps full history.
+	if c.GitCloneDepth < 0 {
+		c.GitCloneDepth = 50
+	}
+	// git.sync_max_workspaces: unset / <1 → 2 parallel workspace pre-syncs.
+	if c.GitSyncMaxWorkspaces < 1 {
+		c.GitSyncMaxWorkspaces = 2
 	}
 }
 

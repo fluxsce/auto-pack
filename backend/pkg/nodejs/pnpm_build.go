@@ -7,12 +7,15 @@ import (
 
 var pnpmAllowBuildsCmd = regexp.MustCompile(`(?i)\bpnpm\s+(install|i|ci|add)\b`)
 
-// AppendPnpmAllowAllBuildsEnv adds env vars pnpm reads for dangerouslyAllowAllBuilds.
+// AppendPnpmAllowAllBuildsEnv adds env vars pnpm reads for dangerouslyAllowAllBuilds
+// and disables minimumReleaseAge so freshly published private packages install in CI.
 func AppendPnpmAllowAllBuildsEnv(env []string) []string {
 	// pnpm/npm config from env; lowercase preferred inside shell scripts.
 	pairs := []string{
 		"npm_config_dangerously_allow_all_builds=true",
 		"NPM_CONFIG_DANGEROUSLY_ALLOW_ALL_BUILDS=true",
+		"npm_config_minimum_release_age=0",
+		"NPM_CONFIG_MINIMUM_RELEASE_AGE=0",
 	}
 	out := append([]string{}, env...)
 	for _, p := range pairs {

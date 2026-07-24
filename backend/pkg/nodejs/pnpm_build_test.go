@@ -23,6 +23,9 @@ func TestAppendPnpmAllowAllBuildsEnv(t *testing.T) {
 	if !hasEnvKey(env, "npm_config_dangerously_allow_all_builds") {
 		t.Fatalf("missing npm_config env: %v", env)
 	}
+	if !hasEnvKey(env, "npm_config_minimum_release_age") {
+		t.Fatalf("missing minimum_release_age env: %v", env)
+	}
 }
 
 func TestInjectPnpmAllowAllBuilds_idempotent(t *testing.T) {
@@ -46,5 +49,8 @@ func TestEnsureWorkdirPnpmAllowBuilds_appends(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "dangerously-allow-all-builds=true") {
 		t.Fatalf("missing allow builds: %q", string(data))
+	}
+	if !strings.Contains(string(data), "minimum-release-age=0") {
+		t.Fatalf("missing minimum-release-age: %q", string(data))
 	}
 }

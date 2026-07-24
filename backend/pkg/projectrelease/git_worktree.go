@@ -87,7 +87,7 @@ func pickCloneBranch(
 			return repoBranch
 		}
 	}
-	log.step("远程无匹配分支，执行完整克隆后在发版流程中检出发版分支")
+	log.step("远程无匹配分支，按全局浅克隆深度拉取后在发版流程中检出发版分支")
 	return ""
 }
 
@@ -130,6 +130,15 @@ func cloneRepository(ctx context.Context, cloneURL, workDir, branch string, env 
 	args := []string{"clone", "--progress"}
 	if branch != "" {
 		args = append(args, "-b", branch, "--single-branch")
+	}
+	// Global shallow depth (app.yaml git.clone_depth, default 50). Prefer keeping
+	// this above ~50 for release: creating branches near HEAD needs a short history
+	// window; version tags are fetched on demand without --depth elsewhere.
+	args = git.AppendCloneDepthArgs(args)
+	if d := git.GlobalCloneDepth(); d > 0 {
+		log.step("浅克隆深度 --depth=%d（全局 git.clone_depth）", d)
+	} else {
+		log.step("完整克隆（git.clone_depth=0）")
 	}
 	args = append(args, cloneURL, filepath.Base(workDir))
 	if _, err := runGit(ctx, parent, env, args...); err != nil {
