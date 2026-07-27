@@ -36,7 +36,7 @@ func TestBuildMIMEAlternative(t *testing.T) {
 	msg := Message{
 		To:      []string{"user@example.com"},
 		Subject: "Hi",
-		Text:    "text",
+		Text:    "text line ending without newline",
 		HTML:    "<p>html</p>",
 	}
 	raw, err := buildMIME(cfg, msg)
@@ -44,11 +44,26 @@ func TestBuildMIMEAlternative(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(raw)
-	if !strings.Contains(s, "multipart/alternative") {
-		t.Fatalf("want alternative multipart:\n%s", s)
+	if !strings.Contains(s, `multipart/alternative; boundary="alt-`) {
+		t.Fatalf("want quoted multipart boundary:\n%s", s)
 	}
 	if !strings.Contains(s, "<p>html</p>") {
 		t.Fatalf("missing html part:\n%s", s)
+	}
+	// Regression: missing CRLF before next boundary glues text into "--alt-..."
+	if strings.Contains(s, "newline--alt-") || strings.Contains(s, "newline--alt") {
+		t.Fatalf("text part not terminated before boundary:\n%s", s)
+	}
+	if !strings.Contains(s, "newline\r\n--alt-") && !strings.Contains(s, "newline\n--alt-") {
+		// quoted-printable may soft-wrap; ensure a boundary line still exists on its own
+		idx := strings.Index(s, "Content-Type: text/html")
+		if idx <= 0 {
+			t.Fatalf("missing html content-type after text part:\n%s", s)
+		}
+		before := s[:idx]
+		if !strings.Contains(before, "\r\n--alt-") && !strings.Contains(before, "\n--alt-") {
+			t.Fatalf("boundary not on its own line before html part:\n%s", s)
+		}
 	}
 }
 

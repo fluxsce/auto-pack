@@ -31,6 +31,7 @@ const props = withDefaults(defineProps<AppDialogProps>(), {
   draggable: true,
   resizable: true,
   initialHeight: '76vh',
+  zIndex: APP_DIALOG_Z_INDEX,
 })
 
 const emit = defineEmits<{
@@ -131,7 +132,7 @@ function handleResizeStart(direction: DialogResizeDirection, event: MouseEvent):
     ref="elDialogRef"
     v-model="visible"
     append-to-body
-    :z-index="APP_DIALOG_Z_INDEX"
+    :z-index="props.zIndex"
     :width="fullscreen ? undefined : dialogWidth"
     :fullscreen="fullscreen"
     :modal="modal"

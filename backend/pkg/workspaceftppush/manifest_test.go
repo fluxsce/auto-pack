@@ -36,7 +36,7 @@ func TestMergeUpdateNoteContent(t *testing.T) {
 	existing := "20260529 shangjian old entry\n备份包路径:/bak/old.war\n更新包路径:/deploy/old.war\n"
 	manifest := "20260604 shangjian new entry\n备份包路径:/bak/new.war\n更新包路径:/deploy/new.war\n"
 	got := MergeUpdateNoteContent(existing, manifest)
-	want := strings.TrimRight(existing, "\n") + "\n" + strings.TrimRight(manifest, "\n") + "\n"
+	want := strings.TrimRight(existing, "\n") + "\n\n" + strings.TrimRight(manifest, "\n") + "\n"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
@@ -55,6 +55,32 @@ func TestBuildManifestContent(t *testing.T) {
 		"备份包路径:/开发/石头科技/datahubV9-P06/BAK/20260529/datahubServer.war\n" +
 		"更新包路径:/开发/石头科技/datahubV9-P06/datahubServer.war\n" +
 		detail + "\n"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestBuildManifestContentPairs(t *testing.T) {
+	ts := time.Date(2026, 7, 27, 10, 18, 0, 0, time.Local)
+	got := BuildManifestContentPairs(ManifestInput{
+		Pusher:   "shangjian",
+		TaskRef:  "测试一下",
+		Detail:   "请忽略邮件",
+		PushTime: ts,
+	}, []NotePathPair{
+		{
+			BackupPath: "/war/test/BAK/1/a.jar",
+			UpdatePath: "/war/test/a.jar",
+		},
+		{
+			BackupPath: "/war/test/BAK/1/b.jar",
+			UpdatePath: "/war/test/b.jar",
+		},
+	})
+	want := "20260727 shangjian 测试一下\n" +
+		"备份包路径:/war/test/BAK/1/a.jar;/war/test/BAK/1/b.jar\n" +
+		"更新包路径:/war/test/a.jar;/war/test/b.jar\n" +
+		"    请忽略邮件\n"
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}

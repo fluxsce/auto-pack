@@ -117,6 +117,7 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("DELETE "+base+"/{recID}/workspace", requireAuth(http.HandlerFunc(h.deleteWorkspace)))
 	mux.Handle("POST "+base+"/{recID}/workspace/ftp-push", requireAuth(http.HandlerFunc(h.workspaceFtpPush)))
 	mux.Handle("GET "+base+"/{recID}/workspace/ftp-push/status", requireAuth(http.HandlerFunc(h.workspaceFtpPushStatus)))
+	mux.Handle("POST "+base+"/{recID}/workspace/ftp-update-note", requireAuth(http.HandlerFunc(h.workspaceFtpUpdateNote)))
 	mux.Handle("GET "+base+"/{recID}/workspace/ftp-remote-note", requireAuth(http.HandlerFunc(h.workspaceFtpRemoteNote)))
 	mux.Handle("GET "+base+"/{recID}/workspace/file", requireAuth(http.HandlerFunc(h.readWorkspaceFile)))
 	mux.Handle("GET "+base+"/{recID}/workspace/download", requireAuth(http.HandlerFunc(h.downloadWorkspaceEntry)))

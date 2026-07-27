@@ -33,4 +33,6 @@ export interface AppDialogProps {
    * Pass `auto` for content-driven height (no fixed viewport ratio).
    */
   initialHeight?: string | number | 'auto'
+  /** Overlay z-index; raise for nested dialogs stacked above another AppDialog. */
+  zIndex?: number
 }

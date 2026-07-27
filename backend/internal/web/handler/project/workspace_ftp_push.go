@@ -17,13 +17,15 @@ import (
 )
 
 type workspaceFtpPushPayload struct {
-	Path        string `json:"path"`
-	FTPEnvRecID string `json:"ftp_env_rec_id"`
-	PushPath    string `json:"push_path"`
-	BackupPath  string `json:"backup_path"`
-	Pusher      string `json:"pusher"`
-	TaskRef     string `json:"task_ref"`
-	Detail      string `json:"detail"`
+	Path           string                          `json:"path"`
+	FTPEnvRecID    string                          `json:"ftp_env_rec_id"`
+	PushPath       string                          `json:"push_path"`
+	BackupPath     string                          `json:"backup_path"`
+	Pusher         string                          `json:"pusher"`
+	TaskRef        string                          `json:"task_ref"`
+	Detail         string                          `json:"detail"`
+	SkipUpdateNote bool                            `json:"skip_update_note"`
+	PriorNotePaths []workspaceftppush.NotePathPair `json:"prior_note_paths,omitempty"`
 }
 
 type workspaceFtpPushStartResponse struct {
@@ -103,15 +105,17 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		appendLog("FTP 环境：%s", item.EnvName)
 		appendLog("推送路径：%s", strings.TrimSpace(body.PushPath))
 		result, err := workspaceftppush.Push(workspaceftppush.Request{
-			LocalBase:    base,
-			RelativePath: rel,
-			FTPConfig:    ftpCfg,
-			PushPath:     body.PushPath,
-			BackupPath:   body.BackupPath,
-			Pusher:       body.Pusher,
-			TaskRef:      body.TaskRef,
-			Detail:       body.Detail,
-			Logf:         appendLog,
+			LocalBase:      base,
+			RelativePath:   rel,
+			FTPConfig:      ftpCfg,
+			PushPath:       body.PushPath,
+			BackupPath:     body.BackupPath,
+			Pusher:         body.Pusher,
+			TaskRef:        body.TaskRef,
+			Detail:         body.Detail,
+			SkipUpdateNote: body.SkipUpdateNote,
+			PriorNotePaths: body.PriorNotePaths,
+			Logf:           appendLog,
 		})
 		if err != nil {
 			appendLog("推送失败")
@@ -128,7 +132,11 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		appendLog("推送成功")
 		appendLog("  备份路径：%s", result.BackupPath)
 		appendLog("  更新包路径：%s", result.UpdatePath)
-		appendLog("  说明文件：%s", result.InfoFilePath)
+		if body.SkipUpdateNote {
+			appendLog("  说明文件：稍后合并写入")
+		} else {
+			appendLog("  说明文件：%s", result.InfoFilePath)
+		}
 		h.audit.Record(r.Context(), r, audit.Entry{
 			Action: audit.ActionUpdate, Module: audit.ModuleProject, TargetType: "project",
 			TargetID: projectRecID, TargetName: project.ProjectName,

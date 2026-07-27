@@ -26,6 +26,25 @@ export function verifyEnvSetting(recId: string): Promise<EnvProbeResult> {
   return http.post(`/env/settings/${recId}/verify`)
 }
 
+export interface SendMailPayload {
+  recipients: string
+  subject: string
+  /** Plain-text fallback body. */
+  body: string
+  /** Optional HTML body; when set, sent as multipart/alternative with body. */
+  html?: string
+  /** Optional display name override for the SMTP From header. */
+  from_name?: string
+}
+
+/** Send an ad-hoc email via a configured SMTP environment. */
+export function sendEnvMail(
+  smtpEnvRecId: string,
+  data: SendMailPayload,
+): Promise<{ ok: boolean }> {
+  return http.post(`/env/settings/${smtpEnvRecId}/send-mail`, data)
+}
+
 export interface EnvProbePayload {
   env_type: EnvType
   config_json: string

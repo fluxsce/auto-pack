@@ -6,6 +6,7 @@ import { ArrowDown, Plus, Refresh, Search, Setting } from '@element-plus/icons-v
 import { useMessage } from '@/components/feedback/message'
 import { purgeWorkspace } from '@/request/api/workspace'
 import ProjectBulkAutoBuildDialog from './components/ProjectBulkAutoBuildDialog.vue'
+import ProjectBulkAutoFtpPushDialog from './components/ProjectBulkAutoFtpPushDialog.vue'
 import ProjectBulkAutoReleaseDialog from './components/ProjectBulkAutoReleaseDialog.vue'
 import ProjectBulkBuildStepsDialog from './components/ProjectBulkBuildStepsDialog.vue'
 import ProjectBulkGitBranchDialog from './components/ProjectBulkGitBranchDialog.vue'
@@ -38,6 +39,7 @@ const bulkPostBuildEmailOpen = ref(false)
 const bulkBuildStepsOpen = ref(false)
 const bulkAutoReleaseOpen = ref(false)
 const bulkAutoBuildOpen = ref(false)
+const bulkAutoFtpPushOpen = ref(false)
 const mavenDepsOpen = ref(false)
 const mavenDepsMode = ref<'workspace' | 'project'>('workspace')
 const mavenDepsTargetId = ref<string | undefined>(undefined)
@@ -172,6 +174,14 @@ function openAutoBuild(): void {
     return
   }
   bulkAutoBuildOpen.value = true
+}
+
+function openAutoFtpPush(): void {
+  if (!activeWorkspaceRecId.value) {
+    message.warning(t('workspaceSelectRequired'))
+    return
+  }
+  bulkAutoFtpPushOpen.value = true
 }
 
 function openAutoRelease(): void {
@@ -465,6 +475,9 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+          <el-button type="primary" plain class="project-manage__quick-op" @click="openAutoFtpPush()">
+            {{ $t('projectBulkAutoFtp') }}
+          </el-button>
           <el-button
             :type="autoBuildResumePending ? 'warning' : 'primary'"
             class="project-manage__quick-op"
@@ -628,6 +641,15 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
       :project-count="workspaceProjectCount"
       @success="loadList()"
       @session-change="syncAutoBuildResumeFlag()"
+    />
+    <ProjectBulkAutoFtpPushDialog
+      v-model:open="bulkAutoFtpPushOpen"
+      :workspace-rec-id="activeWorkspaceRecId"
+      :workspace-name="activeWorkspace?.workspace_name ?? ''"
+      :workspace-code="activeWorkspace?.workspace_code ?? ''"
+      :project-count="workspaceProjectCount"
+      :env-options="envOptions"
+      @success="loadList()"
     />
     <ProjectBulkAutoReleaseDialog
       v-model:open="bulkAutoReleaseOpen"

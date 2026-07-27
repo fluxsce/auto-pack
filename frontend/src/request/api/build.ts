@@ -50,6 +50,11 @@ export function deleteProjectWorkspace(
   return http.delete(`/projects/${projectRecId}/workspace`, { params: { path } })
 }
 
+export interface WorkspaceFtpNotePathPair {
+  backup_path: string
+  update_path: string
+}
+
 export interface WorkspaceFtpPushPayload {
   path: string
   ftp_env_rec_id: string
@@ -58,6 +63,10 @@ export interface WorkspaceFtpPushPayload {
   pusher: string
   task_ref: string
   detail?: string
+  /** Upload package only; do not write updateNote.txt yet. */
+  skip_update_note?: boolean
+  /** Earlier packages in the same batch; merged into one note on the final write. */
+  prior_note_paths?: WorkspaceFtpNotePathPair[]
 }
 
 export interface WorkspaceFtpPushResult {
@@ -90,6 +99,23 @@ export function pushProjectWorkspaceFtp(
   data: WorkspaceFtpPushPayload,
 ): Promise<WorkspaceFtpPushStartResponse> {
   return http.post(`/projects/${projectRecId}/workspace/ftp-push`, data)
+}
+
+export interface WorkspaceFtpUpdateNotePayload {
+  ftp_env_rec_id: string
+  push_path: string
+  pusher: string
+  task_ref: string
+  detail?: string
+  paths: WorkspaceFtpNotePathPair[]
+}
+
+/** Append one merged updateNote.txt block after a multi-package FTP push. */
+export function appendProjectWorkspaceFtpUpdateNote(
+  projectRecId: string,
+  data: WorkspaceFtpUpdateNotePayload,
+): Promise<WorkspaceFtpPushResult> {
+  return http.post(`/projects/${projectRecId}/workspace/ftp-update-note`, data)
 }
 
 export function fetchProjectWorkspaceFtpPushStatus(

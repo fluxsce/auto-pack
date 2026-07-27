@@ -24,7 +24,11 @@ type Request struct {
 	Pusher       string
 	TaskRef      string
 	Detail       string
-	Logf         func(format string, args ...any)
+	// SkipUpdateNote uploads the package but does not write updateNote.txt.
+	SkipUpdateNote bool
+	// PriorNotePaths are earlier packages in the same batch; merged into one note on write.
+	PriorNotePaths []NotePathPair
+	Logf           func(format string, args ...any)
 }
 
 // Result is returned after a successful push.
@@ -143,12 +147,33 @@ func Push(req Request) (Result, error) {
 	}
 	req.logf("Package upload completed")
 
-	manifest := BuildManifestContent(ManifestInput{
+	if req.SkipUpdateNote {
+		req.logf("Skip writing updateNote.txt (batch merge later)")
+		return Result{
+			BackupPath:   manifestBackup,
+			UpdatePath:   updatePath,
+			InfoFilePath: infoRemote,
+			InfoContent:  "",
+		}, nil
+	}
+
+	pairs := make([]NotePathPair, 0, len(req.PriorNotePaths)+1)
+	for _, p := range req.PriorNotePaths {
+		pairs = append(pairs, NotePathPair{
+			BackupPath: strings.TrimSpace(p.BackupPath),
+			UpdatePath: strings.TrimSpace(p.UpdatePath),
+		})
+	}
+	pairs = append(pairs, NotePathPair{
+		BackupPath: backupFilePath,
+		UpdatePath: updatePath,
+	})
+	manifest := BuildManifestContentPairs(ManifestInput{
 		Pusher:   req.Pusher,
 		TaskRef:  req.TaskRef,
 		Detail:   req.Detail,
 		PushTime: pushTime,
-	}, backupFilePath, updatePath)
+	}, pairs)
 
 	noteExists, err := ftpclient.RemoteExists(conn, req.FTPConfig, infoRemote)
 	if err != nil {
@@ -164,6 +189,9 @@ func Push(req Request) (Result, error) {
 		noteUpload = MergeUpdateNoteContent(string(existing), manifest)
 	} else {
 		req.logf("Remote updateNote.txt not found; creating a new one")
+	}
+	if len(pairs) > 1 {
+		req.logf("Writing merged updateNote.txt for %d packages", len(pairs))
 	}
 	if err := ftpclient.UploadBytes(conn, req.FTPConfig, strings.TrimPrefix(infoRemote, "/"), []byte(noteUpload)); err != nil {
 		return Result{}, fmt.Errorf("upload info file: %w", err)

@@ -35,13 +35,18 @@ export function formatManifestDateStamp(d: Date): string {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
 }
 
-/** Appends a new manifest block after existing updateNote.txt content. */
+/** Appends a new manifest block after existing updateNote.txt content (blank line before new block). */
 export function mergeUpdateNotePreview(existing: string, manifest: string): string {
   const m = manifest.replace(/\r\n/g, '\n').replace(/\n+$/, '')
   const e = existing.replace(/\r\n/g, '\n').replace(/\n+$/, '')
   if (!m) return e ? `${e}\n` : ''
   if (!e) return `${m}\n`
-  return `${e}\n${m}\n`
+  return `${e}\n\n${m}\n`
+}
+
+export interface ManifestPathPair {
+  backupPath: string
+  updatePath: string
 }
 
 export function buildManifestPreview(
@@ -52,16 +57,56 @@ export function buildManifestPreview(
   updatePathText: string,
   detailText: string,
 ): string {
+  return buildManifestPreviewPairs(
+    pushTime,
+    pusherName,
+    taskRefText,
+    [{ backupPath: backupPathText, updatePath: updatePathText }],
+    detailText,
+  )
+}
+
+/** Indent each detail line with 4 spaces (ops updateNote convention). */
+export function formatManifestDetail(raw: string): string {
+  const text = raw.replace(/\r\n/g, '\n').replace(/\n+$/, '')
+  if (!text.trim()) return ''
+  return text
+    .split('\n')
+    .map((line) => {
+      const trimmedRight = line.replace(/[ \t]+$/, '')
+      if (!trimmedRight.trim()) return ''
+      if (trimmedRight.startsWith('    ') || trimmedRight.startsWith('\t')) return trimmedRight
+      return `    ${trimmedRight.replace(/^[ \t]+/, '')}`
+    })
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** One updateNote block; multiple packages join paths with ";". */
+export function buildManifestPreviewPairs(
+  pushTime: Date,
+  pusherName: string,
+  taskRefText: string,
+  pairs: ManifestPathPair[],
+  detailText: string,
+): string {
   const dateYmd = formatManifestDateStamp(pushTime)
+  const backups: string[] = []
+  const updates: string[] = []
+  for (const p of pairs) {
+    const backup = p.backupPath.trim()
+    const update = p.updatePath.trim()
+    if (!backup && !update) continue
+    if (backup) backups.push(backup)
+    if (update) updates.push(update)
+  }
   const lines = [
     `${dateYmd} ${pusherName.trim()} ${taskRefText.trim()}`,
-    `备份包路径:${backupPathText.trim()}`,
-    `更新包路径:${updatePathText.trim()}`,
+    `备份包路径:${backups.join(';')}`,
+    `更新包路径:${updates.join(';')}`,
   ]
-  const detail = detailText.replace(/\r\n/g, '\n').trimEnd()
-  if (detail.trim()) {
-    lines.push(detail)
-  }
+  const detail = formatManifestDetail(detailText)
+  if (detail) lines.push(detail)
   return `${lines.join('\n')}\n`
 }
 

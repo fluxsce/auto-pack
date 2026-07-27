@@ -95,7 +95,12 @@ func encodeAlternative(text, html string) ([]byte, string, error) {
 		if _, err := w.Write([]byte(partBody)); err != nil {
 			return err
 		}
-		return w.Close()
+		if err := w.Close(); err != nil {
+			return err
+		}
+		// Multipart boundaries must start at the beginning of a line.
+		buf.WriteString("\r\n")
+		return nil
 	}
 	if err := writePart("text/plain; charset=utf-8", text); err != nil {
 		return nil, "", err
@@ -104,7 +109,7 @@ func encodeAlternative(text, html string) ([]byte, string, error) {
 		return nil, "", err
 	}
 	buf.WriteString("--" + boundary + "--\r\n")
-	headers := "Content-Type: multipart/alternative; boundary=" + boundary + "\r\n"
+	headers := fmt.Sprintf("Content-Type: multipart/alternative; boundary=\"%s\"\r\n", boundary)
 	return buf.Bytes(), headers, nil
 }
 
@@ -150,7 +155,7 @@ func encodeMixed(msg Message) ([]byte, string, error) {
 	}
 
 	buf.WriteString("--" + boundary + "--\r\n")
-	headers := "Content-Type: multipart/mixed; boundary=" + boundary + "\r\n"
+	headers := fmt.Sprintf("Content-Type: multipart/mixed; boundary=\"%s\"\r\n", boundary)
 	return buf.Bytes(), headers, nil
 }
 

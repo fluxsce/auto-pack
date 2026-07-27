@@ -37,6 +37,7 @@ func Register(mux *http.ServeMux, h *Handler, requireAuth func(http.Handler) htt
 	mux.Handle("PUT "+base+"/{recID}", requireAuth(http.HandlerFunc(h.update)))
 	mux.Handle("DELETE "+base+"/{recID}", requireAuth(http.HandlerFunc(h.delete)))
 	mux.Handle("POST "+base+"/{recID}/verify", requireAuth(http.HandlerFunc(h.verify)))
+	mux.Handle("POST "+base+"/{recID}/send-mail", requireAuth(http.HandlerFunc(h.sendMail)))
 	mux.Handle("GET "+apiBase+"/env/types", requireAuth(http.HandlerFunc(h.types)))
 }
 
