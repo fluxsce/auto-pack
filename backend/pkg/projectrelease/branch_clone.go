@@ -9,9 +9,47 @@ import (
 	apigit "auto-pack/backend/pkg/git"
 )
 
+// ExistingTargetPolicy controls what happens when the target branch already exists on origin.
+type ExistingTargetPolicy string
+
+const (
+	// ExistingTargetOverwrite deletes the remote target branch, then recreates it from the source tip.
+	ExistingTargetOverwrite ExistingTargetPolicy = "overwrite"
+	// ExistingTargetSkip leaves an existing remote target branch unchanged.
+	ExistingTargetSkip ExistingTargetPolicy = "skip"
+)
+
+func NormalizeExistingTargetPolicy(raw string) ExistingTargetPolicy {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case string(ExistingTargetSkip), "skip_existing", "skip-existing":
+		return ExistingTargetSkip
+	default:
+		return ExistingTargetOverwrite
+	}
+}
+
+// protectedBranchesForDelete must never be deleted by branch-clone overwrite.
+var protectedBranchesForDelete = map[string]struct{}{
+	"develop": {},
+	"master":  {},
+	"main":    {},
+}
+
+// IsProtectedBranchForDelete reports whether branch is develop/master/main (case-insensitive).
+func IsProtectedBranchForDelete(branch string) bool {
+	name := strings.ToLower(strings.TrimSpace(branch))
+	if name == "" {
+		return false
+	}
+	_, ok := protectedBranchesForDelete[name]
+	return ok
+}
+
 // BranchCloner copies a source git ref to a target branch on origin for one project.
 type BranchCloner struct {
 	Git *GitCommitter
+	// ExistingTarget selects overwrite (default) or skip when target already exists on origin.
+	ExistingTarget ExistingTargetPolicy
 }
 
 // Run clones sourceBranch to targetBranch for the project worktree and pushes to origin.
@@ -25,6 +63,7 @@ func (c *BranchCloner) Run(
 	log := newPublishLogger(&steps)
 	sourceBranch = strings.TrimSpace(sourceBranch)
 	targetBranch = strings.TrimSpace(targetBranch)
+	policy := NormalizeExistingTargetPolicy(string(c.ExistingTarget))
 	if sourceBranch == "" || targetBranch == "" {
 		return BranchCloneResult{
 			ProjectName: name,
@@ -46,6 +85,14 @@ func (c *BranchCloner) Run(
 			ProjectName: name,
 			Status:      "failed",
 			Message:     "target cannot be a tag ref",
+			Steps:       steps,
+		}
+	}
+	if IsProtectedBranchForDelete(targetBranch) && policy == ExistingTargetOverwrite {
+		return BranchCloneResult{
+			ProjectName: name,
+			Status:      "failed",
+			Message:     fmt.Sprintf("refusing to delete protected branch %q (develop/master/main are not allowed as overwrite targets)", targetBranch),
 			Steps:       steps,
 		}
 	}
@@ -78,11 +125,100 @@ func (c *BranchCloner) Run(
 	if err := syncOriginRefs(ctx, workDir, shellEnv, log); err != nil {
 		return BranchCloneResult{ProjectName: name, Status: "failed", Message: err.Error(), Steps: steps}
 	}
+
+	exists, err := originHeadBranchExists(ctx, workDir, shellEnv, targetBranch)
+	if err != nil {
+		return BranchCloneResult{ProjectName: name, Status: "failed", Message: err.Error(), Steps: steps}
+	}
+	if exists {
+		if policy == ExistingTargetSkip {
+			log.step("目标分支 %s 已存在于远程，按策略跳过", targetBranch)
+			return BranchCloneResult{
+				ProjectName: name,
+				Status:      "skipped",
+				Message:     "target branch already exists on origin",
+				Steps:       steps,
+			}
+		}
+		log.step("目标分支 %s 已存在于远程，先删除再从源分支重建", targetBranch)
+		if err := deleteOriginBranch(ctx, workDir, shellEnv, sourceBranch, targetBranch, log); err != nil {
+			return BranchCloneResult{ProjectName: name, Status: "failed", Message: err.Error(), Steps: steps}
+		}
+	}
+
 	if err := cloneBranchFromSource(ctx, workDir, shellEnv, sourceBranch, targetBranch, log); err != nil {
 		return BranchCloneResult{ProjectName: name, Status: "failed", Message: err.Error(), Steps: steps}
 	}
 	log.step("分支克隆完成（%s → %s）", sourceBranch, targetBranch)
 	return BranchCloneResult{ProjectName: name, Status: "ok", Steps: steps}
+}
+
+// deleteOriginBranch removes the remote target branch (and local tracking refs) so a later
+// push from source creates a clean tip equal to the source ref.
+func deleteOriginBranch(
+	ctx context.Context,
+	dir string,
+	env []string,
+	sourceBranch, targetBranch string,
+	log *publishLogger,
+) error {
+	targetBranch = strings.TrimSpace(targetBranch)
+	sourceBranch = strings.TrimSpace(sourceBranch)
+	if targetBranch == "" {
+		return fmt.Errorf("target branch is empty")
+	}
+	if IsProtectedBranchForDelete(targetBranch) {
+		return fmt.Errorf("refusing to delete protected branch %q", targetBranch)
+	}
+	if strings.EqualFold(targetBranch, sourceBranch) {
+		return fmt.Errorf("refusing to delete source branch %q", sourceBranch)
+	}
+
+	// Cannot delete the currently checked-out branch; move to source tip first.
+	if cur := currentGitBranch(ctx, dir, env); strings.EqualFold(cur, targetBranch) {
+		safeRef := strings.TrimSpace(sourceBranch)
+		if apigit.IsTagRef(safeRef) {
+			safeRef = apigit.NormalizeTagName(safeRef)
+			ensureGitTagFetched(ctx, dir, env, safeRef)
+			for _, ref := range apigit.CheckoutRefCandidates(sourceBranch) {
+				if gitRefExists(ctx, dir, env, ref) {
+					safeRef = ref
+					break
+				}
+			}
+		} else {
+			_ = fetchOriginBranch(ctx, dir, env, safeRef, log)
+			if gitRefExists(ctx, dir, env, originBranchRef(safeRef)) {
+				safeRef = originBranchRef(safeRef)
+			}
+		}
+		log.step("当前在目标分支，先切换到 %s 再删除", safeRef)
+		if _, err := runGit(ctx, dir, env, "checkout", "-f", "--detach", safeRef); err != nil {
+			if _, err2 := runGit(ctx, dir, env, "checkout", "-f", safeRef); err2 != nil {
+				return fmt.Errorf("checkout away from %s before delete: %w", targetBranch, err2)
+			}
+		}
+	}
+
+	log.step("git push origin --delete %s", targetBranch)
+	if _, err := runGit(ctx, dir, env, "push", "origin", "--delete", targetBranch); err != nil {
+		// Fallback delete refspec for older remotes/clients.
+		log.step("git push origin :refs/heads/%s", targetBranch)
+		if _, err2 := runGit(ctx, dir, env, "push", "origin", ":refs/heads/"+targetBranch); err2 != nil {
+			return fmt.Errorf("delete remote branch %s: %w", targetBranch, err)
+		}
+	}
+
+	if _, err := runGitAllow(ctx, dir, env, "branch", "-D", targetBranch); err == nil {
+		log.step("已删除本地分支 %s", targetBranch)
+	}
+	remoteRef := originRemoteBranchRef(targetBranch)
+	if remoteRef != "" {
+		if _, err := runGitAllow(ctx, dir, env, "update-ref", "-d", remoteRef); err == nil {
+			log.step("已清理远程跟踪引用 %s", remoteRef)
+		}
+	}
+	return nil
 }
 
 func cloneBranchFromSource(
@@ -112,7 +248,7 @@ func cloneBranchFromSource(
 		if err := checkoutNewBranchFromRef(ctx, dir, env, targetBranch, sourceRef); err != nil {
 			return err
 		}
-		return pushBranchFromHEAD(ctx, dir, env, targetBranch, log)
+		return pushNewBranchFromHEAD(ctx, dir, env, targetBranch, log)
 	}
 
 	onOrigin, err := originHeadBranchExists(ctx, dir, env, sourceBranch)
@@ -133,5 +269,30 @@ func cloneBranchFromSource(
 	if err := checkoutNewBranchFromRef(ctx, dir, env, targetBranch, sourceRef); err != nil {
 		return err
 	}
-	return pushBranchFromHEAD(ctx, dir, env, targetBranch, log)
+	return pushNewBranchFromHEAD(ctx, dir, env, targetBranch, log)
+}
+
+// pushNewBranchFromHEAD publishes a freshly created local branch. After an overwrite delete,
+// the remote should not exist; still allow force fallback for races.
+func pushNewBranchFromHEAD(ctx context.Context, dir string, env []string, targetBranch string, log *publishLogger) error {
+	targetBranch = strings.TrimSpace(targetBranch)
+	if targetBranch == "" {
+		return fmt.Errorf("target branch is empty")
+	}
+	if cur := currentGitBranch(ctx, dir, env); !strings.EqualFold(cur, targetBranch) {
+		log.step("git branch -f %s HEAD", targetBranch)
+		if _, err := runGit(ctx, dir, env, "branch", "-f", targetBranch, "HEAD"); err != nil {
+			return err
+		}
+	}
+	log.step("git push -u origin %s（新建目标分支）", targetBranch)
+	if _, err := runGit(ctx, dir, env, "push", "-u", "origin", targetBranch); err != nil {
+		// Rare race: someone recreated the branch between delete and push.
+		log.step("普通推送失败，回退 force 推送源尖端")
+		if err2 := pushBranchWithRepeatFallback(ctx, dir, env, targetBranch, true, log); err2 != nil {
+			return err2
+		}
+	}
+	log.step("已推送到目标分支 %s", targetBranch)
+	return nil
 }

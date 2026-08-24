@@ -57,7 +57,9 @@ func (g *GitCommitter) SyncReleaseWorktree(
 
 // PublishChanges syncs the release branch, writes files, commits, and pushes.
 // When createTargetBranch is true and targetBranch differs from releaseBranch,
-// the same commit is also pushed to targetBranch (e.g. release/V9.0.0-P08 from develop).
+// Version.txt (and other non-pom files) stay on the release branch; pom.xml updates
+// are committed only on the target branch (e.g. develop → release/V9.0.0-P08).
+// Without a distinct target branch, all files (including POM) are written on the release branch.
 func (g *GitCommitter) PublishChanges(
 	ctx context.Context,
 	project *repository.PackProject,
@@ -109,6 +111,98 @@ func (g *GitCommitter) PublishChanges(
 		return err
 	}
 
+	targetBranch = strings.TrimSpace(targetBranch)
+	deferPom := deferPomToTargetBranch(createTargetBranch, releaseBranch, targetBranch)
+	releaseFiles, pomFiles := splitReleasePublishFiles(files)
+
+	if !deferPom {
+		if err := writeCommitPushBranch(ctx, workDir, shellEnv, releaseBranch, files, tagRef, commitMsg, allowRepeat, log); err != nil {
+			return err
+		}
+		if createTargetBranch && targetBranch != "" && !strings.EqualFold(targetBranch, releaseBranch) {
+			log.step("同步推送到目标分支 %s", targetBranch)
+			if err := pushBranchFromHEAD(ctx, workDir, shellEnv, targetBranch, log); err != nil {
+				return fmt.Errorf("git push target branch %s: %w", targetBranch, err)
+			}
+		}
+		if err := createAndPushVersionTag(ctx, workDir, shellEnv, tagRef, allowRepeat, log); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	log.step("已开启目标分支：pom.xml 仅在目标分支 %s 更新，发版分支 %s 不写 POM", targetBranch, releaseBranch)
+	if err := writeCommitPushBranch(ctx, workDir, shellEnv, releaseBranch, releaseFiles, tagRef, commitMsg, allowRepeat, log); err != nil {
+		return err
+	}
+	if len(pomFiles) > 0 {
+		log.step("检出目标分支并写入 POM: %s", targetBranch)
+		if err := checkoutOrCreateBranchAtHEAD(ctx, workDir, shellEnv, targetBranch, log); err != nil {
+			return fmt.Errorf("checkout target branch %s: %w", targetBranch, err)
+		}
+		if err := writeCommitPushBranch(ctx, workDir, shellEnv, targetBranch, pomFiles, tagRef, commitMsg, true, log); err != nil {
+			return err
+		}
+	} else {
+		log.step("同步推送到目标分支 %s（无 POM 变更）", targetBranch)
+		if err := pushBranchFromHEAD(ctx, workDir, shellEnv, targetBranch, log); err != nil {
+			return fmt.Errorf("git push target branch %s: %w", targetBranch, err)
+		}
+	}
+	if err := createAndPushVersionTag(ctx, workDir, shellEnv, tagRef, allowRepeat, log); err != nil {
+		return err
+	}
+	return nil
+}
+
+// deferPomToTargetBranch reports whether pom.xml should be committed only on the target branch.
+func deferPomToTargetBranch(createTarget bool, releaseBranch, targetBranch string) bool {
+	if !createTarget {
+		return false
+	}
+	targetBranch = strings.TrimSpace(targetBranch)
+	releaseBranch = strings.TrimSpace(releaseBranch)
+	return targetBranch != "" && !strings.EqualFold(targetBranch, releaseBranch)
+}
+
+// splitReleasePublishFiles separates pom.xml updates from Version.txt and other release files.
+func splitReleasePublishFiles(files map[string][]byte) (releaseFiles, pomFiles map[string][]byte) {
+	releaseFiles = make(map[string][]byte)
+	pomFiles = make(map[string][]byte)
+	for path, data := range files {
+		if isPomReleaseFile(path) {
+			pomFiles[path] = data
+		} else {
+			releaseFiles[path] = data
+		}
+	}
+	return releaseFiles, pomFiles
+}
+
+func isPomReleaseFile(path string) bool {
+	return strings.EqualFold(filepath.Base(strings.TrimSpace(path)), pomFileName)
+}
+
+func writeCommitPushBranch(
+	ctx context.Context,
+	workDir string,
+	shellEnv []string,
+	branch string,
+	files map[string][]byte,
+	tagRef string,
+	commitMsg string,
+	allowRepeat bool,
+	log *publishLogger,
+) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("branch is empty")
+	}
+	if len(files) == 0 {
+		log.step("分支 %s 无待写入发版文件，跳过提交", branch)
+		return nil
+	}
+
 	relPaths := make([]string, 0, len(files))
 	for p := range files {
 		rel, relErr := relativeToWorkDir(workDir, p)
@@ -117,7 +211,7 @@ func (g *GitCommitter) PublishChanges(
 		}
 		relPaths = append(relPaths, rel)
 	}
-	log.step("写入发版文件: %s", strings.Join(relPaths, ", "))
+	log.step("写入发版文件到 %s: %s", branch, strings.Join(relPaths, ", "))
 	for path, data := range files {
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
@@ -144,18 +238,19 @@ func (g *GitCommitter) PublishChanges(
 		log.step("git commit 失败: %v", err)
 		return err
 	}
-	if err := pushReleaseBranchToOrigin(ctx, workDir, shellEnv, releaseBranch, allowRepeat, log); err != nil {
+	if err := pushBranchWithRepeatFallback(ctx, workDir, shellEnv, branch, allowRepeat, log); err != nil {
 		return err
 	}
+	return nil
+}
 
-	targetBranch = strings.TrimSpace(targetBranch)
-	if createTargetBranch && targetBranch != "" && !strings.EqualFold(targetBranch, releaseBranch) {
-		log.step("同步推送到目标分支 %s", targetBranch)
-		if err := pushBranchFromHEAD(ctx, workDir, shellEnv, targetBranch, log); err != nil {
-			return fmt.Errorf("git push target branch %s: %w", targetBranch, err)
-		}
+func checkoutOrCreateBranchAtHEAD(ctx context.Context, dir string, env []string, branch string, log *publishLogger) error {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return fmt.Errorf("branch is empty")
 	}
-	if err := createAndPushVersionTag(ctx, workDir, shellEnv, tagRef, allowRepeat, log); err != nil {
+	log.step("git checkout -f -B %s", branch)
+	if _, err := runGit(ctx, dir, env, "checkout", "-f", "-B", branch); err != nil {
 		return err
 	}
 	return nil
@@ -238,13 +333,26 @@ func pushBranchWithRepeatFallback(ctx context.Context, dir string, env []string,
 	} else if !allowRepeat {
 		return fmt.Errorf("git push %s: %w", branch, err)
 	}
+
+	// Refresh remote-tracking tip before --force-with-lease. Shallow/partial fetches often
+	// omit the target branch, which makes lease checks fail with "stale info".
+	if exists, err := originHeadBranchExists(ctx, dir, env, branch); err == nil && exists {
+		if fetchErr := fetchOriginBranch(ctx, dir, env, branch, log); fetchErr != nil {
+			log.step("刷新远程跟踪分支 origin/%s 失败（继续 force-with-lease）: %v", branch, fetchErr)
+		}
+	}
+
 	log.step("git push --force-with-lease origin %s（重复发版）", branch)
 	_, err2 := runGit(ctx, dir, env, "push", "-u", "--force-with-lease", "origin", branch)
 	if err2 == nil {
 		return nil
 	}
-	if isUnknownGitPushOption(err2, "force-with-lease") {
-		log.step("git push --force origin %s（旧版 Git，无 force-with-lease）", branch)
+	if isUnknownGitPushOption(err2, "force-with-lease") || isStaleForceWithLease(err2) {
+		reason := "旧版 Git，无 force-with-lease"
+		if isStaleForceWithLease(err2) {
+			reason = "force-with-lease stale info，改用 --force"
+		}
+		log.step("git push --force origin %s（%s）", branch, reason)
 		if _, err3 := runGit(ctx, dir, env, "push", "-u", "--force", "origin", branch); err3 != nil {
 			return fmt.Errorf("git push %s: %w", branch, err3)
 		}
@@ -260,6 +368,15 @@ func isUnknownGitPushOption(err error, option string) bool {
 	msg := strings.ToLower(err.Error())
 	opt := strings.ToLower(strings.TrimSpace(option))
 	return strings.Contains(msg, "unknown option") && strings.Contains(msg, opt)
+}
+
+func isStaleForceWithLease(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "stale info") ||
+		(strings.Contains(msg, "rejected") && strings.Contains(msg, "force-with-lease"))
 }
 
 func pushBranchFromHEAD(ctx context.Context, dir string, env []string, targetBranch string, log *publishLogger) error {

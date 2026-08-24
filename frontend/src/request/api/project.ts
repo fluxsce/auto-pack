@@ -240,6 +240,8 @@ export interface BatchBranchClonePayload {
   workspace_rec_id: string
   source_branch: string
   target_branch: string
+  /** overwrite (default) | skip when target branch already exists on origin */
+  existing_target?: 'overwrite' | 'skip'
 }
 
 export interface BatchBranchCloneResultItem {

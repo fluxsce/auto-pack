@@ -2,6 +2,7 @@ package ftpclient
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"strings"
@@ -52,7 +53,7 @@ func UploadFiles(cfg envtypes.FTPConfig, items []UploadItem) error {
 		if err != nil {
 			return fmt.Errorf("open %s: %w", item.LocalPath, err)
 		}
-		if err := conn.Stor(remote, f); err != nil {
+		if err := storInDir(conn, remote, f); err != nil {
 			_ = f.Close()
 			return fmt.Errorf("stor %s: %w", remote, err)
 		}
@@ -72,22 +73,67 @@ func joinFTPPath(base, rel string) string {
 	return path.Clean(base + "/" + rel)
 }
 
+// mkdirFTP creates dir and parents. Prefer CWD + relative MKD for servers that
+// reject absolute MKD (missing dirs often surface later as 550 Filename invalid on STOR).
 func mkdirFTP(conn *ftp.ServerConn, dir string) error {
-	dir = path.Clean(dir)
-	if dir == "." || dir == "/" {
+	dir = path.Clean(strings.ReplaceAll(dir, "\\", "/"))
+	if dir == "." || dir == "/" || dir == "" {
 		return nil
 	}
+	if err := conn.ChangeDir(dir); err == nil {
+		return nil
+	}
+
 	parts := strings.Split(strings.Trim(dir, "/"), "/")
 	cur := ""
 	for _, p := range parts {
+		if p == "" || p == "." {
+			continue
+		}
 		if cur == "" {
 			cur = "/" + p
 		} else {
 			cur = cur + "/" + p
 		}
-		_ = conn.MakeDir(cur)
+		if err := conn.ChangeDir(cur); err == nil {
+			continue
+		}
+		parent := path.Dir(cur)
+		if parent == "" || parent == "." {
+			parent = "/"
+		}
+		if err := conn.ChangeDir(parent); err != nil {
+			return fmt.Errorf("ftp cwd %s: %w", parent, err)
+		}
+		if err := conn.MakeDir(p); err != nil {
+			// Already exists / race: accept if we can enter it.
+			if err2 := conn.ChangeDir(cur); err2 == nil {
+				continue
+			}
+			return fmt.Errorf("ftp mkdir %s: %w", cur, err)
+		}
+		if err := conn.ChangeDir(cur); err != nil {
+			return fmt.Errorf("ftp mkdir %s: created but cwd failed: %w", cur, err)
+		}
+	}
+	if err := conn.ChangeDir(dir); err != nil {
+		return fmt.Errorf("ftp ensure dir %s: %w", dir, err)
 	}
 	return nil
+}
+
+// storInDir uploads into remote file path by CWD to parent then STOR basename.
+// Falls back to absolute STOR if CWD fails after mkdir.
+func storInDir(conn *ftp.ServerConn, remote string, r io.Reader) error {
+	dir := path.Dir(remote)
+	name := path.Base(remote)
+	if name == "" || name == "." || name == "/" {
+		return fmt.Errorf("invalid remote file name for %s", remote)
+	}
+	if err := conn.ChangeDir(dir); err != nil {
+		return conn.Stor(remote, r)
+	}
+	return conn.Stor(name, r)
 }
 
 // RemotePathFromRel builds an FTP path under base_path.

@@ -276,6 +276,7 @@ export interface ProjectWorkspaceEntry {
   path: string
   is_dir: boolean
   size: number
+  mod_time?: string
 }
 
 export interface ProjectWorkspaceListing {

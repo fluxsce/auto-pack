@@ -527,6 +527,8 @@ async function quickBuild(row: { rec_id: string }): Promise<void> {
         :workspace-exists="detailWorkspaceExists"
         :workspace-abs-path="detailWorkspaceAbsPath"
         :workspace-loading="detailWorkspaceLoading"
+        :workspace-code="activeWorkspace?.workspace_code"
+        :workspace-name="activeWorkspace?.workspace_name"
         :type-label="typeLabel"
         @back="closeDetail"
         @configure="openConfigureFromDetail"

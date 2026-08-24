@@ -119,6 +119,8 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 	log.step("已生成 Version.txt（版本 %s，发布日期 %s）", tag, releaseDate)
 
 	files := map[string][]byte{versionPath: []byte(content)}
+	targetBranch := strings.TrimSpace(req.TargetBranch)
+	pomOnTarget := deferPomToTargetBranch(req.CreateTargetBranch, branch, targetBranch)
 	if req.UpdatePomVersion && IsMavenReleaseProject(projectType) {
 		pomFiles, pomSteps, err := CollectPomVersionUpdates(workDir, tag)
 		if err != nil {
@@ -131,6 +133,9 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		}
 		for _, msg := range pomSteps {
 			log.step("%s", msg)
+		}
+		if len(pomFiles) > 0 && pomOnTarget {
+			log.step("POM 版本将仅提交到目标分支 %s（发版分支 %s 不更新 pom.xml）", targetBranch, branch)
 		}
 	} else if req.UpdatePomVersion {
 		log.step("跳过 pom.xml 版本更新（非 Maven 工程）")
@@ -150,7 +155,6 @@ func (r *Releaser) RunRelease(ctx context.Context, project *repository.PackProje
 		return res
 	}
 
-	targetBranch := strings.TrimSpace(req.TargetBranch)
 	if req.CreateTargetBranch && targetBranch == "" {
 		res.Message = "target branch is required when creating target release branch"
 		res.Steps = steps

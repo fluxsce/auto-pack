@@ -1,5 +1,6 @@
 import type { RouteLocationNormalized, Router } from 'vue-router'
-import { getToken } from '@/request/utils'
+import { getToken } from '@/request/utils/token'
+import { useSessionStore } from '@/stores/session'
 
 function requiresAuth(to: RouteLocationNormalized): boolean {
   return to.matched.some((record) => record.meta.requiresAuth === true)
@@ -18,18 +19,37 @@ export function resolveRedirect(target: unknown): string | null {
 }
 
 export function setupRouterGuards(router: Router): void {
-  router.beforeEach((to) => {
+  router.beforeEach(async (to) => {
+    const session = useSessionStore()
     const token = getToken()
-    const authed = Boolean(token)
 
-    if (requiresAuth(to) && !authed) {
-      return {
-        name: 'home',
-        query: { redirect: to.fullPath },
+    if (requiresAuth(to)) {
+      if (!token) {
+        return {
+          name: 'home',
+          query: { redirect: to.fullPath },
+        }
       }
+      if (!session.currentUser) {
+        const user = await session.loadSession()
+        if (!user) {
+          return {
+            name: 'home',
+            query: { redirect: to.fullPath },
+          }
+        }
+      }
+      return
     }
 
-    if (isGuestRoute(to) && authed) {
+    if (isGuestRoute(to) && token) {
+      if (!session.currentUser) {
+        const user = await session.loadSession()
+        if (!user) {
+          // token 已失效，留在登录页重新登录
+          return
+        }
+      }
       const redirect = resolveRedirect(to.query.redirect)
       return redirect ?? { name: 'dashboard' }
     }

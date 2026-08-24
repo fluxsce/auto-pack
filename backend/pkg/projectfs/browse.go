@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"auto-pack/backend/internal/repository"
 	"auto-pack/backend/pkg/projectcfg"
@@ -21,10 +22,11 @@ const maxReadFileBytes = 512 * 1024
 
 // Entry describes a file or directory under the project work tree.
 type Entry struct {
-	Name  string `json:"name"`
-	Path  string `json:"path"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size"`
+	Name    string `json:"name"`
+	Path    string `json:"path"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time,omitempty"`
 }
 
 // DirListing is the response for workspace browse.
@@ -115,14 +117,19 @@ func ListDir(base, rel string) (DirListing, error) {
 			childRel = childRel + "/" + name
 		}
 		var size int64
-		if fi, err := e.Info(); err == nil && !fi.IsDir() {
-			size = fi.Size()
+		var modTime string
+		if fi, err := e.Info(); err == nil {
+			if !fi.IsDir() {
+				size = fi.Size()
+			}
+			modTime = fi.ModTime().UTC().Format(time.RFC3339)
 		}
 		out = append(out, Entry{
-			Name:  name,
-			Path:  filepath.ToSlash(childRel),
-			IsDir: e.IsDir(),
-			Size:  size,
+			Name:    name,
+			Path:    filepath.ToSlash(childRel),
+			IsDir:   e.IsDir(),
+			Size:    size,
+			ModTime: modTime,
 		})
 	}
 	return DirListing{

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   FileContentDialog,
@@ -12,7 +12,8 @@ import {
 } from '@/components/files'
 import { useMessage } from '@/components/feedback/message'
 import { deleteProjectWorkspace, fetchProjectWorkspaceFile } from '@/request/api/build'
-import type { ProjectWorkspaceEntry, ProjectWorkspaceFile } from '@/types'
+import type { ProjectWorkspaceEntry } from '@/types'
+import { formatBuildTime } from '../../project-format'
 import ProjectWorkspaceFtpPushDialog from '../ProjectWorkspaceFtpPushDialog.vue'
 
 const props = defineProps<{
@@ -22,6 +23,11 @@ const props = defineProps<{
   exists: boolean
   entries: ProjectWorkspaceEntry[]
   loading: boolean
+  projectName?: string
+  projectVersion?: string
+  projectType?: string
+  workspaceCode?: string
+  workspaceName?: string
 }>()
 
 const emit = defineEmits<{
@@ -40,8 +46,10 @@ const downloadingPath = ref<string | null>(null)
 const deletingPath = ref<string | null>(null)
 const clearingDir = ref(false)
 const ftpPushOpen = ref(false)
-const ftpPushEntry = ref<ProjectWorkspaceEntry | null>(null)
-const viewerFile = ref<ProjectWorkspaceFile | null>(null)
+const ftpPushEntries = ref<ProjectWorkspaceEntry[]>([])
+const selectedEntries = ref<ProjectWorkspaceEntry[]>([])
+const tableRef = ref<{ clearSelection: () => void } | null>(null)
+const viewerFile = ref<import('@/types').ProjectWorkspaceFile | null>(null)
 
 const isRoot = computed(() => props.path === '.' || !props.path)
 
@@ -49,6 +57,28 @@ const breadcrumb = computed(() => {
   if (isRoot.value) return [t('projectDetailProjectDirRoot')]
   return [t('projectDetailProjectDirRoot'), ...props.path.split('/')]
 })
+
+const selectedCount = computed(() => selectedEntries.value.length)
+
+watch(
+  () => props.path,
+  () => {
+    selectedEntries.value = []
+    tableRef.value?.clearSelection()
+  },
+)
+
+watch(
+  () => props.entries,
+  () => {
+    const valid = new Set(props.entries.map((e) => e.path))
+    selectedEntries.value = selectedEntries.value.filter((e) => valid.has(e.path))
+  },
+)
+
+function onSelectionChange(rows: ProjectWorkspaceEntry[]): void {
+  selectedEntries.value = rows
+}
 
 async function viewEntry(entry: ProjectWorkspaceEntry, event?: Event): Promise<void> {
   event?.stopPropagation()
@@ -136,10 +166,19 @@ function deleteEntry(entry: ProjectWorkspaceEntry, event?: Event): void {
   void deleteAtPath(entry.path)
 }
 
-function openFtpPush(entry: ProjectWorkspaceEntry, event?: Event): void {
+function openFtpPush(entries: ProjectWorkspaceEntry[], event?: Event): void {
   event?.stopPropagation()
-  ftpPushEntry.value = entry
+  if (!entries.length) return
+  ftpPushEntries.value = [...entries]
   ftpPushOpen.value = true
+}
+
+function openSelectedFtpPush(): void {
+  if (!selectedEntries.value.length) {
+    message.warning(t('projectFtpPushSelectRequired'))
+    return
+  }
+  openFtpPush(selectedEntries.value)
 }
 
 function onRowClick(row: ProjectWorkspaceEntry): void {
@@ -159,6 +198,20 @@ function onRowClick(row: ProjectWorkspaceEntry): void {
         <p v-if="absPath" class="project-workspace-panel__path-hint">{{ absPath }}</p>
       </div>
       <div class="project-workspace-panel__actions">
+        <el-button
+          v-if="exists && entries.length"
+          size="small"
+          type="primary"
+          plain
+          :disabled="!selectedCount"
+          @click="openSelectedFtpPush"
+        >
+          {{
+            selectedCount
+              ? $t('projectFtpPushSelected', { count: selectedCount })
+              : $t('projectFtpPushAction')
+          }}
+        </el-button>
         <el-button size="small" :disabled="isRoot" @click="emit('up')">
           {{ $t('projectWorkspaceUp') }}
         </el-button>
@@ -188,12 +241,15 @@ function onRowClick(row: ProjectWorkspaceEntry): void {
       <p v-if="!exists" class="project-workspace-panel__hint">{{ $t('projectWorkspaceNotCreated') }}</p>
       <el-table
         v-else-if="entries.length"
+        ref="tableRef"
         :data="entries"
         row-key="path"
         size="small"
         class="project-workspace-panel__table"
         @row-click="onRowClick"
+        @selection-change="onSelectionChange"
       >
+        <el-table-column type="selection" width="42" />
         <el-table-column prop="name" :label="$t('projectWorkspaceName')" min-width="160">
           <template #default="{ row }">
             <span :class="{ 'is-dir': row.is_dir }">{{ row.name }}</span>
@@ -203,6 +259,11 @@ function onRowClick(row: ProjectWorkspaceEntry): void {
           <template #default="{ row }">
             <span v-if="!row.is_dir">{{ formatFileSize(row.size) }}</span>
             <span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="mod_time" :label="$t('projectWorkspaceModTime')" width="176">
+          <template #default="{ row }">
+            {{ formatBuildTime(row.mod_time) }}
           </template>
         </el-table-column>
         <el-table-column :label="$t('projectWorkspaceActions')" width="320" align="center" fixed="right">
@@ -217,7 +278,7 @@ function onRowClick(row: ProjectWorkspaceEntry): void {
               @view="viewEntry(row)"
               @download="downloadEntry(row)"
               @delete="deleteEntry(row)"
-              @remote-push="openFtpPush(row)"
+              @remote-push="openFtpPush([row])"
             />
           </template>
         </el-table-column>
@@ -228,7 +289,12 @@ function onRowClick(row: ProjectWorkspaceEntry): void {
     <ProjectWorkspaceFtpPushDialog
       v-model:open="ftpPushOpen"
       :project-rec-id="projectRecId"
-      :entry="ftpPushEntry"
+      :entries="ftpPushEntries"
+      :project-name="projectName"
+      :project-version="projectVersion"
+      :project-type="projectType"
+      :workspace-code="workspaceCode"
+      :workspace-name="workspaceName"
     />
 
     <FileContentDialog

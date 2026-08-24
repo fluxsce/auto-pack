@@ -9,15 +9,23 @@ export interface FtpNotifyEmailFields {
   updateContent: string
   taskNo: string
   ftpVersionSource: string
+  /** Fixed for DATAHUB notify: 整包更新 */
   updateMethod: string
   needRestart: string
   browserCacheRefresh: string
   impactScope: string
-  frontendOrBackend: string
+  /** 更新范围: DATAHUB共享lib / DATAHUB界面 / DATAHUB服务 */
+  updateScope: string
+  /** 是否影响接口运行: 是 / 否 */
+  affectsApi: string
   warPackage: string
   other: string
   backup: string
 }
+
+export const FTP_NOTIFY_UPDATE_METHOD = '整包更新'
+export const FTP_NOTIFY_FROM_NAME = 'DATAHUB 更新通知'
+export const FTP_NOTIFY_SCOPE_OPTIONS = ['DATAHUB共享lib', 'DATAHUB界面', 'DATAHUB服务'] as const
 
 const GENERIC_WORKSPACE_CODES = new Set(['default', 'defaults', 'workspace', 'ws'])
 
@@ -99,11 +107,12 @@ function notifyRows(fields: FtpNotifyEmailFields, summary: string): Array<[strin
     ['更新内容', summary],
     ['任务编号', fields.taskNo.trim()],
     ['FTP版本来源', fields.ftpVersionSource.trim()],
-    ['更新方式', fields.updateMethod.trim() || '局部更新'],
+    ['更新方式', fields.updateMethod.trim() || FTP_NOTIFY_UPDATE_METHOD],
     ['是否重启', fields.needRestart.trim() || '是'],
     ['浏览器缓存刷新', fields.browserCacheRefresh.trim() || '是'],
     ['影响范围', fields.impactScope.trim() || '全局'],
-    ['前端or后端', fields.frontendOrBackend.trim()],
+    ['更新范围', fields.updateScope.trim()],
+    ['是否影响接口运行', fields.affectsApi.trim() || '是'],
     ['更新war包', fields.warPackage.trim()],
   ]
   const other = fields.other.trim()
@@ -181,7 +190,7 @@ export function buildFtpNotifyEmailHTML(fields: FtpNotifyEmailFields, at = new D
         <table role="presentation" cellpadding="0" cellspacing="0" width="640" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #d9e2ec;border-radius:10px;overflow:hidden;">
           <tr>
             <td style="padding:18px 22px;background:#0f4c81;color:#ffffff;">
-              <div style="font-size:12px;letter-spacing:0.04em;opacity:0.85;margin-bottom:6px;">FTP 更新告知</div>
+              <div style="font-size:12px;letter-spacing:0.04em;opacity:0.85;margin-bottom:6px;">DATAHUB 更新通知</div>
               <div style="font-size:18px;font-weight:600;line-height:1.4;">${escapeHtml(greeting)}</div>
             </td>
           </tr>
@@ -216,11 +225,17 @@ export function warPackageDisplayName(fileName: string): string {
   return name.replace(/\.(war|jar|zip)$/i, '')
 }
 
-export function inferFrontendOrBackend(projectType: string): string {
+/** Map project type to a default DATAHUB update scope. */
+export function inferUpdateScope(projectType: string): string {
   const t = projectType.trim().toLowerCase()
-  if (t === 'npm' || t === 'vue' || t === 'nodejs' || t === 'frontend') return '前端'
-  if (t === 'maven' || t === 'gradle' || t === 'go' || t === 'java') return '后端'
-  return '前端'
+  if (t === 'npm' || t === 'vue' || t === 'nodejs' || t === 'frontend') return 'DATAHUB界面'
+  if (t === 'maven' || t === 'gradle' || t === 'go' || t === 'java') return 'DATAHUB服务'
+  return 'DATAHUB界面'
+}
+
+/** @deprecated Use inferUpdateScope */
+export function inferFrontendOrBackend(projectType: string): string {
+  return inferUpdateScope(projectType)
 }
 
 export function smtpFromNameFromConfig(configJSON: string | undefined): string {
@@ -256,7 +271,7 @@ export function buildMergedFtpNotifyFields(
   )
   const backups = uniqueNonEmpty(items.map((it) => it.backupPath.trim()))
   const taskRef = first.taskRef.trim() || items.map((it) => it.taskRef.trim()).find(Boolean) || ''
-  const layers = uniqueNonEmpty(items.map((it) => inferFrontendOrBackend(it.projectType)))
+  const scopes = uniqueNonEmpty(items.map((it) => inferUpdateScope(it.projectType)))
   const ftpSource = normalizeRemoteDir(
     resolvePushLayout(first.pushPath, first.fileName || 'package').pushDir,
   )
@@ -270,11 +285,12 @@ export function buildMergedFtpNotifyFields(
     updateContent: formatNotifyUpdateContent(taskRef),
     taskNo: '',
     ftpVersionSource: ftpSource,
-    updateMethod: '局部更新',
+    updateMethod: FTP_NOTIFY_UPDATE_METHOD,
     needRestart: '是',
     browserCacheRefresh: '是',
     impactScope: '全局',
-    frontendOrBackend: layers.length > 1 ? layers.join('/') : layers[0] || '前端',
+    updateScope: scopes.length > 1 ? scopes.join('、') : scopes[0] || 'DATAHUB界面',
+    affectsApi: '是',
     warPackage: warPackages.join('、'),
     other: '',
     backup: backups.join('；'),

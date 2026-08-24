@@ -93,7 +93,7 @@ func AppendUpdateNote(req AppendUpdateNoteRequest) (Result, error) {
 		req.logf("Remote updateNote.txt not found; creating merged note")
 	}
 	req.logf("Writing merged updateNote.txt for %d packages", len(pairs))
-	if err := ftpclient.UploadBytes(conn, req.FTPConfig, strings.TrimPrefix(infoRemote, "/"), []byte(noteUpload)); err != nil {
+	if err := ftpclient.UploadBytes(conn, req.FTPConfig, infoRemote, []byte(noteUpload)); err != nil {
 		return Result{}, fmt.Errorf("upload info file: %w", err)
 	}
 

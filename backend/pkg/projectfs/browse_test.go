@@ -1,8 +1,10 @@
 package projectfs
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"auto-pack/backend/internal/repository"
 	"auto-pack/backend/pkg/projectcfg"
@@ -69,5 +71,29 @@ func TestResolveProjectSourceAbsDirRelativeOverride(t *testing.T) {
 	want := filepath.Join(custom, "sources", "shared-datahub")
 	if got != want {
 		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestListDirIncludesModTime(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	listing, err := ListDir(dir, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Entries) != 1 {
+		t.Fatalf("entries %d", len(listing.Entries))
+	}
+	e := listing.Entries[0]
+	if e.Name != "hello.txt" || e.Size != 2 || e.IsDir {
+		t.Fatalf("entry %+v", e)
+	}
+	if e.ModTime == "" {
+		t.Fatal("missing mod_time")
+	}
+	if _, err := time.Parse(time.RFC3339, e.ModTime); err != nil {
+		t.Fatalf("mod_time %q: %v", e.ModTime, err)
 	}
 }

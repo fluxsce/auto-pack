@@ -30,6 +30,8 @@ const props = defineProps<{
   workspaceExists: boolean
   workspaceAbsPath: string
   workspaceLoading: boolean
+  workspaceCode?: string
+  workspaceName?: string
   typeLabel: (type: unknown) => string
 }>()
 
@@ -262,6 +264,11 @@ function onNavClick(id: ProjectDetailSection | 'configure'): void {
           :exists="workspaceExists"
           :entries="workspaceEntries"
           :loading="workspaceLoading"
+          :project-name="project?.project_name"
+          :project-version="project?.project_version"
+          :project-type="project ? String(project.project_type) : undefined"
+          :workspace-code="workspaceCode"
+          :workspace-name="workspaceName"
           @up="emit('workspaceUp')"
           @refresh="emit('workspaceRefresh')"
           @open="emit('workspaceOpen', $event)"

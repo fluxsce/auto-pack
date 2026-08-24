@@ -92,7 +92,7 @@ function switchLang(next: AppLocale): void {
 
 function onLogout(): void {
   sessionStore.logout()
-  vueRouter.replace({ name: 'home' })
+  void vueRouter.replace({ name: 'home' })
 }
 
 onMounted(() => {

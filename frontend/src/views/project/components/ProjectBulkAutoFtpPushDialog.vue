@@ -21,7 +21,13 @@ import {
   mergeUpdateNotePreview,
   resolvePushLayout,
 } from '@/utils/workspace-ftp'
-import { pickTargetArtifact } from '@/utils/workspace-artifact'
+import {
+  isVdatahubStaticDirName,
+  isVdatahubStaticPath,
+  pickTargetArtifact,
+  VDATAHUB_STATIC_ROOT,
+  vdatahubZipFileName,
+} from '@/utils/workspace-artifact'
 import {
   buildMergedFtpNotifyFields,
   type FtpNotifyEmailFields,
@@ -77,6 +83,7 @@ const backupManual = ref(false)
 const pusher = ref('')
 const taskRef = ref('')
 const detail = ref('')
+const mergeVdatahub = ref(false)
 
 const remoteNoteContent = ref('')
 const remoteNoteExists = ref(false)
@@ -100,7 +107,24 @@ const availableProjectOptions = computed(() =>
   workspaceProjects.value.filter((p) => !targetIdSet.value.has(p.rec_id)),
 )
 
-const previewFileName = computed(() => targets.value[0]?.fileName || 'package.war')
+const vdatahubTargets = computed(() =>
+  targets.value.filter(
+    (row) => isVdatahubStaticPath(row.path) || isVdatahubStaticDirName(row.fileName),
+  ),
+)
+
+const canMergeVdatahub = computed(() => vdatahubTargets.value.length >= 2)
+
+const mergeVdatahubActive = computed(() => canMergeVdatahub.value && mergeVdatahub.value)
+
+const otherTargets = computed(() =>
+  targets.value.filter((row) => !vdatahubTargets.value.some((v) => v.project.rec_id === row.project.rec_id && v.path === row.path)),
+)
+
+const previewFileName = computed(() => {
+  if (mergeVdatahubActive.value) return vdatahubZipFileName()
+  return targets.value[0]?.fileName || 'package.war'
+})
 
 const pushLayout = computed(() => resolvePushLayout(pushPath.value, previewFileName.value))
 
@@ -114,16 +138,22 @@ const backupFilePathPreview = computed(() => {
   return backupFilePath(pushPath.value, previewFileName.value, backupPath.value)
 })
 
-const previewPathPairs = computed(() =>
-  targets.value.map((row) => {
+const previewPathPairs = computed(() => {
+  const rows = mergeVdatahubActive.value
+    ? [
+        { fileName: vdatahubZipFileName(), path: vdatahubZipFileName() },
+        ...otherTargets.value,
+      ]
+    : targets.value
+  return rows.map((row) => {
     const name = row.fileName || row.path.split('/').pop() || 'package'
     const layout = resolvePushLayout(pushPath.value, name)
     return {
       backupPath: backupFilePath(pushPath.value, name, backupPath.value),
       updatePath: pushPath.value.trim() ? layout.updatePath : name,
     }
-  }),
-)
+  })
+})
 
 const newManifestBlock = computed(() =>
   buildManifestPreviewPairs(
@@ -155,6 +185,12 @@ watch(open, (v) => {
   }
   resetForm()
   Promise.all([loadWorkspaceProjects(), loadFtpEnvs()]).catch(() => undefined)
+})
+
+watch(canMergeVdatahub, (ok) => {
+  if (!open.value) return
+  if (ok && !mergeVdatahub.value) mergeVdatahub.value = true
+  if (!ok) mergeVdatahub.value = false
 })
 
 watch(pushPath, (v) => {
@@ -189,6 +225,7 @@ function resetForm(): void {
   pusher.value = ''
   taskRef.value = ''
   detail.value = ''
+  mergeVdatahub.value = false
   remoteNoteContent.value = ''
   remoteNoteExists.value = false
   logText.value = t('projectBulkAutoFtpLogReady')
@@ -423,6 +460,60 @@ async function waitForFtpPushTask(
   }
 }
 
+async function pushMergedVdatahub(rows: PushTarget[]): Promise<PushSuccessItem | null> {
+  const anchor = rows[0]
+  const envName = ftpEnvs.value.find((e) => e.rec_id === ftpEnvRecId.value)?.env_name ?? ftpEnvRecId.value
+  const fileName = vdatahubZipFileName()
+  appendLog([
+    `[${formatLogTime()}] ${t('projectFtpPushMergeVdatahubTarget', { count: rows.length })}`,
+    `  ${t('projectFtpPushLogEnv', { name: envName })}`,
+    `  ${t('projectFtpPushLogPushPath', { path: pushPath.value.trim() })}`,
+    `  ${t('projectFtpPushLogUploading')}`,
+  ])
+  try {
+    const sameProjectPaths = rows.filter((r) => r.project.rec_id === anchor.project.rec_id).map((r) => r.path)
+    const start = await pushProjectWorkspaceFtp(anchor.project.rec_id, {
+      path: anchor.path,
+      paths: sameProjectPaths,
+      merge_zip_root: VDATAHUB_STATIC_ROOT,
+      merge_sources: rows
+        .filter((r) => r.project.rec_id !== anchor.project.rec_id)
+        .map((r) => ({ project_rec_id: r.project.rec_id, path: r.path })),
+      ftp_env_rec_id: ftpEnvRecId.value,
+      push_path: pushPath.value.trim(),
+      backup_path: backupPath.value.trim() || undefined,
+      pusher: pusher.value.trim(),
+      task_ref: taskRef.value.trim(),
+      skip_update_note: true,
+    })
+    const result = await waitForFtpPushTask(anchor.project.rec_id, start.task_id)
+    const plannedBackup = backupFilePath(pushPath.value.trim(), fileName, backupPath.value)
+    appendLog([
+      `[${formatLogTime()}] ${t('projectFtpPushLogSuccess')}`,
+      `  ${t('projectFtpPushLogBackupPath', { path: result.backup_path || plannedBackup || '—' })}`,
+      `  ${t('projectFtpPushLogUpdatePath', { path: result.update_path })}`,
+      `  ${t('projectBulkAutoFtpNoteDeferred')}`,
+    ])
+    return {
+      project: anchor.project,
+      path: fileName,
+      fileName,
+      result: {
+        ...result,
+        backup_path: result.backup_path || plannedBackup,
+      },
+      pushPath: pushPath.value.trim(),
+      taskRef: taskRef.value.trim(),
+    }
+  } catch (e) {
+    appendLog([
+      `[${formatLogTime()}] ${t('projectFtpPushLogFailed')}`,
+      `  ${(e as Error).message}`,
+    ])
+    return null
+  }
+}
+
 async function pushOne(row: PushTarget): Promise<PushSuccessItem | null> {
   const envName = ftpEnvs.value.find((e) => e.rec_id === ftpEnvRecId.value)?.env_name ?? ftpEnvRecId.value
   const fileLabel = row.fileName || row.path
@@ -518,8 +609,14 @@ async function onSubmit(): Promise<void> {
   hideCtxMenu()
   logText.value = `[${formatLogTime()}] ${t('projectBulkAutoFtpStart')}`
   try {
+    const mergeList = mergeVdatahubActive.value ? vdatahubTargets.value : []
+    const rest = mergeVdatahubActive.value ? otherTargets.value : targets.value
     const ok: PushSuccessItem[] = []
-    for (const row of targets.value) {
+    if (mergeList.length) {
+      const item = await pushMergedVdatahub(mergeList)
+      if (item) ok.push(item)
+    }
+    for (const row of rest) {
       const item = await pushOne(row)
       if (item) ok.push(item)
     }
@@ -534,7 +631,7 @@ async function onSubmit(): Promise<void> {
     appendLog([
       `[${formatLogTime()}] ${t('projectBulkAutoFtpDone', {
         succeeded: ok.length,
-        failed: targets.value.length - ok.length,
+        failed: (mergeList.length ? 1 : 0) + rest.length - ok.length,
       })}`,
     ])
     if (ok.length) {
@@ -693,6 +790,17 @@ watch(
               </ul>
               <p v-else class="auto-ftp__hint">{{ $t('projectBulkAutoFtpProjectsNone') }}</p>
             </div>
+            <el-checkbox
+              v-if="canMergeVdatahub"
+              v-model="mergeVdatahub"
+              class="auto-ftp__merge"
+              :disabled="saving"
+            >
+              {{ $t('projectFtpPushMergeVdatahub') }}
+            </el-checkbox>
+            <p v-if="canMergeVdatahub" class="auto-ftp__hint">
+              {{ $t('projectFtpPushMergeVdatahubHint') }}
+            </p>
           </el-form-item>
 
           <el-form-item :label="$t('projectFtpPushEnv')" required>
@@ -880,6 +988,11 @@ watch(
 
   &__projects {
     width: 100%;
+  }
+
+  &__merge {
+    margin-top: 8px;
+    font-size: 13px;
   }
 
   &__target-list {

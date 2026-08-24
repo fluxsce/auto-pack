@@ -23,9 +23,10 @@ import (
 )
 
 type batchBranchClonePayload struct {
-	WorkspaceRecID string `json:"workspace_rec_id"`
-	SourceBranch   string `json:"source_branch"`
-	TargetBranch   string `json:"target_branch"`
+	WorkspaceRecID  string `json:"workspace_rec_id"`
+	SourceBranch    string `json:"source_branch"`
+	TargetBranch    string `json:"target_branch"`
+	ExistingTarget  string `json:"existing_target"` // overwrite (default) | skip
 }
 
 type batchBranchCloneStartResponse struct {
@@ -64,6 +65,12 @@ func (h *Handler) batchBranchClone(w http.ResponseWriter, r *http.Request) {
 	}
 	body.SourceBranch = source
 	body.TargetBranch = target
+	body.ExistingTarget = string(projectrelease.NormalizeExistingTargetPolicy(body.ExistingTarget))
+	if body.ExistingTarget == string(projectrelease.ExistingTargetOverwrite) &&
+		projectrelease.IsProtectedBranchForDelete(target) {
+		httpx.WriteError(w, http.StatusBadRequest, "cannot overwrite protected branch develop/master/main")
+		return
+	}
 
 	ws, err := h.workspaces.FindByRecID(wsID)
 	if err != nil {
@@ -164,7 +171,8 @@ func (h *Handler) runBatchBranchClone(
 	logPath string,
 ) {
 	cloner := &projectrelease.BranchCloner{
-		Git: &projectrelease.GitCommitter{EnvRepo: h.env},
+		Git:            &projectrelease.GitCommitter{EnvRepo: h.env},
+		ExistingTarget: projectrelease.NormalizeExistingTargetPolicy(body.ExistingTarget),
 	}
 
 	var results []projectrelease.BranchCloneResult
@@ -247,10 +255,11 @@ func (h *Handler) formatPersistedBranchCloneLog(
 	currentProject string,
 ) string {
 	return projectrelease.FormatBatchReleaseLog(projectrelease.BatchLogParams{
-		StartLabel:        "开始批量分支克隆…",
-		DoneLabel:         "分支克隆结束",
-		ProgressLabel:     "克隆进度（实时）",
-		ParamsLine:        "源分支: " + body.SourceBranch + " → 目标分支: " + body.TargetBranch,
+		StartLabel:    "开始批量分支克隆…",
+		DoneLabel:     "分支克隆结束",
+		ProgressLabel: "克隆进度（实时）",
+		ParamsLine: "源分支: " + body.SourceBranch + " → 目标分支: " + body.TargetBranch +
+			"；已存在策略: " + existingTargetPolicyLabel(body.ExistingTarget),
 		SummaryLine:       "汇总 — 成功 " + strconv.Itoa(cloned) + "，跳过 " + strconv.Itoa(skipped) + "，失败 " + strconv.Itoa(failed),
 		NoStepsLabel:      "（无步骤明细）",
 		NoMessageLabel:    "（无错误详情）",
@@ -263,6 +272,15 @@ func (h *Handler) formatPersistedBranchCloneLog(
 		Failed:            failed,
 		Results:           projectrelease.BranchCloneResultsAsReleaseResults(results),
 	})
+}
+
+func existingTargetPolicyLabel(raw string) string {
+	switch projectrelease.NormalizeExistingTargetPolicy(raw) {
+	case projectrelease.ExistingTargetSkip:
+		return "跳过"
+	default:
+		return "先删除再克隆"
+	}
 }
 
 func (h *Handler) loadGitCloneProjects(wsID string) ([]repository.PackProject, error) {

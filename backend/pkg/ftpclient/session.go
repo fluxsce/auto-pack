@@ -140,9 +140,12 @@ func UploadBytes(conn *ftp.ServerConn, cfg envtypes.FTPConfig, rel string, conte
 	base := normalizeBase(cfg.BasePath)
 	remote := joinFTPPath(base, rel)
 	if err := mkdirFTP(conn, path.Dir(remote)); err != nil {
-		return err
+		return fmt.Errorf("ensure remote dir: %w", err)
 	}
-	return conn.Stor(remote, strings.NewReader(string(content)))
+	if err := storInDir(conn, remote, strings.NewReader(string(content))); err != nil {
+		return fmt.Errorf("stor %s: %w", remote, err)
+	}
+	return nil
 }
 
 func normalizeBase(base string) string {
@@ -168,7 +171,10 @@ func UploadReader(conn *ftp.ServerConn, cfg envtypes.FTPConfig, rel string, r io
 	base := normalizeBase(cfg.BasePath)
 	remote := joinFTPPath(base, rel)
 	if err := mkdirFTP(conn, path.Dir(remote)); err != nil {
-		return err
+		return fmt.Errorf("ensure remote dir: %w", err)
 	}
-	return conn.Stor(remote, r)
+	if err := storInDir(conn, remote, r); err != nil {
+		return fmt.Errorf("stor %s: %w", remote, err)
+	}
+	return nil
 }

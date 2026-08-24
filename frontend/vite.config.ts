@@ -1,6 +1,6 @@
 import { fileURLToPath, URL } from 'node:url'
 
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
@@ -10,6 +10,10 @@ const appBase = '/autopack/'
 export default defineConfig({
   base: appBase,
   plugins: [vue(), vueDevTools()],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.{test,spec}.ts'],
+  },
   build: {
     chunkSizeWarningLimit: 1600,
     rolldownOptions: {

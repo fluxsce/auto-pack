@@ -55,8 +55,19 @@ export interface WorkspaceFtpNotePathPair {
   update_path: string
 }
 
+export interface WorkspaceFtpMergeSource {
+  project_rec_id: string
+  path: string
+}
+
 export interface WorkspaceFtpPushPayload {
   path: string
+  /** Extra same-project paths packed with merge_zip_root. */
+  paths?: string[]
+  /** Pack sources into one zip folder (e.g. sce-vdatahub). */
+  merge_zip_root?: string
+  /** Extra sources from other projects in the same workspace. */
+  merge_sources?: WorkspaceFtpMergeSource[]
   ftp_env_rec_id: string
   push_path: string
   backup_path?: string

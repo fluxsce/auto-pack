@@ -14,6 +14,12 @@ import (
 	"auto-pack/backend/pkg/projectfs"
 )
 
+// SourcePath is one local file or directory to include in a merged zip.
+type SourcePath struct {
+	LocalBase    string
+	RelativePath string
+}
+
 // Request is input for a workspace FTP push (environment auto-update).
 type Request struct {
 	LocalBase    string
@@ -28,7 +34,14 @@ type Request struct {
 	SkipUpdateNote bool
 	// PriorNotePaths are earlier packages in the same batch; merged into one note on write.
 	PriorNotePaths []NotePathPair
-	Logf           func(format string, args ...any)
+	// RelativePaths are extra paths under LocalBase; used with MergeZipRoot.
+	RelativePaths []string
+	// MergeSources are extra paths that may live in other project work dirs.
+	MergeSources []SourcePath
+	// MergeZipRoot, when set and there are 2+ sources, packs them into one zip
+	// named {MergeZipRoot}.zip. Each source keeps its original directory name.
+	MergeZipRoot string
+	Logf         func(format string, args ...any)
 }
 
 // Result is returned after a successful push.
@@ -56,7 +69,7 @@ func (r Request) logf(format string, args ...any) {
 // Push uploads a workspace file or directory to FTP with backup and updateNote.txt.
 func Push(req Request) (Result, error) {
 	rel := strings.TrimSpace(strings.ReplaceAll(req.RelativePath, "\\", "/"))
-	if rel == "" || rel == "." {
+	if (rel == "" || rel == ".") && strings.TrimSpace(req.MergeZipRoot) == "" {
 		return Result{}, ErrPathRequired
 	}
 	if strings.TrimSpace(req.PushPath) == "" {
@@ -69,19 +82,6 @@ func Push(req Request) (Result, error) {
 		return Result{}, ErrTaskRefRequired
 	}
 
-	abs, err := projectfs.SafeJoin(req.LocalBase, rel)
-	if err != nil {
-		return Result{}, err
-	}
-	req.logf("Resolved local path: %s", abs)
-	info, err := os.Stat(abs)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return Result{}, ErrNotFound
-		}
-		return Result{}, err
-	}
-
 	pushTime := time.Now()
 
 	conn, err := ftpclient.OpenSession(req.FTPConfig)
@@ -90,24 +90,9 @@ func Push(req Request) (Result, error) {
 	}
 	defer conn.Quit()
 
-	var uploadLocal string
-	var uploadName string
-	var cleanup func()
-	if info.IsDir() {
-		req.logf("Directory detected; packaging as zip before upload")
-		tmp, name, clean, err := zipDirToTemp(abs)
-		if err != nil {
-			return Result{}, err
-		}
-		uploadLocal = tmp
-		uploadName = name
-		cleanup = clean
-		req.logf("Created temp package: %s", uploadName)
-	} else {
-		uploadLocal = abs
-		uploadName = filepath.Base(abs)
-		cleanup = func() {}
-		req.logf("File detected; uploading directly: %s", uploadName)
+	uploadLocal, uploadName, cleanup, err := prepareUpload(req, rel)
+	if err != nil {
+		return Result{}, err
 	}
 	defer cleanup()
 
@@ -141,6 +126,7 @@ func Push(req Request) (Result, error) {
 		req.logf("Remote target does not exist; backup skipped")
 	}
 
+	req.logf("Ensuring remote directory: %s", layout.PushDir)
 	req.logf("Uploading package to remote")
 	if err := ftpclient.UploadLocalFile(conn, req.FTPConfig, updatePath, uploadLocal); err != nil {
 		return Result{}, fmt.Errorf("upload update package: %w", err)
@@ -193,7 +179,7 @@ func Push(req Request) (Result, error) {
 	if len(pairs) > 1 {
 		req.logf("Writing merged updateNote.txt for %d packages", len(pairs))
 	}
-	if err := ftpclient.UploadBytes(conn, req.FTPConfig, strings.TrimPrefix(infoRemote, "/"), []byte(noteUpload)); err != nil {
+	if err := ftpclient.UploadBytes(conn, req.FTPConfig, infoRemote, []byte(noteUpload)); err != nil {
 		return Result{}, fmt.Errorf("upload info file: %w", err)
 	}
 	req.logf("updateNote.txt upload completed")
@@ -213,4 +199,120 @@ func ParseFTPConfig(raw string) (envtypes.FTPConfig, error) {
 		return cfg, fmt.Errorf("ftp config: %w", err)
 	}
 	return cfg, nil
+}
+
+func prepareUpload(req Request, rel string) (uploadLocal, uploadName string, cleanup func(), err error) {
+	root := strings.TrimSpace(req.MergeZipRoot)
+	if root != "" {
+		absPaths, err := resolveMergeAbsPaths(req, rel)
+		if err != nil {
+			return "", "", nil, err
+		}
+		if len(absPaths) >= 2 {
+			req.logf("Merging %d path(s) into %s.zip (original directory names kept)", len(absPaths), sanitizeZipRoot(root))
+			for _, p := range absPaths {
+				req.logf("  source: %s", p)
+			}
+			tmp, name, clean, err := zipSourcesToTemp(absPaths, root, req.logf)
+			if err != nil {
+				return "", "", nil, err
+			}
+			req.logf("Created merged temp package: %s", name)
+			return tmp, name, clean, nil
+		}
+		if len(absPaths) == 1 {
+			req.logf("Only one source; skip merge zip and push as a single item")
+			return uploadSingleLocal(req, absPaths[0])
+		}
+	}
+
+	abs, err := projectfs.SafeJoin(req.LocalBase, rel)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return uploadSingleLocal(req, abs)
+}
+
+func uploadSingleLocal(req Request, abs string) (uploadLocal, uploadName string, cleanup func(), err error) {
+	req.logf("Resolved local path: %s", abs)
+	info, err := os.Stat(abs)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil, ErrNotFound
+		}
+		return "", "", nil, err
+	}
+	if info.IsDir() {
+		req.logf("Directory detected; packaging as zip before upload")
+		tmp, name, clean, err := zipDirToTemp(abs)
+		if err != nil {
+			return "", "", nil, err
+		}
+		req.logf("Created temp package: %s", name)
+		return tmp, name, clean, nil
+	}
+	req.logf("File detected; uploading directly: %s", filepath.Base(abs))
+	return abs, filepath.Base(abs), func() {}, nil
+}
+
+func resolveMergeAbsPaths(req Request, rel string) ([]string, error) {
+	var absPaths []string
+	rels := make([]string, 0, 1+len(req.RelativePaths))
+	if rel != "" && rel != "." {
+		rels = append(rels, rel)
+	}
+	for _, extra := range req.RelativePaths {
+		extra = strings.TrimSpace(strings.ReplaceAll(extra, "\\", "/"))
+		if extra == "" || extra == "." || extra == rel {
+			continue
+		}
+		rels = append(rels, extra)
+	}
+	for _, item := range rels {
+		abs, err := projectfs.SafeJoin(req.LocalBase, item)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(abs); err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+		absPaths = append(absPaths, abs)
+	}
+	for _, src := range req.MergeSources {
+		srcRel := strings.TrimSpace(strings.ReplaceAll(src.RelativePath, "\\", "/"))
+		if srcRel == "" || srcRel == "." {
+			return nil, ErrPathRequired
+		}
+		abs, err := projectfs.SafeJoin(src.LocalBase, srcRel)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := os.Stat(abs); err != nil {
+			if os.IsNotExist(err) {
+				return nil, ErrNotFound
+			}
+			return nil, err
+		}
+		absPaths = append(absPaths, abs)
+	}
+	if len(absPaths) == 0 {
+		return nil, ErrPathRequired
+	}
+	return uniqueStrings(absPaths), nil
+}
+
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }

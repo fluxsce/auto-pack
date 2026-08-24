@@ -16,8 +16,16 @@ import (
 	"github.com/google/uuid"
 )
 
+type workspaceFtpMergeSource struct {
+	ProjectRecID string `json:"project_rec_id"`
+	Path         string `json:"path"`
+}
+
 type workspaceFtpPushPayload struct {
 	Path           string                          `json:"path"`
+	Paths          []string                        `json:"paths,omitempty"`
+	MergeZipRoot   string                          `json:"merge_zip_root,omitempty"`
+	MergeSources   []workspaceFtpMergeSource       `json:"merge_sources,omitempty"`
 	FTPEnvRecID    string                          `json:"ftp_env_rec_id"`
 	PushPath       string                          `json:"push_path"`
 	BackupPath     string                          `json:"backup_path"`
@@ -59,7 +67,8 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := strings.TrimSpace(body.Path)
-	if rel == "" || rel == "." {
+	mergeRoot := strings.TrimSpace(body.MergeZipRoot)
+	if (rel == "" || rel == ".") && mergeRoot == "" && len(body.Paths) == 0 && len(body.MergeSources) == 0 {
 		httpx.WriteError(w, http.StatusBadRequest, "path is required")
 		return
 	}
@@ -98,15 +107,53 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	extraRels := normalizeRelPaths(body.Paths, rel)
+	mergeSources, err := h.resolveFtpMergeSources(project, body.MergeSources)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	for _, src := range mergeSources {
+		if running, err := h.builds.FindRunningByProject(src.projectRecID); err != nil {
+			httpx.WriteError(w, http.StatusInternalServerError, err.Error())
+			return
+		} else if running != nil {
+			httpx.WriteError(w, http.StatusConflict, "cannot push while a build is running")
+			return
+		}
+		if src.projectRecID != projectRecID {
+			if active := h.ftpPushCoord.activeTask(src.projectRecID); active != nil {
+				httpx.WriteError(w, http.StatusConflict, "ftp push already in progress")
+				return
+			}
+		}
+	}
+	pushMergeSources := make([]workspaceftppush.SourcePath, 0, len(mergeSources))
+	for _, src := range mergeSources {
+		pushMergeSources = append(pushMergeSources, src.source)
+	}
+
+	objectLabel := rel
+	if mergeRoot != "" {
+		objectLabel = mergeRoot + ".zip"
+	}
+
 	taskID := uuid.New().String()
-	h.ftpPushCoord.start(taskID, projectRecID, rel, body.PushPath, func(ctx context.Context, appendLog func(format string, args ...any)) (*workspaceftppush.Result, error) {
+	h.ftpPushCoord.start(taskID, projectRecID, objectLabel, body.PushPath, func(ctx context.Context, appendLog func(format string, args ...any)) (*workspaceftppush.Result, error) {
 		appendLog("开始 FTP 远程推送")
-		appendLog("对象：%s", rel)
+		if mergeRoot != "" {
+			appendLog("对象：合并 %s（%d 个目录）", mergeRoot+".zip", 1+len(extraRels)+len(mergeSources))
+		} else {
+			appendLog("对象：%s", rel)
+		}
 		appendLog("FTP 环境：%s", item.EnvName)
 		appendLog("推送路径：%s", strings.TrimSpace(body.PushPath))
 		result, err := workspaceftppush.Push(workspaceftppush.Request{
 			LocalBase:      base,
 			RelativePath:   rel,
+			RelativePaths:  extraRels,
+			MergeZipRoot:   mergeRoot,
+			MergeSources:   pushMergeSources,
 			FTPConfig:      ftpCfg,
 			PushPath:       body.PushPath,
 			BackupPath:     body.BackupPath,
@@ -123,7 +170,7 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 			h.audit.Record(r.Context(), r, audit.Entry{
 				Action: audit.ActionUpdate, Module: audit.ModuleProject, TargetType: "project",
 				TargetID: projectRecID, TargetName: project.ProjectName,
-				Summary: "FTP 远程推送失败 " + rel,
+				Summary: "FTP 远程推送失败 " + objectLabel,
 				Detail:  err.Error(),
 				Success: false,
 			})
@@ -140,7 +187,7 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		h.audit.Record(r.Context(), r, audit.Entry{
 			Action: audit.ActionUpdate, Module: audit.ModuleProject, TargetType: "project",
 			TargetID: projectRecID, TargetName: project.ProjectName,
-			Summary: "FTP 远程推送 " + rel + " → " + result.UpdatePath,
+			Summary: "FTP 远程推送 " + objectLabel + " → " + result.UpdatePath,
 			Detail:  result.InfoContent,
 			Success: true,
 		})
@@ -150,4 +197,66 @@ func (h *Handler) workspaceFtpPush(w http.ResponseWriter, r *http.Request) {
 		TaskID: taskID,
 		Status: "running",
 	})
+}
+
+type resolvedFtpMergeSource struct {
+	projectRecID string
+	source       workspaceftppush.SourcePath
+}
+
+func normalizeRelPaths(paths []string, skip string) []string {
+	skip = strings.TrimSpace(strings.ReplaceAll(skip, "\\", "/"))
+	out := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	if skip != "" && skip != "." {
+		seen[skip] = struct{}{}
+	}
+	for _, p := range paths {
+		p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+		if p == "" || p == "." {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
+func (h *Handler) resolveFtpMergeSources(anchor *repository.PackProject, srcs []workspaceFtpMergeSource) ([]resolvedFtpMergeSource, error) {
+	if len(srcs) == 0 {
+		return nil, nil
+	}
+	out := make([]resolvedFtpMergeSource, 0, len(srcs))
+	for _, src := range srcs {
+		id := strings.TrimSpace(src.ProjectRecID)
+		rel := strings.TrimSpace(src.Path)
+		if id == "" || rel == "" || rel == "." {
+			return nil, errors.New("merge_sources require project_rec_id and path")
+		}
+		if id == anchor.RecID {
+			continue
+		}
+		p, err := h.projects.FindByRecID(id)
+		if err != nil {
+			return nil, err
+		}
+		if p.WorkspaceRecID != anchor.WorkspaceRecID {
+			return nil, errors.New("merge sources must belong to the same workspace")
+		}
+		_, _, base, err := h.resolveProjectDir(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, resolvedFtpMergeSource{
+			projectRecID: id,
+			source: workspaceftppush.SourcePath{
+				LocalBase:    base,
+				RelativePath: rel,
+			},
+		})
+	}
+	return out, nil
 }

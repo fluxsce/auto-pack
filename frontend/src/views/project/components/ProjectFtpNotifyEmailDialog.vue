@@ -11,6 +11,9 @@ import {
   buildFtpNotifyEmailBody,
   buildFtpNotifyEmailHTML,
   buildFtpNotifyEmailSubject,
+  FTP_NOTIFY_FROM_NAME,
+  FTP_NOTIFY_SCOPE_OPTIONS,
+  FTP_NOTIFY_UPDATE_METHOD,
   normalizeNotifyRecipients,
   smtpFromNameFromConfig,
   type FtpNotifyEmailFields,
@@ -33,7 +36,7 @@ const { t } = useI18n()
 const message = useMessage()
 
 const smtpEnvRecId = ref('')
-const fromName = ref('')
+const fromName = ref(FTP_NOTIFY_FROM_NAME)
 const fromNameManual = ref(false)
 const recipients = ref('')
 const subject = ref('')
@@ -44,11 +47,12 @@ const fields = ref<FtpNotifyEmailFields>({
   updateContent: '',
   taskNo: '',
   ftpVersionSource: '',
-  updateMethod: '局部更新',
+  updateMethod: FTP_NOTIFY_UPDATE_METHOD,
   needRestart: '是',
   browserCacheRefresh: '是',
   impactScope: '全局',
-  frontendOrBackend: '前端',
+  updateScope: 'DATAHUB界面',
+  affectsApi: '是',
   warPackage: '',
   other: '',
   backup: '',
@@ -76,7 +80,8 @@ watch(
 watch(smtpEnvRecId, (recId) => {
   if (fromNameManual.value) return
   const env = options.value.find((e) => e.rec_id === recId)
-  fromName.value = smtpFromNameFromConfig(env?.config_json)
+  const name = smtpFromNameFromConfig(env?.config_json)
+  fromName.value = !name || name === 'Auto Pack' ? FTP_NOTIFY_FROM_NAME : name
 })
 
 function resetFromInitial(): void {
@@ -87,17 +92,18 @@ function resetFromInitial(): void {
     updateContent: init?.updateContent ?? '',
     taskNo: init?.taskNo ?? '',
     ftpVersionSource: init?.ftpVersionSource ?? '',
-    updateMethod: init?.updateMethod || '局部更新',
+    updateMethod: FTP_NOTIFY_UPDATE_METHOD,
     needRestart: init?.needRestart || '是',
     browserCacheRefresh: init?.browserCacheRefresh || '是',
     impactScope: init?.impactScope || '全局',
-    frontendOrBackend: init?.frontendOrBackend || '前端',
+    updateScope: init?.updateScope || 'DATAHUB界面',
+    affectsApi: init?.affectsApi || '是',
     warPackage: init?.warPackage ?? '',
     other: init?.other ?? '',
     backup: init?.backup ?? '',
   }
   smtpEnvRecId.value = ''
-  fromName.value = ''
+  fromName.value = FTP_NOTIFY_FROM_NAME
   recipients.value = ''
   subject.value = buildFtpNotifyEmailSubject(fields.value)
 }
@@ -136,7 +142,7 @@ async function onSubmit(): Promise<void> {
       subject: subject.value.trim(),
       body: textBody.value.trim(),
       html: htmlBody.value.trim(),
-      from_name: fromName.value.trim() || undefined,
+      from_name: fromName.value.trim() || FTP_NOTIFY_FROM_NAME,
     })
     message.success(t('projectFtpNotifySendSuccess'))
     open.value = false
@@ -160,7 +166,7 @@ async function onSubmit(): Promise<void> {
     :confirm-loading="saving"
     @confirm="onSubmit"
   >
-    <el-form label-width="108px" class="ftp-notify" @submit.prevent="onSubmit">
+    <el-form label-width="128px" class="ftp-notify" @submit.prevent="onSubmit">
       <el-form-item :label="$t('projectPostBuildSmtpEnv')" required>
         <el-select
           v-model="smtpEnvRecId"
@@ -219,6 +225,30 @@ async function onSubmit(): Promise<void> {
         <el-form-item :label="$t('projectFtpNotifyBackup')" class="ftp-notify__span2">
           <el-input v-model="fields.backup" />
         </el-form-item>
+        <el-form-item :label="$t('projectFtpNotifyUpdateMethod')">
+          <el-input :model-value="FTP_NOTIFY_UPDATE_METHOD" disabled />
+        </el-form-item>
+        <el-form-item :label="$t('projectFtpNotifyUpdateScope')">
+          <el-select
+            v-model="fields.updateScope"
+            teleported
+            :popper-class="APP_DIALOG_POPPER_CLASS"
+            class="ftp-notify__full"
+          >
+            <el-option v-for="opt in FTP_NOTIFY_SCOPE_OPTIONS" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('projectFtpNotifyAffectsApi')">
+          <el-select
+            v-model="fields.affectsApi"
+            teleported
+            :popper-class="APP_DIALOG_POPPER_CLASS"
+            class="ftp-notify__full"
+          >
+            <el-option label="是" value="是" />
+            <el-option label="否" value="否" />
+          </el-select>
+        </el-form-item>
         <el-form-item :label="$t('projectFtpNotifyNeedRestart')">
           <el-select
             v-model="fields.needRestart"
@@ -239,17 +269,6 @@ async function onSubmit(): Promise<void> {
           >
             <el-option label="是" value="是" />
             <el-option label="不" value="不" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('projectFtpNotifyLayer')">
-          <el-select
-            v-model="fields.frontendOrBackend"
-            teleported
-            :popper-class="APP_DIALOG_POPPER_CLASS"
-            class="ftp-notify__full"
-          >
-            <el-option :label="$t('projectFtpNotifyLayerFrontend')" value="前端" />
-            <el-option :label="$t('projectFtpNotifyLayerBackend')" value="后端" />
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('projectFtpNotifyImpactScope')">

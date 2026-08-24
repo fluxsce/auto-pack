@@ -32,6 +32,8 @@ const message = useMessage()
 
 const sourceBranch = ref('release/V10.0.0-P01')
 const targetBranch = ref('release/V10.0.0-P02')
+/** When target already exists on origin: overwrite tip from source, or skip. */
+const existingTarget = ref<'overwrite' | 'skip'>('overwrite')
 const saving = ref(false)
 const running = ref(false)
 const foreignJob = ref(false)
@@ -423,6 +425,11 @@ async function onSubmit(): Promise<void> {
   logHeader.value = [
     `[${formatLogTime()}] ${t('projectBulkBranchCloneLogStart')}`,
     `${t('projectBulkBranchCloneSource')}: ${source} → ${t('projectBulkBranchCloneTarget')}: ${target}`,
+    `${t('projectBulkBranchCloneExisting')}: ${
+      existingTarget.value === 'skip'
+        ? t('projectBulkBranchCloneExistingSkip')
+        : t('projectBulkBranchCloneExistingOverwrite')
+    }`,
   ].join('\n')
   logText.value = logHeader.value
   logViewMode.value = 'live'
@@ -435,6 +442,7 @@ async function onSubmit(): Promise<void> {
       workspace_rec_id: props.workspaceRecId,
       source_branch: source,
       target_branch: target,
+      existing_target: existingTarget.value,
     })
     activeBatchRecId.value = start.batch_rec_id
     void loadBatchHistory()
@@ -480,6 +488,13 @@ async function onSubmit(): Promise<void> {
               :disabled="running || foreignJob"
               autocomplete="off"
             />
+          </el-form-item>
+          <el-form-item :label="$t('projectBulkBranchCloneExisting')">
+            <el-radio-group v-model="existingTarget" :disabled="running || foreignJob">
+              <el-radio value="overwrite">{{ $t('projectBulkBranchCloneExistingOverwrite') }}</el-radio>
+              <el-radio value="skip">{{ $t('projectBulkBranchCloneExistingSkip') }}</el-radio>
+            </el-radio-group>
+            <p class="project-bulk-branch-clone__note">{{ $t('projectBulkBranchCloneExistingHint') }}</p>
           </el-form-item>
           <p class="project-bulk-branch-clone__note">{{ $t('projectBulkBranchCloneNote') }}</p>
         </el-form>
