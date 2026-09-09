@@ -1,0 +1,37 @@
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tag {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--shell-border);
+  border-radius: 999px;
+  background: var(--shell-inset-bg);
+  color: var(--shell-title);
+  font-family: var(--rs-font-mono);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.tag:hover {
+  border-color: #0ea5e9;
+  color: #0ea5e9;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--shell-muted);
+}

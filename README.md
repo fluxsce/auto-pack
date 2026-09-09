@@ -1,132 +1,100 @@
 # auto-pack
 
-自动打包工程：
+作业型自动打包控制台（2.0）。配置（空间 / 工程 / 环境）与执行（作业）分开；UI 用 [niuma-ui](https://github.com/Blair-Shang/niuma-ui)；平台库支持 SQLite / PostgreSQL / MySQL。
 
-- 前端：Vue 3 + Vite + Element Plus
-- 后端：Go + SQLite（离线数据库）
+试用版 1.0.0 已冻结：tag `v1.0.0`，源码在 [legacy/](legacy/)。
 
-## 目录结构
+## 版本
 
-```
-backend/
-  cmd/                 # 程序入口
-  configs/             # app.yaml 配置
-  internal/
-    app/               # 依赖装配与 HTTP 根 Handler
-    config/            # 加载 YAML 配置
-    db/                # SQLite 初始化与种子数据
-    repository/        # 数据库访问（模型、仓储、种子数据）
-    httpx/             # JSON 响应、CORS 等 HTTP 工具
-    web/               # HTTP 层：auth、assets、handler、静态资源
-      auth/            # 登录、JWT、鉴权
-      assets/          # 前端产物目录常量（打包脚本用）
-      handler/         # 按 API 模块拆分（login、me、password、username）
-      middleware/      # 鉴权中间件
-      static/          # 磁盘静态资源代理（发布包 web/ 目录）
-frontend/
-```
+| 名称 | 示例 | 管什么 |
+|------|------|--------|
+| 控制台 SemVer | `v2.0.0` | 本仓库；见 [CHANGELOG.md](CHANGELOG.md) |
+| 产品发版 Tag | `V9.0.0-P01` | 被打包工程，只出现在作业参数里 |
 
-## 发布打包
-
-在仓库根目录执行（输出到 `build/`，应用名 `autopack`）：
+发布控制台时注入版本：
 
 ```bash
-# Linux（需在 Linux 下执行）
-bash scripts/package-linux.sh
-
-# Windows（PowerShell）
-powershell -File scripts/package-windows.ps1
+go build -ldflags="-s -w -X auto-pack/server/internal/config.AppVersion=2.0.0" -o autopack ./cmd
 ```
 
-详见 [scripts/README.md](scripts/README.md)。
+## 目录
 
-## 正式版补丁发版与 FTP 推送
-
-已上线正式版本的缺陷修复、修订 Tag 发版、自动构建与公司 FTP 推送流程说明见：
-
-- [docs/release-production-patch.md](docs/release-production-patch.md)
-
-控制台 **任务面板** 中有对应的简明操作指引。
+```
+server/                 # Go 控制面
+  cmd/                  # 入口
+  configs/app.yaml.example  # 复制为 app.yaml；本机 yaml 不入库
+  internal/
+    config/             # YAML + AppVersion
+    store/              # 三库连接与事务
+    migrate/            # init.sql + 98_patch.sql
+    iam/                # 身份 / 空间成员 / 动作
+    crypt/              # 环境密文
+    token/              # JWT，无 HTTP
+    web/                # L4 HTTP，按功能模块划分
+      mod/ router/      # 前缀与组装；router 不写业务路径
+      health/ auth/ jobs/ workspaces/ projects/ envs/ users/ audit/
+    host/               # 本机工具族（bash git npm maven ftp）
+    job/                # 作业控制面（入队 / 查询 / 取消 / cron）
+      runner/           # 执行面
+    workspace/ project/ env/ user/ audit/
+src/                    # Vue 3 + niuma-ui
+script/
+  db/                   # sqlite / mysql / postgres DDL
+  build/                # Windows / Linux 全局构建
+  run/                  # 启停模板（打进发行包根目录）
+  package/              # 发行包说明
+legacy/                 # v1.0.0 试用版
+```
 
 ## 启动
 
-### 后端
+```bash
+# 需本机有 ../niuma-ui 与 Go
+# 首次：复制示例配置，再按本机改 DSN / 密钥（app.yaml 不进 git）
+#   Copy-Item server/configs/app.yaml.example server/configs/app.yaml
+pnpm install
+pnpm dev          # Vite :5173 + 后端 :8080
+# pnpm dev:web    # 只前端
+# pnpm dev:server # 只后端
+```
+
+浏览器：http://localhost:5173/autopack/  
+API：`/autopack/api/...`  
+默认账号：`admin` / `123456`
+
+`app.yaml` 里 `database.driver` 可改为 `postgres` 或 `mysql`。`workspace.root` 是所有空间与工程的检出根目录，默认 `./data/workspaces/{空间编码}/{工程名}`。
+
+## 发行包
+
+全局构建把前端、后端和运维脚本打进 `build/dist/auto-pack-{版本}-{os}-{arch}/`，按 `bin` / `web` / `configs` / `script/db` 分开，不带源码和本机密钥。说明见 [script/README.md](script/README.md)。
+
+```powershell
+pnpm package:windows
+# 或交叉编 Linux：
+# powershell -NoProfile -ExecutionPolicy Bypass -File script/build/windows.ps1 -OS linux
+```
 
 ```bash
-cd backend
-go run ./cmd
-# 或指定配置目录：go run ./cmd -config ./configs
+pnpm package:linux
+# 或：bash script/build/linux.sh --os windows
 ```
 
-配置见 `backend/configs/app.yaml`：
+到发行目录后：`start.bat` / `./start.sh`。浏览器 http://127.0.0.1:8080/autopack/
 
-| 配置项 | 默认值 | 说明 |
-|--------|--------|------|
-| `server.addr` | `:8080` | 监听地址 |
-| `database.path` | `./data/autopack.db` | SQLite 文件路径（相对应用根目录） |
-| `web.jwt_secret` | 内置开发密钥 | JWT 签名密钥，生产环境务必修改 |
-| `web.frontend.path` | 空 | 前端 dist；空则自动找 `web/` 或 `../frontend/dist` |
+## 权限（2.0）
 
-首次启动会自动创建数据库，并初始化默认管理员：
+JWT 只证明身份。写操作走 `iam.Allow(actor, workspace, action)`。
 
-- 用户名：`admin`
-- 密码：`123456`
+| 角色 | 动作 |
+|------|------|
+| owner | 全部 |
+| operator | `job.submit` `job.cancel` `project.write` `env.write` `audit.read` |
+| viewer | 只读作业与日志 |
 
-### 前端
+`user.admin` 管成员与动作矩阵。完整 RBAC UI 在用户页；闸在 service，不在 Runner。
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+## 作业类型
 
-## 认证接口
+`build` · `release` · `ftp_push` · `pom_version` · `branch_clone` · `sync_sources`
 
-| 方法 | 路径 | 说明 | 鉴权 |
-|------|------|------|------|
-| POST | `/autopack/api/auth/login` | 登录，返回 JWT | 否 |
-| GET | `/autopack/api/auth/me` | 当前用户信息 | Bearer Token |
-| PUT | `/autopack/api/auth/password` | 修改密码 | Bearer Token |
-| PUT | `/autopack/api/auth/username` | 修改用户名 | Bearer Token |
-
-### 登录
-
-```json
-POST /autopack/api/auth/login
-{ "username": "admin", "password": "123456" }
-```
-
-响应示例：
-
-```json
-{
-  "token": "...",
-  "expires_at": "2026-06-03T10:00:00+08:00",
-  "user": { "id": 1, "username": "admin" }
-}
-```
-
-后续请求在 Header 中携带：`Authorization: Bearer <token>`
-
-### 修改密码
-
-```json
-PUT /autopack/api/auth/password
-{ "old_password": "123456", "new_password": "newpass" }
-```
-
-### 修改用户名
-
-```json
-PUT /autopack/api/auth/username
-{ "password": "123456", "new_username": "admin2" }
-```
-
-## 其他接口
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/autopack/api/health` | 健康检查 |
-| GET/POST | `/autopack/api/tasks` | 打包任务（需登录） |
-
-前端与静态资源统一前缀 **`/autopack`**（生产环境由后端从发布包 `web/` 目录代理，访问 http://localhost:8080/autopack/ ）。
+cron 只负责入队，不直接跑构建。

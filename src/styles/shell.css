@@ -1,0 +1,200 @@
+:root,
+[data-rs-theme='dark'] {
+  --shell-accent: #0ea5e9;
+  --shell-title: #f8fafc;
+  --shell-muted: rgba(226, 232, 240, 0.78);
+  --shell-border: rgba(148, 163, 184, 0.22);
+  --shell-card-bg: rgba(15, 23, 42, 0.72);
+  --shell-card-border: rgba(148, 163, 184, 0.22);
+  --shell-card-shadow: 0 20px 50px rgba(2, 6, 23, 0.28), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shell-inset-bg: rgba(255, 255, 255, 0.06);
+  --shell-header-bg: rgba(15, 23, 42, 0.55);
+  --shell-header-shadow: 0 4px 24px rgba(2, 6, 23, 0.12);
+  --shell-nav-hover: rgba(255, 255, 255, 0.08);
+  --shell-chip-bg: rgba(255, 255, 255, 0.08);
+  --shell-page-bg: #020617;
+  --shell-title-grad: linear-gradient(120deg, #fff 0%, #a5f3fc 45%, #c4b5fd 100%);
+  --prefs-bg: rgba(255, 255, 255, 0.12);
+  --prefs-border: rgba(255, 255, 255, 0.2);
+  --prefs-text: rgba(248, 250, 252, 0.9);
+  --prefs-active-bg: rgba(255, 255, 255, 0.95);
+  --prefs-active-fg: #0f172a;
+  --tech-mesh:
+    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(34, 211, 238, 0.22), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 85% 10%, rgba(167, 139, 250, 0.2), transparent 50%),
+    radial-gradient(ellipse 45% 35% at 70% 80%, rgba(59, 130, 246, 0.16), transparent 55%),
+    linear-gradient(160deg, #020617 0%, #0f172a 45%, #1e1b4b 100%);
+}
+
+[data-rs-theme='light'] {
+  --shell-title: #0f172a;
+  --shell-muted: #64748b;
+  --shell-border: rgba(226, 232, 240, 0.9);
+  --shell-card-bg: rgba(255, 255, 255, 0.96);
+  --shell-card-border: rgba(226, 232, 240, 0.9);
+  --shell-card-shadow: 0 24px 48px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(226, 232, 240, 0.8);
+  --shell-inset-bg: rgba(241, 245, 249, 0.9);
+  --shell-header-bg: rgba(255, 255, 255, 0.72);
+  --shell-header-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+  --shell-nav-hover: rgba(14, 165, 233, 0.07);
+  --shell-chip-bg: rgba(255, 255, 255, 0.72);
+  --shell-page-bg: #f1f5f9;
+  --shell-title-grad: linear-gradient(120deg, #0f172a 0%, #0369a1 50%, #6d28d9 100%);
+  --prefs-bg: rgba(255, 255, 255, 0.75);
+  --prefs-border: rgba(226, 232, 240, 0.9);
+  --prefs-text: #64748b;
+  --prefs-active-bg: #fff;
+  --prefs-active-fg: #0369a1;
+  --tech-mesh:
+    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(14, 165, 233, 0.18), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 85% 10%, rgba(139, 92, 246, 0.14), transparent 50%),
+    radial-gradient(ellipse 42% 32% at 70% 82%, rgba(59, 130, 246, 0.1), transparent 55%),
+    linear-gradient(160deg, #e8f4fc 0%, #f8fafc 40%, #ede9fe 100%);
+}
+
+.tech-bg__mesh {
+  background: var(--tech-mesh);
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.page--wide {
+  max-width: none;
+}
+
+.page__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.page__titles h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--shell-title);
+}
+
+.page__titles p {
+  margin: 0.4rem 0 0;
+  max-width: 58em;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--shell-muted);
+}
+
+.page__quiet {
+  margin: 0;
+  padding: 1.25rem 1.35rem 1.5rem;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--shell-muted);
+}
+
+.page .rs-card {
+  background: var(--shell-card-bg);
+  border-color: var(--shell-card-border);
+  box-shadow: var(--shell-card-shadow);
+  backdrop-filter: blur(16px);
+  color: var(--shell-title);
+}
+
+.page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.page__stack {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.page__pager {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.65rem 0.85rem 0.85rem;
+}
+
+.form-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.mono {
+  font-family: var(--rs-font-mono);
+  white-space: pre-wrap;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--rs-code-bg, color-mix(in srgb, var(--rs-surface) 88%, #000));
+  max-height: 28rem;
+  overflow: auto;
+}
+
+.matrix {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.matrix th,
+.matrix td {
+  padding: 0.9rem 1rem;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--shell-border);
+}
+
+.matrix th {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--shell-muted);
+}
+
+.matrix td:not(:first-child),
+.matrix th:not(:first-child) {
+  text-align: center;
+}
+
+.matrix tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.matrix tbody tr:hover td {
+  background: color-mix(in srgb, var(--rs-primary) 6%, transparent);
+}
+
+.matrix__action {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.matrix__name {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: var(--shell-title);
+}
+
+.matrix__code {
+  font-family: var(--rs-font-mono);
+  font-size: 0.72rem;
+  color: var(--shell-muted);
+}

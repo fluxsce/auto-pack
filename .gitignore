@@ -1,14 +1,35 @@
-# Backend (SQLite、构建产物)
-backend/data/
-backend/bin/
-backend/logs/
+# 2.0 runtime
+server/data/
+server/bin/
+server/logs/
+/server/autopack
 *.exe
-/backend/autopack
-/backend/cmd/autopack
+data/
+logs/
+run/
+
+# 本机运行配置（DSN / 密钥）。仓库只收 *.example
+server/configs/app.yaml
+configs/app.yaml
+**/configs/app.yaml
+
+
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# Legacy 1.0
+legacy/backend/data/
+legacy/backend/bin/
+legacy/backend/logs/
+legacy/frontend/node_modules/
+legacy/frontend/dist/
 
 # Release packages
 build/
 
-# OS
+# OS / IDE
 .DS_Store
 Thumbs.db
+.idea/

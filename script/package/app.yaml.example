@@ -1,0 +1,38 @@
+# 发行包配置示例。复制为同目录 app.yaml 后再改本机值。
+# 应用根 = configs 的上一级。静态页 ./web。不要把填了密钥的 app.yaml 提交或二次打包。
+
+server:
+  addr: ":8080"
+
+database:
+  # sqlite | postgres | mysql
+  driver: sqlite
+  # sqlite 文件（相对应用根）
+  path: ./data/db/autopack.db
+  # postgres / mysql DSN，例如
+  # postgres://user:pass@127.0.0.1:5432/autopack
+  # user:pass@tcp(127.0.0.1:3306)/autopack?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci
+  # go-sql-driver 按最后一个 @ 切开，密码里的 @ 保持原样，不要写成 %40
+  dsn: ""
+
+web:
+  jwt_secret: auto-pack-dev-secret-change-in-production
+  frontend:
+    path: ./web
+
+crypt:
+  # 环境凭据密钥环；生产必须改
+  passphrase: auto-pack-dev-crypt-change-in-production
+
+# 所有工作空间与工程的检出根目录。实际路径：{root}/{空间编码}/{工程名}/
+workspace:
+  root: ./data/workspaces
+
+git:
+  clone_depth: 50
+
+# 进程日志（启动、cron、接口报错、panic、致命错误）。相对路径相对应用根（configs 的上一级）。
+# 作业构建输出不在这里：data/jobs/{作业ID}/job.log，控制台「控制台输出」页读取。
+log:
+  level: info
+  file: ./logs/autopack.log

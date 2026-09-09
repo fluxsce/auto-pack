@@ -1,0 +1,12 @@
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--shell-muted);
+}
