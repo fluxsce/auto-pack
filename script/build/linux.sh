@@ -101,8 +101,9 @@ mkdir -p "$PKG"
 
 if [[ "$SKIP_WEB" -eq 0 ]]; then
   ensure_web_deps
-  step "pnpm build (web -> server/web)"
-  pnpm build
+  export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=4096}"
+  step "pnpm build:web (web -> server/web)"
+  pnpm build:web
 else
   [[ -f "$ROOT/server/web/index.html" ]] || { echo "SkipWeb but server/web/index.html missing" >&2; exit 1; }
 fi

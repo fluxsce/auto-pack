@@ -87,8 +87,11 @@ function Ensure-WebDeps([string]$Repo) {
 
 function Invoke-Frontend([string]$Repo) {
     Ensure-WebDeps $Repo
-    Write-Step 'pnpm build (web -> server/web)'
-    Invoke-Pnpm $Repo @('build')
+    if (-not $env:NODE_OPTIONS) {
+        $env:NODE_OPTIONS = '--max-old-space-size=4096'
+    }
+    Write-Step 'pnpm build:web (web -> server/web)'
+    Invoke-Pnpm $Repo @('build:web')
     $index = Join-Path $Repo 'server\web\index.html'
     if (-not (Test-Path -LiteralPath $index -PathType Leaf)) {
         throw "frontend missing: $index"

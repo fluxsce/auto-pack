@@ -15,6 +15,7 @@
     "dev:web": "vite",
     "dev:server": "go run -C server ./cmd",
     "build": "vue-tsc --noEmit && vite build",
+    "build:web": "vite build",
     "package:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File script/build/windows.ps1",
     "package:linux": "bash script/build/linux.sh",
     "preview": "vite preview",
