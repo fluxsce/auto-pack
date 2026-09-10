@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"auto-pack/server/internal/job"
@@ -46,6 +47,15 @@ func TestSkipSync(t *testing.T) {
 		RecipeJSON: `{"scm_mode":"git"}`,
 	}, job.Payload{}); skip {
 		t.Fatal("should clone")
+	}
+	if skip, reason := skipSync(project.Project{
+		RepoURL:    "https://git.example.com/a.git",
+		RecipeJSON: `{"scm_mode":"git"}`,
+	}, job.Payload{SkipSync: true}); !skip || !strings.Contains(reason, "already synced") {
+		t.Fatalf("skip_sync %v %q", skip, reason)
+	}
+	if originLabel("auto_build") != "工作空间自动构建" {
+		t.Fatal(originLabel("auto_build"))
 	}
 }
 

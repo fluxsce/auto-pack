@@ -161,8 +161,10 @@ func normalizeStart(req StartRequest) (StartRequest, error) {
 func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Workspace, list []project.Project, body StartRequest, job *record.Job, logPath string) {
 	s.appendLog(logPath, stamp()+" 开始自动构建")
 	s.coord.SetPhase(job, "sync")
+	var sync release.SyncResult
 	if s.releases != nil {
-		_, err := s.releases.SyncSourcesProgress(ctx, actor, body.WorkspaceRecID, func(ev release.SyncEvent) {
+		var err error
+		sync, err = s.releases.SyncSourcesProgress(ctx, actor, body.WorkspaceRecID, func(ev release.SyncEvent) {
 			if line := formatSyncEvent(ev); line != "" {
 				s.appendLog(logPath, line)
 			}
@@ -205,7 +207,7 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 		}
 		s.coord.SetProgress(job, prj.ProjectName, i, len(queue))
 		s.appendLog(logPath, stamp()+fmt.Sprintf(" 正在构建（%d/%d）：%s", i+1, len(queue), prj.ProjectName))
-		out := batchrun.RunBuild(ctx, s.jobs, actor, body.WorkspaceRecID, prj.RecID, func(step string) {
+		out := batchrun.RunBuild(ctx, s.jobs, actor, body.WorkspaceRecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
 			s.appendLog(logPath, stamp()+fmt.Sprintf(" %s · %s", prj.ProjectName, step))
 		})
 		res := record.Result{ProjectName: prj.ProjectName, Message: out.Message}
@@ -231,7 +233,7 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 				continue
 			}
 			s.appendLog(logPath, stamp()+" 重试构建："+prj.ProjectName)
-			out := batchrun.RunBuild(ctx, s.jobs, actor, body.WorkspaceRecID, prj.RecID, nil)
+			out := batchrun.RunBuild(ctx, s.jobs, actor, body.WorkspaceRecID, prj.RecID, sync.SyncedReady(prj.ProjectName), nil)
 			if out.OK {
 				failed--
 				succeeded++

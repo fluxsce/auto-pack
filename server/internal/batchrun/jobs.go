@@ -32,7 +32,8 @@ type Outcome struct {
 type StepFn func(step string)
 
 // RunBuild submits a build job and waits until it finishes.
-func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceID, projectID string, onStep StepFn) Outcome {
+// skipSync 为 true 时作业不再 fetch/checkout（调用方刚做过空间预同步）。
+func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceID, projectID string, skipSync bool, onStep StepFn) Outcome {
 	if jobs == nil {
 		return Outcome{Message: "job service unavailable"}
 	}
@@ -40,6 +41,7 @@ func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspace
 		WorkspaceRecID: workspaceID,
 		ProjectRecID:   projectID,
 		JobType:        job.TypeBuild,
+		Payload:        job.Payload{SkipSync: skipSync, Origin: "auto_build"},
 	})
 	if err != nil {
 		return Outcome{Message: err.Error()}

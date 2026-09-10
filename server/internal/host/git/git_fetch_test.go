@@ -151,6 +151,29 @@ func TestCommitPushPomAndSkipWhenUnchanged(t *testing.T) {
 	}
 }
 
+func TestLastUserCommitSkipsPack(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not in PATH")
+	}
+	dir := t.TempDir()
+	mustGit(t, "", "init", "-b", "main", dir)
+	mustWrite(t, filepath.Join(dir, "a.txt"), "one\n")
+	mustGit(t, dir, "add", "a.txt")
+	mustGit(t, dir, "commit", "-m", "fix: user change")
+	mustWrite(t, filepath.Join(dir, "b.txt"), "bot\n")
+	mustGit(t, dir, "add", "b.txt")
+	cmd := exec.Command("git", "-c", "user.name=auto-pack", "-c", "user.email=auto-pack@local", "-c", "commit.gpgsign=false", "commit", "-m", "chore: tag")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_TERMINAL_PROMPT=0")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("bot commit: %v\n%s", err, out)
+	}
+	got := LastUserCommit(context.Background(), dir, Options{})
+	if !strings.Contains(got, "fix: user change") || strings.Contains(got, "chore: tag") {
+		t.Fatal(got)
+	}
+}
+
 func mustWrite(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

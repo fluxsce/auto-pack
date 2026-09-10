@@ -28,6 +28,17 @@ export function isBuildJob(row: Pick<JobRow, 'job_type'>): boolean {
   return row.job_type === 'build'
 }
 
+export function jobOrigin(row: Pick<JobRow, 'payload_json'>): string {
+  const raw = row.payload_json?.trim()
+  if (!raw) return ''
+  try {
+    const body = JSON.parse(raw) as { origin?: string }
+    return String(body.origin || '').trim()
+  } catch {
+    return ''
+  }
+}
+
 export type JobStats = {
   running: number
   queued: number

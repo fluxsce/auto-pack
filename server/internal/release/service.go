@@ -473,8 +473,8 @@ func (s *Service) SyncSourcesProgress(ctx context.Context, actor iam.Actor, work
 			finish()
 			continue
 		}
-		if tip := git.ShortHead(ctx, work, opt); tip != "" {
-			item.Message = tip
+		if line := git.LastUserCommit(ctx, work, opt); line != "" {
+			item.Message = line
 		}
 		out.Synced++
 		item.Outcome = "synced"

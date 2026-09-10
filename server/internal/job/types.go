@@ -124,6 +124,10 @@ type Payload struct {
 	CloneURL    string   `json:"clone_url,omitempty"`
 	CloneDir    string   `json:"clone_dir,omitempty"`
 	DependChain []string `json:"depend_chain,omitempty"`
+	// SkipSync 批次已统一预同步时跳过作业内再次 fetch/checkout。
+	SkipSync bool `json:"skip_sync,omitempty"`
+	// Origin 标记作业来源，供工程构建历史区分手动构建与自动构建/发版后构建。
+	Origin string `json:"origin,omitempty"`
 }
 
 // BatchSubmitRequest queues the same job type for matching projects in a workspace.

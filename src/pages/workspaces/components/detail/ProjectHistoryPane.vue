@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { RsEmpty } from '@/ui'
-import type { JobRow } from '../../api'
+import { jobOrigin, type JobRow } from '../../api'
 import { statusTone } from '../../composables/use-project-list'
 
 const props = defineProps<{
@@ -22,6 +22,13 @@ function buildNo(index: number): number {
 
 function noTone(row: JobRow): string {
   return statusTone(row.job_status)
+}
+
+function originLabel(row: JobRow): string {
+  const origin = jobOrigin(row)
+  if (origin === 'auto_build') return t('workspaces.autoBuild')
+  if (origin === 'auto_release') return t('workspaces.autoRelease')
+  return ''
 }
 
 function historyTime(row: JobRow): string {
@@ -51,6 +58,7 @@ function historyTime(row: JobRow): string {
         >
           <span class="history__no" :class="`is-${noTone(row)}`">#{{ buildNo(i) }}</span>
           <span class="history__time">{{ historyTime(row) }}</span>
+          <span v-if="originLabel(row)" class="history__origin">{{ originLabel(row) }}</span>
         </button>
       </li>
     </ol>
@@ -161,6 +169,12 @@ function historyTime(row: JobRow): string {
 .history__time {
   color: #94a3b8;
   font-size: 0.82rem;
+}
+
+.history__origin {
+  margin-left: auto;
+  color: #0369a1;
+  font-size: 0.7rem;
 }
 
 .pane.is-aside .history__row {

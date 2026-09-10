@@ -25,7 +25,7 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 	}
 	s.coord.SetPhase(job, "post_build")
 	s.appendLog(logPath, stamp()+" 发版完成，开始自动构建与推送")
-	_, err := s.SyncSourcesProgress(ctx, actor, ws.RecID, func(ev SyncEvent) {
+	sync, err := s.SyncSourcesProgress(ctx, actor, ws.RecID, func(ev SyncEvent) {
 		if line := formatReleaseSyncEvent(ev); line != "" {
 			s.appendLog(logPath, line)
 		}
@@ -80,7 +80,7 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 		}
 		s.coord.SetProgress(job, prj.ProjectName, i)
 		s.appendLog(logPath, stamp()+fmt.Sprintf(" 正在构建（%d/%d）：%s", i+1, len(queue), prj.ProjectName))
-		out := batchrun.RunBuild(ctx, s.jobs, actor, ws.RecID, prj.RecID, func(step string) {
+		out := batchrun.RunBuild(ctx, s.jobs, actor, ws.RecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
 			s.appendLog(logPath, stamp()+fmt.Sprintf(" %s · %s", prj.ProjectName, step))
 		})
 		if out.OK {

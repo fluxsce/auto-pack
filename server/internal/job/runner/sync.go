@@ -12,8 +12,14 @@ import (
 )
 
 func (e *Engine) stepSync(ctx context.Context, j job.Job, prj project.Project, p job.Payload, work string, w io.Writer) error {
+	if origin := strings.TrimSpace(p.Origin); origin != "" {
+		logLine(w, "来源 %s", originLabel(origin))
+	}
+	recipe := project.ParseRecipe(prj.RecipeJSON)
+	opt := e.gitOptFor(ctx, j.WorkspaceRecID, recipe.GitEnvRecID)
 	if skip, reason := skipSync(prj, p); skip {
 		_, _ = fmt.Fprintln(w, reason)
+		logHeadCommit(ctx, work, opt, w)
 		return nil
 	}
 	url := p.CloneURL
@@ -24,12 +30,34 @@ func (e *Engine) stepSync(ctx context.Context, j job.Job, prj project.Project, p
 	if branch == "" {
 		branch = prj.RepoBranch
 	}
-	recipe := project.ParseRecipe(prj.RecipeJSON)
-	opt := e.gitOptFor(ctx, j.WorkspaceRecID, recipe.GitEnvRecID)
+	var err error
 	if git.IsRepo(work) {
-		return git.FetchPull(ctx, work, branch, opt, w)
+		err = git.FetchPull(ctx, work, branch, opt, w)
+	} else {
+		err = git.Clone(ctx, url, work, branch, opt, w)
 	}
-	return git.Clone(ctx, url, work, branch, opt, w)
+	if err != nil {
+		return err
+	}
+	logHeadCommit(ctx, work, opt, w)
+	return nil
+}
+
+func originLabel(origin string) string {
+	switch origin {
+	case "auto_build":
+		return "工作空间自动构建"
+	case "auto_release":
+		return "发版后自动构建"
+	default:
+		return origin
+	}
+}
+
+func logHeadCommit(ctx context.Context, work string, opt git.Options, w io.Writer) {
+	if line := git.LastUserCommit(ctx, work, opt); line != "" {
+		logLine(w, "最新用户提交 %s", line)
+	}
 }
 
 func (e *Engine) stepBranchClone(ctx context.Context, j job.Job, prj project.Project, p job.Payload, work string, w io.Writer) error {
@@ -82,6 +110,9 @@ func (e *Engine) stepBranchClone(ctx context.Context, j job.Job, prj project.Pro
 
 // skipSync reports that the sync step should no-op (local checkout, disabled pull, or no URL).
 func skipSync(prj project.Project, p job.Payload) (bool, string) {
+	if p.SkipSync {
+		return true, "batch already synced; skip sync"
+	}
 	recipe := project.ParseRecipe(prj.RecipeJSON)
 	if recipe.IsLocal() {
 		return true, "scm_mode=local; skip sync"

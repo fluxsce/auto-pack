@@ -16,6 +16,7 @@ import {
   type JobStep,
   type Project,
 } from '../api'
+import { isAutoBuildLive } from '../auto-build/runtime'
 import { parseRecipe, workRel } from '../lib/project-defaults'
 import { asProjectDetailTab, type ProjectDetailTab } from '../lib/project-detail'
 
@@ -138,22 +139,25 @@ export function useProjectDetail() {
     try {
       const [detail, view] = await Promise.all([
         getJob(id),
-        getJobLog(id, 0).catch(() => ({ log: '', size: 0, offset: 0 })),
+        getJobLog(id, 0).catch((e) => ({ log: errText(e), size: 0, offset: 0 })),
       ])
       patchJob(detail.job)
       steps.value = detail.steps ?? []
       const next = applyJobLog('', view)
       logText.value = next.text
       logSize.value = next.size
-    } catch {
+    } catch (e) {
       steps.value = []
+      logText.value = errText(e)
     }
   }
 
   async function pollLive(): Promise<void> {
-    const id = selectedJobId.value
-    if (!id || !pageAlive) return
+    if (!pageAlive) return
     try {
+      await refreshJobList()
+      const id = selectedJobId.value
+      if (!id) return
       const wantLog = tab.value === 'console'
       const [detail, view] = await Promise.all([
         getJob(id),
@@ -168,9 +172,6 @@ export function useProjectDetail() {
         const next = applyJobLog(logText.value, view)
         logText.value = next.text
         logSize.value = next.size
-      }
-      if (detail.job && !LIVE.has(detail.job.job_status)) {
-        await refreshJobList().catch(() => undefined)
       }
     } catch {
       /* keep the last good snapshot */
@@ -200,10 +201,12 @@ export function useProjectDetail() {
     }
   }
 
+  const batchLive = computed(() => isAutoBuildLive(project.value?.workspace_rec_id || ws.currentId))
+
   function syncPoll(): void {
     if (pollId) window.clearInterval(pollId)
     pollId = 0
-    if (!live.value) return
+    if (!live.value && !batchLive.value) return
     pollId = window.setInterval(() => {
       void pollLive()
     }, POLL_MS)
@@ -230,7 +233,7 @@ export function useProjectDetail() {
       }
     },
   )
-  watch(live, syncPoll, { immediate: true })
+  watch([live, batchLive], syncPoll, { immediate: true })
 
   return {
     project,

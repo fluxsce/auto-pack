@@ -19,7 +19,6 @@ import { type AutoBuildScope } from './session'
 import { autoBuildBag, autoBuildEpoch, bumpAutoBuild, isAutoBuildLive, stopAutoBuildPolls, type AutoBuildBag } from './runtime'
 import { setAutoBuildBusy, useBatchActivity } from '../composables/use-batch-activity'
 import { cyclicRecIds, isOrderedBuildType, orderProjectsForBuild } from '../lib/ordered-build'
-import { syncSourcesWithLog } from '../lib/sync-log'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{ workspace?: Workspace | null }>()
@@ -130,36 +129,10 @@ function stamp(): string {
   return new Date().toLocaleString()
 }
 
-function isSyncInProgress(e: unknown): boolean {
-  return /source sync already in progress/i.test(errText(e))
-}
-
 function appendLog(workspaceId: string, line: string): void {
   const slot = autoBuildBag(workspaceId)
   slot.logText = slot.logText ? `${slot.logText}\n${line}` : line
   touch(workspaceId)
-}
-
-async function syncSourcesFollow(workspaceId: string): Promise<Awaited<ReturnType<typeof syncSourcesWithLog>>> {
-  const slot = autoBuildBag(workspaceId)
-  for (;;) {
-    try {
-      return await syncSourcesWithLog(
-        workspaceId,
-        t,
-        (line) => appendLog(workspaceId, line),
-        (hint) => {
-          slot.syncHint = hint
-          touch(workspaceId)
-        },
-      )
-    } catch (e) {
-      if (!isSyncInProgress(e)) throw e
-      slot.syncHint = t('workspaces.autoBuildSyncWait')
-      touch(workspaceId)
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-    }
-  }
 }
 
 async function loadProjects(workspaceId: string): Promise<void> {
@@ -193,7 +166,7 @@ function logPlan(workspaceId: string): void {
   })
 }
 
-async function refreshPlan(workspaceId: string, resync: boolean): Promise<void> {
+async function refreshPlan(workspaceId: string): Promise<void> {
   const slot = autoBuildBag(workspaceId)
   if (!workspaceId || slot.running || (workspaceId === wsId.value && startBlocked.value)) return
   if (slot.planTask) return slot.planTask
@@ -204,21 +177,16 @@ async function refreshPlan(workspaceId: string, resync: boolean): Promise<void> 
       if (!slot.projects.length) await loadProjects(workspaceId)
       applyPlan(workspaceId, slot.analysis)
       const graph = slot.projects.filter((p) => p.is_enabled !== 0 && isOrderedBuildType(p.project_type))
-      if (resync || !slot.analysis) {
-        slot.warnings = []
-        const sync = await syncSourcesFollow(workspaceId)
-        appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildSyncDone', { synced: sync.synced, skipped: sync.skipped, failed: sync.failed })}`)
-        if (sync.failed_items?.length) slot.warnings = [...slot.warnings, ...sync.failed_items]
-        if (graph.length) {
-          slot.syncHint = t('workspaces.autoBuildOrderStart')
-          touch(workspaceId)
-          appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
-          slot.analysis = await fetchMavenOrder(workspaceId)
-          slot.warnings = [...slot.warnings, ...(slot.analysis.warnings ?? [])]
-          appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: slot.analysis.full_build_order?.length ?? 0 })}`)
-        } else {
-          slot.analysis = null
-        }
+      slot.warnings = []
+      if (graph.length) {
+        slot.syncHint = t('workspaces.autoBuildOrderStart')
+        touch(workspaceId)
+        appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
+        slot.analysis = await fetchMavenOrder(workspaceId)
+        slot.warnings = [...slot.warnings, ...(slot.analysis.warnings ?? [])]
+        appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: slot.analysis.full_build_order?.length ?? 0 })}`)
+      } else {
+        slot.analysis = null
       }
       applyPlan(workspaceId, slot.analysis)
       logPlan(workspaceId)
@@ -356,7 +324,7 @@ async function onOpen(): Promise<void> {
     return
   }
   if (startBlocked.value) return
-  void refreshPlan(id, true)
+  void refreshPlan(id)
 }
 
 async function submit(): Promise<void> {

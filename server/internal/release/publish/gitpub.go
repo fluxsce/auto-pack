@@ -52,7 +52,13 @@ func (g *GitCommitter) SyncReleaseWorktree(ctx context.Context, prj project.Proj
 		return fmt.Errorf("git fetch: %w", err)
 	}
 	log.Step("同步发版分支工作区 %s", releaseBranch)
-	return checkoutReleaseBranch(ctx, workDir, opt, releaseBranch, versionTag, log)
+	if err := checkoutReleaseBranch(ctx, workDir, opt, releaseBranch, versionTag, log); err != nil {
+		return err
+	}
+	if line := git.LastUserCommit(ctx, workDir, opt); line != "" {
+		log.Step("最新用户提交 %s", line)
+	}
+	return nil
 }
 
 // PublishChanges syncs the release branch, writes files, commits, and pushes.

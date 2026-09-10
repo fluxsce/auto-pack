@@ -1,6 +1,8 @@
 package release
 
 import (
+	"strings"
+
 	"auto-pack/server/internal/release/order"
 	"auto-pack/server/internal/release/record"
 )
@@ -68,6 +70,21 @@ type SyncResult struct {
 	Failed      int        `json:"failed"`
 	Items       []SyncItem `json:"items,omitempty"`
 	FailedItems []string   `json:"failed_items,omitempty"`
+}
+
+// SyncedReady 该工程预同步已成功对齐远程，作业内可跳过再次 fetch。
+// 失败、跳过或不在清单里的工程返回 false，由作业自己再拉一次。
+func (r SyncResult) SyncedReady(projectName string) bool {
+	name := strings.TrimSpace(projectName)
+	if name == "" {
+		return false
+	}
+	for _, it := range r.Items {
+		if it.ProjectName == name {
+			return it.Outcome == "synced"
+		}
+	}
+	return false
 }
 
 // Request is input for one project release.

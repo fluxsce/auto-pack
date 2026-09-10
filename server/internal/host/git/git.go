@@ -93,11 +93,35 @@ func run(ctx context.Context, dir string, opt Options, w io.Writer, args ...stri
 	if extra := opt.extraEnv(); len(extra) > 0 {
 		cmd.Env = append(os.Environ(), extra...)
 	}
+	var buf bytes.Buffer
 	if w != nil {
-		cmd.Stdout = w
-		cmd.Stderr = w
+		cmd.Stdout = io.MultiWriter(w, &buf)
+		cmd.Stderr = cmd.Stdout
+	} else {
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
 	}
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		if msg := lastGitLine(buf.String()); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
+}
+
+func lastGitLine(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	lines := strings.Split(raw, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // Clone clones url into dest. Only the requested branch is fetched; tags stay on the remote.
@@ -200,6 +224,54 @@ func ShortHead(ctx context.Context, dir string, opt Options) string {
 		return ""
 	}
 	return out
+}
+
+// LastUserCommit 返回工作区最近一次非 auto-pack 提交的一行摘要（短哈希 作者 时间 说明）。
+// 近段全是发版机器人提交时退回 HEAD。读不到提交时返回空串。
+func LastUserCommit(ctx context.Context, dir string, opt Options) string {
+	raw, err := runOut(ctx, dir, opt, "log", "-20", "--format=%an%x09%ae%x09%h %an %ad %s", "--date=format:%Y-%m-%d %H:%M")
+	if err != nil || raw == "" {
+		return ShortHead(ctx, dir, opt)
+	}
+	if line := pickUserCommit(raw); line != "" {
+		return line
+	}
+	return ShortHead(ctx, dir, opt)
+}
+
+func pickUserCommit(raw string) string {
+	fallback := ""
+	for _, row := range strings.Split(raw, "\n") {
+		name, email, shown, ok := splitCommitMeta(row)
+		if !ok {
+			continue
+		}
+		if fallback == "" {
+			fallback = shown
+		}
+		if !isPackCommitter(name, email) {
+			return shown
+		}
+	}
+	return fallback
+}
+
+func splitCommitMeta(row string) (name, email, shown string, ok bool) {
+	parts := strings.SplitN(row, "\t", 3)
+	if len(parts) < 3 {
+		return "", "", "", false
+	}
+	shown = strings.TrimSpace(parts[2])
+	if shown == "" {
+		return "", "", "", false
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), shown, true
+}
+
+func isPackCommitter(name, email string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	e := strings.ToLower(strings.TrimSpace(email))
+	return n == "auto-pack" || e == "auto-pack@local"
 }
 
 func headBranch(ctx context.Context, dir string, opt Options) string {

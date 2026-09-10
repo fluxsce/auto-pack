@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestPickUserCommit(t *testing.T) {
+	raw := "auto-pack\tauto-pack@local\tabc123 auto-pack 2026-09-10 20:00 chore: tag\n" +
+		"张三\tzhang@example.com\tdef456 张三 2026-09-10 18:20 fix: timeout\n"
+	got := pickUserCommit(raw)
+	if got != "def456 张三 2026-09-10 18:20 fix: timeout" {
+		t.Fatal(got)
+	}
+	if pickUserCommit("auto-pack\tauto-pack@local\tabc123 auto-pack 2026-09-10 20:00 chore: tag\n") != "abc123 auto-pack 2026-09-10 20:00 chore: tag" {
+		t.Fatal("fallback")
+	}
+	if pickUserCommit("") != "" {
+		t.Fatal("empty")
+	}
+}
+
+func TestLastGitLine(t *testing.T) {
+	if lastGitLine("") != "" {
+		t.Fatal("empty")
+	}
+	got := lastGitLine("From origin\nerror: pathspec 'origin/develop' did not match any file(s) known to git.\n")
+	if got != "error: pathspec 'origin/develop' did not match any file(s) known to git." {
+		t.Fatal(got)
+	}
+}
+
 func TestMapAuthHTTPS(t *testing.T) {
 	a := MapAuth(map[string]any{
 		"auth_type":  "https",
