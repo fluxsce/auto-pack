@@ -154,6 +154,7 @@ func (c *Controller) Log(w http.ResponseWriter, r *http.Request) {
 }
 
 // SyncSources 串行预同步空间内 Git 工程。
+// Accept: application/x-ndjson 时按工程推送进度；否则仍回整包 JSON。
 func (c *Controller) SyncSources(w http.ResponseWriter, r *http.Request) {
 	if !c.ready(w) {
 		return
@@ -165,11 +166,35 @@ func (c *Controller) SyncSources(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	out, err := c.svc.SyncSources(r.Context(), middleware.ActorFrom(r), in.WorkspaceRecID)
-	if c.writeErr(w, err) {
+	if !wantsSyncStream(r) {
+		out, err := c.svc.SyncSources(r.Context(), middleware.ActorFrom(r), in.WorkspaceRecID)
+		if c.writeErr(w, err) {
+			return
+		}
+		httpx.WriteJSON(w, http.StatusOK, out)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, out)
+	flusher, _ := w.(http.Flusher)
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	enc := json.NewEncoder(w)
+	writeEv := func(ev release.SyncEvent) {
+		_ = enc.Encode(ev)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	_, err := c.svc.SyncSourcesProgress(r.Context(), middleware.ActorFrom(r), in.WorkspaceRecID, writeEv)
+	if err != nil {
+		writeEv(release.SyncEvent{Event: "error", Message: err.Error()})
+	}
+}
+
+func wantsSyncStream(r *http.Request) bool {
+	accept := strings.ToLower(r.Header.Get("Accept"))
+	return strings.Contains(accept, "application/x-ndjson") || strings.TrimSpace(r.URL.Query().Get("stream")) == "1"
 }
 
 // MavenOrder 返回空间 Maven 依赖构建顺序。
@@ -192,7 +217,7 @@ func (c *Controller) writeErr(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, release.ErrReleaseInProgress) || errors.Is(err, release.ErrNoActive) {
+	if errors.Is(err, release.ErrReleaseInProgress) || errors.Is(err, release.ErrSyncInProgress) || errors.Is(err, release.ErrNoActive) {
 		httpx.WriteError(w, http.StatusConflict, err.Error())
 		return true
 	}

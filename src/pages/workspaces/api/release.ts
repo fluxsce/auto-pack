@@ -1,5 +1,5 @@
 import { apiPath } from '@/api/prefix'
-import { request } from '@/api/http'
+import { notifyUnauthorized, request } from '@/api/http'
 
 export type ReleasePostOptions = {
   auto_build_after_release: boolean
@@ -174,13 +174,100 @@ export function autoReleaseLog(workspaceId: string, releaseId: string, offset = 
   })
 }
 
-export function syncWorkspaceSources(workspaceId: string): Promise<SyncSourcesResult> {
-  return request<SyncSourcesResult>({
+export type SyncEvent = {
+  event: 'start' | 'begin' | 'item' | 'done' | 'error' | string
+  index?: number
+  total?: number
+  item?: SyncSourceItem
+  synced?: number
+  skipped?: number
+  failed?: number
+  message?: string
+}
+
+export async function syncWorkspaceSources(
+  workspaceId: string,
+  onEvent?: (ev: SyncEvent) => void,
+): Promise<SyncSourcesResult> {
+  const token = localStorage.getItem('ap_token')
+  const res = await fetch(apiPath('release', 'sync-sources'), {
     method: 'POST',
-    url: apiPath('release', 'sync-sources'),
-    data: { workspace_rec_id: workspaceId },
-    timeout: 180000,
+    headers: {
+      Accept: 'application/x-ndjson',
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ workspace_rec_id: workspaceId }),
   })
+  const type = String(res.headers.get('content-type') || '')
+  if (!res.ok) {
+    if (res.status === 401) notifyUnauthorized()
+    throw new Error(await readError(res))
+  }
+  if (type.includes('application/json') && !type.includes('ndjson')) {
+    const body = (await res.json()) as SyncSourcesResult
+    replaySyncResult(body, onEvent)
+    return body
+  }
+  return readSyncStream(res, onEvent)
+}
+
+function replaySyncResult(body: SyncSourcesResult, onEvent?: (ev: SyncEvent) => void): void {
+  if (!onEvent) return
+  const items = body.items ?? []
+  onEvent({ event: 'start', total: items.length })
+  items.forEach((item, i) => {
+    onEvent({ event: 'item', index: i + 1, total: items.length, item })
+  })
+  onEvent({ event: 'done', synced: body.synced, skipped: body.skipped, failed: body.failed, total: items.length })
+}
+
+async function readSyncStream(res: Response, onEvent?: (ev: SyncEvent) => void): Promise<SyncSourcesResult> {
+  const out: SyncSourcesResult = { synced: 0, skipped: 0, failed: 0, items: [] }
+  if (!res.body) {
+    throw new Error('empty sync stream')
+  }
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  for (;;) {
+    const chunk = await reader.read()
+    buf += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done })
+    const lines = buf.split('\n')
+    buf = chunk.done ? '' : (lines.pop() ?? '')
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (!line) continue
+      const ev = JSON.parse(line) as SyncEvent
+      if (ev.event === 'error') {
+        throw new Error(ev.message || 'sync failed')
+      }
+      if (ev.event === 'item' && ev.item) {
+        out.items = [...(out.items ?? []), ev.item]
+        if (ev.item.outcome === 'failed') {
+          out.failed_items = [...(out.failed_items ?? []), `${ev.item.project_name}: ${ev.item.message || ''}`]
+        }
+      }
+      if (ev.event === 'done') {
+        out.synced = ev.synced ?? out.synced
+        out.skipped = ev.skipped ?? out.skipped
+        out.failed = ev.failed ?? out.failed
+      }
+      onEvent?.(ev)
+    }
+    if (chunk.done) break
+  }
+  return out
+}
+
+async function readError(res: Response): Promise<string> {
+  const text = await res.text()
+  try {
+    const parsed = JSON.parse(text) as { error?: string; message?: string }
+    return parsed.error || parsed.message || text || res.statusText
+  } catch {
+    return text || res.statusText || 'request failed'
+  }
 }
 
 export function fetchMavenOrder(workspaceId: string): Promise<MavenAnalysis> {

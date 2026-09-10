@@ -20,6 +20,10 @@ export function setUnauthorizedHandler(fn: () => void): void {
   onUnauthorized = fn
 }
 
+export function notifyUnauthorized(): void {
+  onUnauthorized?.()
+}
+
 http.interceptors.response.use(
   (res) => res,
   (err) => {

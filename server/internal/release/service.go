@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"auto-pack/server/internal/access"
@@ -37,6 +38,8 @@ type Service struct {
 	wsRoot     string
 	depth      int
 	runCtx     context.Context
+	syncMu     sync.Mutex
+	syncing    map[string]struct{}
 }
 
 // NewService constructs a release Service. runCtx is the process lifetime used by the batch goroutine.
@@ -47,6 +50,7 @@ func NewService(runCtx context.Context, st *store.Store, guard *iam.Guard, proje
 	return &Service{
 		st: st, guard: guard, projects: projects, workspaces: workspaces, envs: envs,
 		coord: record.NewCoordinator(), dataDir: dataDir, wsRoot: wsRoot, depth: depth, runCtx: runCtx,
+		syncing: map[string]struct{}{},
 	}
 }
 
@@ -361,9 +365,18 @@ func (s *Service) Defaults(ctx context.Context, actor iam.Actor, workspaceID str
 
 // SyncSources fetches Git projects in a workspace sequentially.
 func (s *Service) SyncSources(ctx context.Context, actor iam.Actor, workspaceID string) (SyncResult, error) {
+	return s.SyncSourcesProgress(ctx, actor, workspaceID, nil)
+}
+
+// SyncSourcesProgress 与 SyncSources 相同，并在每个工程开始/结束时回调，供 HTTP 流式日志。
+func (s *Service) SyncSourcesProgress(ctx context.Context, actor iam.Actor, workspaceID string, progress SyncListener) (SyncResult, error) {
 	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionJobSubmit); err != nil {
 		return SyncResult{}, err
 	}
+	if err := s.beginSync(workspaceID); err != nil {
+		return SyncResult{}, err
+	}
+	defer s.endSync(workspaceID)
 	ws, err := s.workspaces.GetRaw(ctx, workspaceID)
 	if err != nil {
 		return SyncResult{}, err
@@ -372,49 +385,66 @@ func (s *Service) SyncSources(ctx context.Context, actor iam.Actor, workspaceID 
 	if err != nil {
 		return SyncResult{}, err
 	}
+	emit := func(ev SyncEvent) {
+		if progress != nil {
+			progress(ev)
+		}
+	}
 	var out SyncResult
-	for _, prj := range list {
+	total := len(list)
+	emit(SyncEvent{Event: "start", Total: total})
+	for i, prj := range list {
 		item := SyncItem{ProjectName: prj.ProjectName, Branch: strings.TrimSpace(prj.RepoBranch)}
 		recipe := project.ParseRecipe(prj.RecipeJSON)
+		finish := func() {
+			out.Items = append(out.Items, item)
+			copied := item
+			emit(SyncEvent{Event: "item", Index: i + 1, Total: total, Item: &copied, Synced: out.Synced, Skipped: out.Skipped, Failed: out.Failed})
+		}
 		if prj.IsEnabled == 0 {
 			out.Skipped++
 			item.Outcome = "skipped"
 			item.Message = "disabled"
-			out.Items = append(out.Items, item)
+			finish()
 			continue
 		}
 		if recipe.IsLocal() {
 			out.Skipped++
 			item.Outcome = "skipped"
 			item.Message = "local"
-			out.Items = append(out.Items, item)
+			finish()
 			continue
 		}
 		if strings.TrimSpace(prj.RepoURL) == "" {
 			out.Skipped++
 			item.Outcome = "skipped"
 			item.Message = "no_repo"
-			out.Items = append(out.Items, item)
+			finish()
 			continue
 		}
 		work := s.workDir(ws, prj)
 		opt := s.gitOpt(ctx, prj)
-		var buf bytes.Buffer
-		var err error
 		if git.IsRepo(work) {
 			item.Action = "fetch"
-			err = git.FetchPull(ctx, work, item.Branch, opt, &buf)
 		} else {
 			item.Action = "clone"
-			err = git.Clone(ctx, prj.RepoURL, work, item.Branch, opt, &buf)
+		}
+		begin := item
+		emit(SyncEvent{Event: "begin", Index: i + 1, Total: total, Item: &begin})
+		var buf bytes.Buffer
+		var syncErr error
+		if item.Action == "fetch" {
+			syncErr = git.FetchPull(ctx, work, item.Branch, opt, &buf)
+		} else {
+			syncErr = git.Clone(ctx, prj.RepoURL, work, item.Branch, opt, &buf)
 		}
 		item.Log = clipSyncLog(buf.String())
-		if err != nil {
+		if syncErr != nil {
 			out.Failed++
 			item.Outcome = "failed"
-			item.Message = err.Error()
-			out.FailedItems = append(out.FailedItems, prj.ProjectName+": "+err.Error())
-			out.Items = append(out.Items, item)
+			item.Message = syncErr.Error()
+			out.FailedItems = append(out.FailedItems, prj.ProjectName+": "+syncErr.Error())
+			finish()
 			continue
 		}
 		if tip := git.ShortHead(ctx, work, opt); tip != "" {
@@ -422,8 +452,9 @@ func (s *Service) SyncSources(ctx context.Context, actor iam.Actor, workspaceID 
 		}
 		out.Synced++
 		item.Outcome = "synced"
-		out.Items = append(out.Items, item)
+		finish()
 	}
+	emit(SyncEvent{Event: "done", Total: total, Synced: out.Synced, Skipped: out.Skipped, Failed: out.Failed})
 	return out, nil
 }
 
@@ -490,6 +521,26 @@ func (s *Service) writeLog(path, content string) {
 	if err := record.WriteLog(path, content); err != nil {
 		log.Printf("release log %s: %v", path, err)
 	}
+}
+
+func (s *Service) beginSync(workspaceID string) error {
+	id := strings.TrimSpace(workspaceID)
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	if s.syncing == nil {
+		s.syncing = map[string]struct{}{}
+	}
+	if _, ok := s.syncing[id]; ok {
+		return ErrSyncInProgress
+	}
+	s.syncing[id] = struct{}{}
+	return nil
+}
+
+func (s *Service) endSync(workspaceID string) {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	delete(s.syncing, strings.TrimSpace(workspaceID))
 }
 
 func orDash(s string) string {

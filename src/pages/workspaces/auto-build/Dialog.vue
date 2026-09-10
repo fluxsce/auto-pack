@@ -1,21 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsButton, RsCheckbox, RsDialog, RsFieldset, RsFormItem, RsLog, RsRadio, RsRadioItem, RsSelect, RsTag, useRsToast } from '@/ui'
+import { RsAlert, RsButton, RsCheckbox, RsDialog, RsFieldset, RsFormItem, RsLog, RsRadio, RsRadioItem, RsSelect, RsTag, useRsToast } from '@/ui'
 import type { Workspace } from '@/stores/workspace'
-import { errText, fetchMavenOrder, fetchServerBootAt, listProjects, submitBuild, syncWorkspaceSources, waitForJob, type MavenAnalysis, type Project } from '../api'
+import { errText, fetchMavenOrder, fetchServerBootAt, listProjects, submitBuild, waitForJob, type MavenAnalysis, type Project } from '../api'
 import { typeLabel, typeVariant } from '../composables/use-project-list'
 import {
   clearAutoBuildSession,
   createAutoBuildSession,
+  hasRunningAutoBuildSession,
   isAutoBuildSessionStale,
   loadAutoBuildSession,
   saveAutoBuildSession,
   type AutoBuildScope,
   type AutoBuildSession,
 } from './session'
+import { setAutoBuildBusy, useBatchActivity } from '../composables/use-batch-activity'
 import { cyclicRecIds, isOrderedBuildType, orderProjectsForBuild } from '../lib/ordered-build'
-import { formatSyncItems } from '../lib/sync-log'
+import { syncSourcesWithLog } from '../lib/sync-log'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{ workspace?: Workspace | null }>()
@@ -34,12 +36,20 @@ const warnings = ref<string[]>([])
 const projects = ref<Project[]>([])
 const analysis = ref<MavenAnalysis | null>(null)
 const active = ref<AutoBuildSession | null>(null)
+const syncHint = ref('')
 let loop: Promise<void> | null = null
 
 const enabledProjects = computed(() => projects.value.filter((p) => p.is_enabled !== 0))
 const selectable = computed(() => [...enabledProjects.value].sort((a, b) => a.project_name.localeCompare(b.project_name)))
 const projectOptions = computed(() => selectable.value.map((p) => ({ value: p.rec_id, label: p.project_name })))
-const canSubmit = computed(() => planned.value.length > 0 && !running.value && !loadingPlan.value && (scope.value !== 'selected' || selectedRecIds.value.length > 0))
+const { releaseBusy, refresh: refreshBatch } = useBatchActivity(() => props.workspace?.rec_id || '')
+const occupyTip = computed(() => {
+  if (releaseBusy.value && !running.value) return t('workspaces.autoBatchBusyRelease')
+  if (running.value) return t('workspaces.autoBatchBusyBuild')
+  return ''
+})
+const startBlocked = computed(() => releaseBusy.value && !running.value)
+const canSubmit = computed(() => planned.value.length > 0 && !running.value && !loadingPlan.value && !startBlocked.value && (scope.value !== 'selected' || selectedRecIds.value.length > 0))
 const cycleIds = computed(() => (analysis.value ? cyclicRecIds(analysis.value) : new Set<string>()))
 const coordById = computed(() => {
   const map = new Map<string, string>()
@@ -57,6 +67,25 @@ const planRows = computed(() =>
     coordinates: coordById.value.get(p.rec_id) || '',
   })),
 )
+const planCaption = computed(() => {
+  if (loadingPlan.value && !analysis.value) return t('workspaces.autoBuildPlanProvisional')
+  if (analysis.value) return t('workspaces.autoBuildPlanReady')
+  return t('workspaces.autoBuildPlanProvisional')
+})
+const planExtra = computed(() => {
+  const n = planned.value.length
+  if (loadingPlan.value) {
+    const hint = syncHint.value.trim()
+    return hint ? `${n} · ${hint}` : `${n} · ${t('workspaces.autoBuildPlanLoading')}`
+  }
+  return String(n)
+})
+const planEmptyText = computed(() => {
+  if (loadingPlan.value) return syncHint.value || t('workspaces.autoBuildPlanLoading')
+  if (scope.value === 'selected' && !selectedRecIds.value.length) return t('workspaces.autoBuildTargetsPh')
+  if (!enabledProjects.value.length) return t('workspaces.autoBuildPlanEmptyHint')
+  return t('workspaces.autoBuildPlanEmpty')
+})
 
 function stamp(): string {
   return new Date().toLocaleString()
@@ -83,34 +112,48 @@ function applyPlan(src: MavenAnalysis | null): void {
   })
 }
 
+function logPlan(): void {
+  if (!planned.value.length) return
+  appendLog(`[${stamp()}] ${t('workspaces.autoBuildPlanLine', { count: planned.value.length })}`)
+  planned.value.forEach((p, i) => {
+    const coord = coordById.value.get(p.rec_id)
+    const kind = typeLabel(p.project_type)
+    appendLog(`  ${i + 1}. ${p.project_name}  [${kind}]${coord ? `  ${coord}` : ''}`)
+  })
+}
+
 async function refreshPlan(resync: boolean): Promise<void> {
-  if (!props.workspace?.rec_id || running.value) return
+  if (!props.workspace?.rec_id || running.value || startBlocked.value) return
   loadingPlan.value = true
   try {
     if (!projects.value.length) await loadProjects()
+    applyPlan(analysis.value)
     const graph = enabledProjects.value.filter((p) => isOrderedBuildType(p.project_type))
     if (resync || !analysis.value) {
       warnings.value = []
-      appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncStart')}`)
-      const sync = await syncWorkspaceSources(props.workspace.rec_id)
-      for (const line of formatSyncItems(sync.items, t)) {
-        appendLog(`[${stamp()}] ${line}`)
-      }
+      const sync = await syncSourcesWithLog(props.workspace.rec_id, t, appendLog, (hint) => {
+        syncHint.value = hint
+      })
       appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncDone', { synced: sync.synced, skipped: sync.skipped, failed: sync.failed })}`)
       if (sync.failed_items?.length) warnings.value = [...warnings.value, ...sync.failed_items]
       if (graph.length) {
+        syncHint.value = t('workspaces.autoBuildOrderStart')
+        appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
         analysis.value = await fetchMavenOrder(props.workspace.rec_id)
         warnings.value = [...warnings.value, ...(analysis.value.warnings ?? [])]
+        appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: analysis.value.full_build_order?.length ?? 0 })}`)
       } else {
         analysis.value = null
       }
     }
     applyPlan(analysis.value)
+    logPlan()
   } catch (e) {
-    planned.value = []
+    applyPlan(analysis.value)
     toast.error(errText(e))
   } finally {
     loadingPlan.value = false
+    syncHint.value = ''
   }
 }
 
@@ -126,10 +169,18 @@ async function runLoop(startIndex: number, analysisCycles: Set<string>): Promise
         const p = planned.value[i]
         const prev = session?.steps[p.rec_id]
         if (prev?.outcome === 'success') continue
-        appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildProject', { name: p.project_name })}`)
+        appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildProject', { name: p.project_name, num: i + 1, total: planned.value.length })}`)
         try {
           const job = await submitBuild(p.workspace_rec_id || props.workspace?.rec_id || '', p.rec_id)
-          const done = await waitForJob(job.rec_id)
+          let lastStep = ''
+          const done = await waitForJob(job.rec_id, 2000, (view) => {
+            const runningStep = (view.steps ?? []).find((s) => s.step_status === 'running')
+            const label = runningStep?.step_name || runningStep?.step_key || ''
+            if (label && label !== lastStep) {
+              lastStep = label
+              appendLog(`[${stamp()}] ${t('workspaces.autoBuildJobStep', { name: p.project_name, step: label })}`)
+            }
+          })
           if (done.job_status === 'succeeded') {
             succeeded++
             appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildOk', { name: p.project_name, num: i + 1 })}`)
@@ -196,6 +247,7 @@ async function onOpen(): Promise<void> {
   logText.value = ''
   planned.value = []
   warnings.value = []
+  await refreshBatch()
   await loadProjects()
   const id = props.workspace?.rec_id || ''
   const saved = loadAutoBuildSession(id)
@@ -204,7 +256,7 @@ async function onOpen(): Promise<void> {
     if (await isAutoBuildSessionStale(saved, boot)) {
       clearAutoBuildSession(id)
       toast.warning(t('workspaces.autoBuildStaleSession'))
-      void refreshPlan(true)
+      if (!startBlocked.value) void refreshPlan(true)
       emit('sessionChange')
       return
     }
@@ -219,6 +271,7 @@ async function onOpen(): Promise<void> {
     return
   }
   active.value = null
+  if (startBlocked.value) return
   void refreshPlan(true)
 }
 
@@ -245,24 +298,38 @@ watch(open, (v) => {
 watch([scope, selectedRecIds, includeNonMaven], () => {
   if (open.value && !running.value && !active.value) applyPlan(analysis.value)
 })
+watch(
+  [running, loadingPlan, () => props.workspace?.rec_id],
+  ([run, load, id], prev) => {
+    const prevId = String(prev?.[2] ?? '')
+    if (prevId && prevId !== id) setAutoBuildBusy(prevId, false)
+    if (!id) return
+    setAutoBuildBusy(id, Boolean(run || load || hasRunningAutoBuildSession(id)))
+  },
+)
 </script>
 
 <template>
   <RsDialog
     v-model:open="open"
-    layout="form"
-    :width="960"
+    layout="window"
+    width="80%"
+    height="70%"
+    draggable
+    resizable
+    fullscreenable
     teleport-to="body"
     :title="t('workspaces.autoBuildTitle')"
     :description="t('workspaces.autoBuildHint', { name: workspace?.workspace_name || '', count: workspace?.project_count ?? projects.length })"
   >
     <template #body>
+      <RsAlert v-if="occupyTip" type="warning" class="occupy-alert">{{ occupyTip }}</RsAlert>
       <div class="auto-split">
         <div class="form-grid">
           <RsFieldset
             :legend="t('workspaces.autoBuildScope')"
             :tooltip="t('workspaces.autoBuildScopeTip')"
-            :disabled="running || loadingPlan"
+            :disabled="running || loadingPlan || startBlocked"
             border-style="dashed"
             title-tone="muted"
             size="sm"
@@ -293,7 +360,8 @@ watch([scope, selectedRecIds, includeNonMaven], () => {
             title-tone="muted"
             size="sm"
           >
-            <template #extra>{{ loadingPlan ? t('workspaces.autoBuildPlanLoading') : planned.length }}</template>
+            <template #extra>{{ planExtra }}</template>
+            <p class="hint">{{ planCaption }}</p>
             <p v-for="(w, i) in warnings" :key="i" class="hint hint--warn">{{ w }}</p>
             <ol v-if="planRows.length" class="plan">
               <li v-for="row in planRows" :key="row.project.rec_id">
@@ -306,20 +374,23 @@ watch([scope, selectedRecIds, includeNonMaven], () => {
                 </div>
               </li>
             </ol>
-            <p v-else class="hint">{{ loadingPlan ? t('workspaces.autoBuildPlanLoading') : t('workspaces.autoBuildPlanEmpty') }}</p>
+            <p v-else class="hint">{{ planEmptyText }}</p>
           </RsFieldset>
         </div>
-        <RsLog
-          v-model:lines="logText"
-          class="log"
-          height="100%"
-          :empty-text="t('workspaces.autoBuildLogEmpty')"
-          :aria-label="t('workspaces.autoBuildTitle')"
-        />
+        <div class="log-col">
+          <RsLog
+            v-model:lines="logText"
+            class="log"
+            wrap
+            height="100%"
+            :empty-text="t('workspaces.autoBuildLogEmpty')"
+            :aria-label="t('workspaces.autoBuildTitle')"
+          />
+        </div>
       </div>
     </template>
     <template #footer>
-      <RsButton variant="ghost" :disabled="running" @click="open = false">{{ t('common.cancel') }}</RsButton>
+      <RsButton variant="ghost" :disabled="running || startBlocked" @click="open = false">{{ t('common.cancel') }}</RsButton>
       <RsButton :loading="running" :disabled="!canSubmit" @click="submit">{{ t('workspaces.autoBuildExecute') }}</RsButton>
     </template>
   </RsDialog>
@@ -327,25 +398,34 @@ watch([scope, selectedRecIds, includeNonMaven], () => {
 
 <style scoped src="./dialog.css"></style>
 <style scoped>
+.occupy-alert {
+  flex: 0 0 auto;
+  margin-bottom: 0.75rem;
+}
 .auto-split {
+  flex: 1 1 0;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
   gap: 0.85rem;
-  min-height: 22rem;
+  overflow: hidden;
+  align-items: stretch;
 }
-.form-grid {
-  min-height: 22rem;
-}
-.log {
-  min-height: 22rem;
-  height: 100%;
+.log-col {
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.log-col :deep(.rs-log) {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
 }
 .plan {
   margin: 0;
   padding-left: 1.2rem;
-  max-height: 16rem;
-  overflow: auto;
   font-size: 0.82rem;
   line-height: 1.55;
 }
@@ -370,6 +450,7 @@ watch([scope, selectedRecIds, includeNonMaven], () => {
 @media (max-width: 800px) {
   .auto-split {
     grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(16rem, 1fr);
   }
 }
 </style>

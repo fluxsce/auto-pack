@@ -1,6 +1,6 @@
 {
   "name": "auto-pack",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,7 +23,7 @@
     "test:server": "go test -C server ./..."
   },
   "dependencies": {
-    "@niuma/ui": "npm:niuma-ui@latest",
+    "@niuma/ui": "link:../niuma-ui",
     "axios": "^1.13.2",
     "pinia": "^3.0.4",
     "vue": "^3.5.39",

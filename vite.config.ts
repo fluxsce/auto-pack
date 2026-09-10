@@ -68,6 +68,8 @@ export default defineConfig({
       '/autopack/api': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
+        timeout: 1_800_000,
+        proxyTimeout: 1_800_000,
       },
     },
   },

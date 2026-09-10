@@ -123,12 +123,14 @@ const sections = computed(() =>
   min-width: 0;
   min-height: 0;
   height: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .detail {
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -137,7 +139,9 @@ const sections = computed(() =>
 .detail :deep(.rs-card__body) {
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .detail__head {
@@ -155,8 +159,9 @@ const sections = computed(() =>
 
 .detail__layout {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
   align-items: stretch;
 }
 
@@ -167,6 +172,7 @@ const sections = computed(() =>
   flex-shrink: 0;
   width: 15.5rem;
   min-height: 0;
+  overflow: hidden;
   padding: 0.55rem 0 0;
   border-right: 1px solid var(--shell-border);
   background: var(--shell-inset-bg);

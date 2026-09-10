@@ -46,6 +46,21 @@ type SyncItem struct {
 	Log         string `json:"log,omitempty"`
 }
 
+// SyncEvent is one live line while SyncSources walks the workspace.
+type SyncEvent struct {
+	Event   string    `json:"event"`
+	Index   int       `json:"index,omitempty"`
+	Total   int       `json:"total,omitempty"`
+	Item    *SyncItem `json:"item,omitempty"`
+	Synced  int       `json:"synced,omitempty"`
+	Skipped int       `json:"skipped,omitempty"`
+	Failed  int       `json:"failed,omitempty"`
+	Message string    `json:"message,omitempty"`
+}
+
+// SyncListener receives live pre-sync events. Nil is ignored.
+type SyncListener func(SyncEvent)
+
 // SyncResult is workspace Git pre-sync counts and per-project lines.
 type SyncResult struct {
 	Synced      int        `json:"synced"`

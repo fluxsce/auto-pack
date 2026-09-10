@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsButton, RsCheckbox, RsDialog, RsFieldset, RsFormItem, RsInput, RsLog, RsTag, useRsToast } from '@/ui'
+import { RsAlert, RsButton, RsCheckbox, RsDialog, RsFieldset, RsFormItem, RsInput, RsLog, RsTag, useRsToast } from '@/ui'
 import { useAuthStore } from '@/stores/auth'
 import type { Workspace } from '@/stores/workspace'
 import {
@@ -18,7 +18,6 @@ import {
   saveAutoReleasePostOptions,
   startAutoRelease,
   submitJob,
-  syncWorkspaceSources,
   waitForJob,
   RELEASE_OK,
   type AutoReleaseStatus,
@@ -32,7 +31,8 @@ import { isGitBranch } from '../lib/path-slug'
 import { orderProjectsForBuild } from '../lib/ordered-build'
 import { defaultBuild, parseRecipe, projectTypes } from '../lib/project-defaults'
 import { defaultBackupDir } from '../lib/workspace-ftp'
-import { formatSyncItems } from '../lib/sync-log'
+import { syncSourcesWithLog } from '../lib/sync-log'
+import { setAutoReleaseBusy, useBatchActivity } from '../composables/use-batch-activity'
 import PushPanel from '../components/remote/PushPanel.vue'
 
 const open = defineModel<boolean>('open', { default: false })
@@ -117,8 +117,15 @@ const previewEntries = computed<ProjectFileEntry[]>(() =>
 )
 const previewFileName = computed(() => previewEntries.value[0]?.name || 'package')
 const noteProjectId = computed(() => ftpPushProjectIds.value[0] || '')
+const { buildBusy, releaseBusy, refresh: refreshBatch } = useBatchActivity(() => props.workspace?.rec_id || '')
+const occupyTip = computed(() => {
+  if (buildBusy.value) return t('workspaces.autoBatchBusyBuild')
+  if (releaseBusy.value || releasing.value || postProcessing.value) return t('workspaces.autoBatchBusyRelease')
+  return ''
+})
+const startBlocked = computed(() => Boolean(occupyTip.value) && !releasing.value && !postProcessing.value)
 const canSubmit = computed(() => {
-  if (releasing.value || postProcessing.value || saving.value) return false
+  if (startBlocked.value || releasing.value || postProcessing.value || saving.value) return false
   if (!isGitBranch(releaseBranch.value) || !tagBranch.value.trim()) return false
   if (createTargetBranch.value && !isGitBranch(targetBranch.value)) return false
   if (ftpEnabled.value && (!pushForm.value.envRecId || !pushForm.value.pushPath.trim() || !pushForm.value.pusher.trim() || !pushForm.value.taskRef.trim() || !ftpPushProjectIds.value.length)) {
@@ -345,8 +352,7 @@ async function runPost(st: AutoReleaseStatus, tag: string): Promise<void> {
     const pushSet = new Set(ftpPushProjectIds.value)
     let queue = released
     try {
-      const sync = await syncWorkspaceSources(wsId)
-      for (const line of formatSyncItems(sync.items, t)) append(line)
+      await syncSourcesWithLog(wsId, t, append)
       const analysis = await fetchMavenOrder(wsId)
       const ordered = orderProjectsForBuild(projects.value, analysis.full_build_order ?? [], {
         targetRecIds: releasedIds,
@@ -360,8 +366,9 @@ async function runPost(st: AutoReleaseStatus, tag: string): Promise<void> {
     } catch (e) {
       append(errText(e))
     }
-    for (const p of queue) {
-      append(`[${new Date().toLocaleString()}] ${t('workspaces.autoReleaseBuildProject', { name: p.project_name })}`)
+    for (let i = 0; i < queue.length; i++) {
+      const p = queue[i]
+      append(`[${new Date().toLocaleString()}] ${t('workspaces.autoReleaseBuildProject', { name: p.project_name, num: i + 1, total: queue.length })}`)
       let built = false
       try {
         const job = await submitJob(wsId, p.rec_id, 'build')
@@ -550,6 +557,7 @@ async function loadRemoteNote(): Promise<void> {
 async function onOpen(): Promise<void> {
   const id = props.workspace?.rec_id
   if (!id) return
+  void refreshBatch()
   handledPostFor = ''
   selectedHistory.value = ''
   logText.value = ''
@@ -646,6 +654,14 @@ watch(
   () => [pushForm.value.pushPath, previewFileName.value],
   () => syncBackupDefault(),
 )
+watch(
+  [releasing, postProcessing, () => props.workspace?.rec_id],
+  ([run, post, id], prev) => {
+    const prevId = String(prev?.[2] ?? '')
+    if (prevId && prevId !== id) setAutoReleaseBusy(prevId, false)
+    if (id) setAutoReleaseBusy(id, Boolean(run || post))
+  },
+)
 onUnmounted(() => {
   stopPoll()
   if (noteTimer) clearTimeout(noteTimer)
@@ -666,6 +682,7 @@ onUnmounted(() => {
     :description="t('workspaces.autoReleaseHint', { name: workspace?.workspace_name || '', count: workspace?.project_count ?? projects.length })"
   >
     <template #body>
+      <RsAlert v-if="occupyTip" type="warning" class="occupy-alert">{{ occupyTip }}</RsAlert>
       <div class="auto-split">
         <div class="form-col">
           <RsFieldset
@@ -795,6 +812,7 @@ onUnmounted(() => {
           <RsLog
             v-model:lines="logText"
             class="log"
+            wrap
             height="100%"
             :infer-markers="logInferMarkers"
             :empty-text="t('workspaces.autoReleaseLogEmpty')"
@@ -804,7 +822,7 @@ onUnmounted(() => {
       </div>
     </template>
     <template #footer>
-      <RsButton variant="ghost" :disabled="saving" @click="open = false">{{ t('common.cancel') }}</RsButton>
+      <RsButton variant="ghost" :disabled="saving || startBlocked" @click="open = false">{{ t('common.cancel') }}</RsButton>
       <RsButton :loading="saving || releasing" :disabled="!canSubmit" @click="submit">{{ t('workspaces.autoReleaseExecute') }}</RsButton>
     </template>
   </RsDialog>
@@ -812,6 +830,10 @@ onUnmounted(() => {
 
 <style scoped src="./dialog.css"></style>
 <style scoped>
+.occupy-alert {
+  flex: 0 0 auto;
+  margin-bottom: 0.75rem;
+}
 .auto-split {
   flex: 1;
   min-height: 0;

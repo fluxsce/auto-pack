@@ -61,8 +61,9 @@ function historyTime(row: JobRow): string {
 <style scoped src="./pane.css"></style>
 <style scoped>
 .pane.is-aside {
-  flex: 1;
+  flex: 1 1 0;
   min-height: 0;
+  overflow: hidden;
   gap: 0.5rem;
 }
 
@@ -85,9 +86,11 @@ function historyTime(row: JobRow): string {
 }
 
 .pane.is-aside .history {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   max-width: none;
   max-height: none;
+  overflow: auto;
 }
 
 .history__row {

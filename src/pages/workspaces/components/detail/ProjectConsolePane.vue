@@ -35,6 +35,7 @@ function statusLabel(code?: string): string {
       class="console-log"
       :class="{ 'is-live': props.live }"
       :lines="props.log"
+      wrap
       height="100%"
       :follow="props.live"
       :empty-text="t('workspaces.detail.emptyLog')"
@@ -45,13 +46,17 @@ function statusLabel(code?: string): string {
 
 <style scoped src="./pane.css"></style>
 <style scoped>
-.console-log {
-  flex: 1;
-  min-height: 16rem;
-  height: 0;
+.pane {
+  overflow: hidden;
 }
 
-.console-log.is-live {
+.pane :deep(.rs-log) {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: 100%;
+}
+
+.pane :deep(.rs-log.is-live) {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--rs-info) 35%, transparent);
 }
 </style>

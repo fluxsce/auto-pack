@@ -75,8 +75,24 @@ function repoCell(row: Project) {
       :padding="false"
     >
       <template #actions>
-        <RsButton size="sm" variant="ghost" tone="info" :disabled="!current" @click="openAutoBuild">{{ t('workspaces.autoBuild') }}</RsButton>
-        <RsButton size="sm" variant="ghost" tone="success" :disabled="!current" @click="openAutoRelease">{{ t('workspaces.autoRelease') }}</RsButton>
+        <RsButton
+          size="sm"
+          variant="ghost"
+          tone="info"
+          :disabled="!current"
+          @click="openAutoBuild"
+        >
+          {{ t('workspaces.autoBuild') }}
+        </RsButton>
+        <RsButton
+          size="sm"
+          variant="ghost"
+          tone="success"
+          :disabled="!current"
+          @click="openAutoRelease"
+        >
+          {{ t('workspaces.autoRelease') }}
+        </RsButton>
         <RsButton size="sm" variant="ghost" tone="warning" :disabled="!current" @click="openAutoPush">{{ t('workspaces.autoPush') }}</RsButton>
         <RsButton size="sm" variant="ghost" tone="primary" :loading="loading" @click="load">{{ t('common.refresh') }}</RsButton>
         <RsButton size="sm" :disabled="!current" @click="create">{{ t('workspaces.newProject') }}</RsButton>

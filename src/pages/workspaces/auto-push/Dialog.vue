@@ -517,6 +517,7 @@ onUnmounted(() => {
           <RsLog
             v-model:lines="logLines"
             class="log"
+            wrap
             height="100%"
             :follow="running"
             :empty-text="t('workspaces.autoPushLogEmpty')"

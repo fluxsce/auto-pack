@@ -153,9 +153,16 @@ export function submitJob(workspaceId: string, projectId: string, jobType: strin
 
 const terminal = new Set(['succeeded', 'failed', 'canceled', 'cancelled'])
 
-export async function waitForJob(id: string, intervalMs = 2000): Promise<JobRow> {
+export type JobView = { job: JobRow; steps?: JobStep[] }
+
+export async function waitForJob(
+  id: string,
+  intervalMs = 2000,
+  onTick?: (view: JobView) => void,
+): Promise<JobRow> {
   for (;;) {
     const view = await getJob(id)
+    onTick?.(view)
     const status = view.job.job_status
     if (terminal.has(status)) {
       return view.job
@@ -164,8 +171,8 @@ export async function waitForJob(id: string, intervalMs = 2000): Promise<JobRow>
   }
 }
 
-export function getJob(id: string): Promise<{ job: JobRow; steps?: JobStep[] }> {
-  return request<{ job: JobRow; steps?: JobStep[] }>({ method: 'GET', url: apiPath('jobs', id) })
+export function getJob(id: string): Promise<JobView> {
+  return request<JobView>({ method: 'GET', url: apiPath('jobs', id) })
 }
 
 export type JobLogView = {
