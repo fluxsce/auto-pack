@@ -44,6 +44,7 @@ export type AutoReleaseStatus = {
   foreign?: boolean
   active_workspace_name?: string
   post_options?: ReleasePostOptions
+  phase?: string
 }
 
 export type AutoReleaseStart = {

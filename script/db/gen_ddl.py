@@ -241,6 +241,30 @@ TABLES: list[dict] = [
             ("IDX_AP_WSREL_WS", ["workspace_rec_id", "release_num"]),
         ],
     },
+    {
+        "table": "AP_WORKSPACE_BUILD",
+        "pk": "PK_AP_WSBLD",
+        "pk_cols": ["rec_id"],
+        "comment": "工作空间自动构建记录。日志在 data/builds/{id}.log。",
+        "cols": [
+            ("rec_id", "id", False, None, "主键 UUID"),
+            ("workspace_rec_id", "id", False, None, "空间"),
+            ("build_num", "int", False, "0", "空间内序号"),
+            ("status", "varchar64", False, None, "running / success / partial / failed"),
+            ("scope", "varchar64", True, None, "workspace / selected"),
+            ("succeeded", "int", False, "0", "成功工程数"),
+            ("skipped", "int", False, "0", "跳过工程数"),
+            ("failed", "int", False, "0", "失败工程数"),
+            ("message", "varchar500", True, None, "摘要"),
+            ("log_path", "path", True, None, "日志文件"),
+            ("filter_json", "text", True, None, "范围与工程过滤"),
+            ("started_at", "datetime", True, None, "开始时间"),
+            ("finished_at", "datetime", True, None, "结束时间"),
+        ],
+        "indexes": [
+            ("IDX_AP_WSBLD_WS", ["workspace_rec_id", "build_num"]),
+        ],
+    },
 ]
 
 

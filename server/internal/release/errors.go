@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	// ErrReleaseInProgress is returned when another auto-release is already running.
+	// ErrReleaseInProgress is returned when this workspace already has an auto-release running.
 	ErrReleaseInProgress = record.ErrReleaseInProgress
 	// ErrNotFound is returned when the release record does not exist in this workspace.
 	ErrNotFound = record.ErrNotFound

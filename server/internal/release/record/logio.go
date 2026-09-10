@@ -16,6 +16,28 @@ func WriteLog(path, content string) error {
 	return os.WriteFile(path, []byte(content+"\n"), 0o644)
 }
 
+// AppendLog appends one or more lines to a persisted batch log.
+func AppendLog(path string, lines ...string) error {
+	if strings.TrimSpace(path) == "" || len(lines) == 0 {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\n")
+		if line == "" {
+			continue
+		}
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ReadLogTail returns content from offset, the file size, and the offset actually used.
 func ReadLogTail(path string, offset int64) (content string, size int64, used int64, err error) {
 	f, err := os.Open(path)

@@ -1,4 +1,4 @@
-// Package record 持久化 AP_WORKSPACE_RELEASE，并提供进程内全局发版锁与批量日志格式。
+// Package record 持久化 AP_WORKSPACE_RELEASE，并提供按工作空间的发版锁与批量日志格式。
 package record
 
 import (
@@ -37,9 +37,10 @@ type Job struct {
 	CurrentProject  string       `json:"current_project,omitempty"`
 	DoneCount       int          `json:"done_count"`
 	TotalCount      int          `json:"total_count"`
-	Foreign         bool         `json:"foreign,omitempty"`
-	ActiveWorkspace string       `json:"active_workspace_name,omitempty"`
+	Foreign         bool         `json:"foreign,omitempty"`               // leftover API field; status never sets it
+	ActiveWorkspace string       `json:"active_workspace_name,omitempty"` // leftover API field; unused after per-workspace lock
 	PostOptions     *PostOptions `json:"post_options,omitempty"`
+	Phase           string       `json:"phase,omitempty"`
 }
 
 // Status is the API view for poll / dialog open.
@@ -47,18 +48,18 @@ type Status struct {
 	Job
 }
 
-// Coordinator ensures at most one auto-release runs at a time (global lock).
+// Coordinator 按工作空间单飞：同一空间同时只跑一次发版，不同空间互不影响。
 type Coordinator struct {
-	mu  sync.Mutex
-	job *Job
+	mu   sync.Mutex
+	jobs map[string]*Job
 }
 
-// NewCoordinator constructs a process-wide single-flight Coordinator.
+// NewCoordinator constructs a per-workspace single-flight Coordinator.
 func NewCoordinator() *Coordinator {
-	return &Coordinator{}
+	return &Coordinator{jobs: map[string]*Job{}}
 }
 
-// Start begins an async release unless another job is running.
+// Start begins an async release unless that workspace already has one running.
 // ctx should be the process lifetime; a nil ctx uses context.Background.
 func (c *Coordinator) Start(ctx context.Context, workspaceRecID, workspaceName string, total int, meta Job, run func(ctx context.Context, job *Job)) error {
 	workspaceRecID = trimID(workspaceRecID)
@@ -69,7 +70,10 @@ func (c *Coordinator) Start(ctx context.Context, workspaceRecID, workspaceName s
 		ctx = context.Background()
 	}
 	c.mu.Lock()
-	if c.job != nil && c.job.Status == JobStatusRunning {
+	if c.jobs == nil {
+		c.jobs = map[string]*Job{}
+	}
+	if existing := c.jobs[workspaceRecID]; existing != nil && existing.Status == JobStatusRunning {
 		c.mu.Unlock()
 		return ErrReleaseInProgress
 	}
@@ -85,7 +89,7 @@ func (c *Coordinator) Start(ctx context.Context, workspaceRecID, workspaceName s
 		TotalCount:     total,
 		PostOptions:    meta.PostOptions,
 	}
-	c.job = j
+	c.jobs[workspaceRecID] = j
 	c.mu.Unlock()
 
 	go func() {
@@ -105,82 +109,80 @@ func (c *Coordinator) Start(ctx context.Context, workspaceRecID, workspaceName s
 	return nil
 }
 
-// Status returns the current job snapshot for polling. queryWorkspace is the dialog's workspace.
+// Status returns this workspace's job snapshot. Other workspaces' runs are invisible.
 func (c *Coordinator) Status(queryWorkspace string) Status {
 	queryWorkspace = trimID(queryWorkspace)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.job == nil {
+	j := c.jobs[queryWorkspace]
+	if j == nil {
 		return Status{Job: Job{Status: JobStatusIdle}}
 	}
-	j := *c.job
-	if len(j.Results) > 0 {
-		j.Results = append([]Result(nil), j.Results...)
+	out := *j
+	if len(out.Results) > 0 {
+		out.Results = append([]Result(nil), out.Results...)
 	}
-	if j.Status == JobStatusRunning && j.WorkspaceRecID != queryWorkspace {
-		return Status{Job: Job{
-			ReleaseRecID:    j.ReleaseRecID,
-			Status:          JobStatusRunning,
-			Foreign:         true,
-			ActiveWorkspace: j.WorkspaceName,
-			Tag:             j.Tag,
-			ReleaseBranch:   j.ReleaseBranch,
-			StartedAt:       j.StartedAt,
-			DoneCount:       j.DoneCount,
-			TotalCount:      j.TotalCount,
-			CurrentProject:  j.CurrentProject,
-		}}
-	}
-	return Status{Job: j}
+	return Status{Job: out}
 }
 
 // SetProgress updates running job progress (call from release loop).
-func (c *Coordinator) SetProgress(current string, done int) {
+func (c *Coordinator) SetProgress(job *Job, current string, done int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.job == nil || c.job.Status != JobStatusRunning {
+	if job == nil || job.Status != JobStatusRunning {
 		return
 	}
-	c.job.CurrentProject = current
-	c.job.DoneCount = done
+	job.CurrentProject = current
+	job.DoneCount = done
 }
 
 // AppendResult records one finished project (safe to call while running).
-func (c *Coordinator) AppendResult(res Result, released, skipped, failed int) {
+func (c *Coordinator) AppendResult(job *Job, res Result, released, skipped, failed int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.job == nil || c.job.Status != JobStatusRunning {
+	if job == nil || job.Status != JobStatusRunning {
 		return
 	}
-	c.job.Results = append(c.job.Results, res)
-	c.job.Released = released
-	c.job.Skipped = skipped
-	c.job.Failed = failed
-	c.job.DoneCount = len(c.job.Results)
+	job.Results = append(job.Results, res)
+	job.Released = released
+	job.Skipped = skipped
+	job.Failed = failed
+	job.DoneCount = len(job.Results)
 }
 
 // FinishResult stores aggregate outcome on the running job.
-func (c *Coordinator) FinishResult(released, skipped, failed int, results []Result) {
+func (c *Coordinator) FinishResult(job *Job, released, skipped, failed int, results []Result) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.job == nil {
+	if job == nil {
 		return
 	}
-	c.job.Released = released
-	c.job.Skipped = skipped
-	c.job.Failed = failed
-	c.job.Results = append([]Result(nil), results...)
-	c.job.DoneCount = len(c.job.Results)
+	job.Released = released
+	job.Skipped = skipped
+	job.Failed = failed
+	job.Results = append([]Result(nil), results...)
+	job.DoneCount = len(job.Results)
+}
+
+// SetPhase records whether the run is still releasing or already in post-build / push.
+func (c *Coordinator) SetPhase(job *Job, phase string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if job == nil || job.Status != JobStatusRunning {
+		return
+	}
+	job.Phase = phase
 }
 
 // SetPostOptions updates the in-memory job so poll/status stay aligned with the DB row.
-func (c *Coordinator) SetPostOptions(opts *PostOptions) {
+func (c *Coordinator) SetPostOptions(workspaceID string, opts *PostOptions) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.job == nil {
+	j := c.jobs[trimID(workspaceID)]
+	if j == nil {
 		return
 	}
-	c.job.PostOptions = opts
+	j.PostOptions = opts
 }
 
 func trimID(s string) string {

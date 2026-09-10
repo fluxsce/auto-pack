@@ -29,4 +29,25 @@ CREATE TABLE IF NOT EXISTS "AP_WORKSPACE_RELEASE" (
 
 CREATE INDEX IF NOT EXISTS "IDX_AP_WSREL_WS" ON "AP_WORKSPACE_RELEASE" ("workspace_rec_id", "release_num");
 
+CREATE TABLE IF NOT EXISTS "AP_WORKSPACE_BUILD" (
+  "rec_id" TEXT NOT NULL,
+  "workspace_rec_id" TEXT NOT NULL,
+  "build_num" INTEGER NOT NULL DEFAULT 0,
+  "status" TEXT NOT NULL,
+  "scope" TEXT,
+  "succeeded" INTEGER NOT NULL DEFAULT 0,
+  "skipped" INTEGER NOT NULL DEFAULT 0,
+  "failed" INTEGER NOT NULL DEFAULT 0,
+  "message" TEXT,
+  "log_path" TEXT,
+  "filter_json" TEXT,
+  "started_at" TEXT,
+  "finished_at" TEXT,
+  "created_at" TEXT NOT NULL DEFAULT (datetime('now')),
+  "updated_at" TEXT NOT NULL DEFAULT (datetime('now')),
+  CONSTRAINT PK_AP_WSBLD PRIMARY KEY ("rec_id")
+);
+
+CREATE INDEX IF NOT EXISTS "IDX_AP_WSBLD_WS" ON "AP_WORKSPACE_BUILD" ("workspace_rec_id", "build_num");
+
 UPDATE "AP_ENV" SET "workspace_rec_id" = '' WHERE "workspace_rec_id" <> '';

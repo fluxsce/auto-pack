@@ -1,8 +1,10 @@
 import { computed, ref, type ComputedRef } from 'vue'
-import { autoReleaseStatus } from '../api'
-import { hasRunningAutoBuildSession } from '../auto-build/session'
+import { autoBuildStatus, autoReleaseStatus } from '../api'
+import { isAutoBuildLive } from '../auto-build/runtime'
+import { isAutoReleaseLive } from '../auto-release/runtime'
 
-const buildIds = new Set<string>()
+const buildLocalIds = new Set<string>()
+const buildServerIds = new Set<string>()
 const releaseLocalIds = new Set<string>()
 const releaseServerIds = new Set<string>()
 const epoch = ref(0)
@@ -24,12 +26,12 @@ function setFlag(bag: Set<string>, workspaceId: string, on: boolean): void {
   }
 }
 
-/** 当前页自动构建（含预同步）占用该空间。 */
+/** 当前页自动构建（含跟进服务端批次）占用该空间。 */
 export function setAutoBuildBusy(workspaceId: string, busy: boolean): void {
-  setFlag(buildIds, workspaceId, busy)
+  setFlag(buildLocalIds, workspaceId, busy)
 }
 
-/** 当前页自动发版对话框占用该空间（含发版后构建）。 */
+/** 当前页自动发版对话框占用该空间。 */
 export function setAutoReleaseBusy(workspaceId: string, busy: boolean): void {
   setFlag(releaseLocalIds, workspaceId, busy)
 }
@@ -46,7 +48,8 @@ export function useBatchActivity(workspaceId: () => string): {
   const idOf = (): string => workspaceId().trim()
   const buildBusy = computed(() => {
     void epoch.value
-    return buildIds.has(idOf())
+    const id = idOf()
+    return buildLocalIds.has(id) || buildServerIds.has(id)
   })
   const releaseBusy = computed(() => {
     void epoch.value
@@ -63,10 +66,12 @@ export function useBatchActivity(workspaceId: () => string): {
   async function refresh(): Promise<void> {
     const id = idOf()
     if (!id) return
-    if (hasRunningAutoBuildSession(id)) setAutoBuildBusy(id, true)
+    if (isAutoBuildLive(id)) setAutoBuildBusy(id, true)
+    if (isAutoReleaseLive(id)) setAutoReleaseBusy(id, true)
     try {
-      const st = await autoReleaseStatus(id)
-      setFlag(releaseServerIds, id, st.status === 'running' && !st.foreign)
+      const [release, build] = await Promise.all([autoReleaseStatus(id), autoBuildStatus(id)])
+      setFlag(releaseServerIds, id, release.status === 'running' && !release.foreign)
+      setFlag(buildServerIds, id, build.status === 'running')
     } catch {
       /* 轮询失败不改本地占用 */
     }

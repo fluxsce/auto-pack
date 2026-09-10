@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"auto-pack/server/internal/access"
 	"auto-pack/server/internal/iam"
@@ -126,6 +127,60 @@ func (s *Service) Cancel(ctx context.Context, actor iam.Actor, id string) error 
 		return fmt.Errorf("job is %s", j.JobStatus)
 	}
 	return SetJobStatus(ctx, s.st, id, StatusCanceled, "canceled by user", false, true)
+}
+
+// Terminal reports whether a job status will no longer change.
+func Terminal(status string) bool {
+	return status == StatusSucceeded || status == StatusFailed || status == StatusCanceled
+}
+
+// Peek reads a job and its steps without waiting.
+func (s *Service) Peek(ctx context.Context, id string) (Job, []Step, error) {
+	if s == nil {
+		return Job{}, nil, errors.New("job service unavailable")
+	}
+	j, err := JobByID(ctx, s.st, id)
+	if err != nil {
+		return Job{}, nil, err
+	}
+	steps, err := StepsByJob(ctx, s.st, id)
+	return j, steps, err
+}
+
+// Wait polls a job until it finishes or ctx is done. Used by workspace batches; does not hold engine locks.
+func (s *Service) Wait(ctx context.Context, id string) (Job, []Step, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		j, steps, err := s.Peek(ctx, id)
+		if err != nil {
+			return j, steps, err
+		}
+		if Terminal(j.JobStatus) {
+			return j, steps, nil
+		}
+		select {
+		case <-ctx.Done():
+			return j, steps, ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+// RunningStepName returns the first running step label for batch logs.
+func RunningStepName(steps []Step) string {
+	for _, st := range steps {
+		if st.StepStatus == StepRunning {
+			if st.StepName != "" {
+				return st.StepName
+			}
+			return st.StepKey
+		}
+	}
+	return ""
 }
 
 func stepsFor(jobType string, p Payload) []Step {

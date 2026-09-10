@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"auto-pack/server/internal/audit"
+	wsbuild "auto-pack/server/internal/build"
 	"auto-pack/server/internal/env"
 	"auto-pack/server/internal/job"
 	"auto-pack/server/internal/project"
@@ -62,6 +63,8 @@ type Deps struct {
 	Audit *audit.Service
 	// Release 为工作空间自动发版。
 	Release *release.Service
+	// Build 为工作空间自动构建。
+	Build *wsbuild.Service
 	// Frontend 为静态页根目录。
 	Frontend string
 	// StartedAt 为进程启动时间，探活用。

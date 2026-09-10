@@ -1,59 +1,93 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsAlert, RsButton, RsCheckbox, RsDialog, RsFieldset, RsFormItem, RsLog, RsRadio, RsRadioItem, RsSelect, RsTag, useRsToast } from '@/ui'
 import type { Workspace } from '@/stores/workspace'
-import { errText, fetchMavenOrder, fetchServerBootAt, listProjects, submitBuild, waitForJob, type MavenAnalysis, type Project } from '../api'
-import { typeLabel, typeVariant } from '../composables/use-project-list'
 import {
-  clearAutoBuildSession,
-  createAutoBuildSession,
-  hasRunningAutoBuildSession,
-  isAutoBuildSessionStale,
-  loadAutoBuildSession,
-  saveAutoBuildSession,
-  type AutoBuildScope,
-  type AutoBuildSession,
-} from './session'
+  autoBuildHistory,
+  autoBuildLog,
+  autoBuildStatus,
+  errText,
+  fetchMavenOrder,
+  listProjects,
+  startAutoBuild,
+  type MavenAnalysis,
+  type WorkspaceBuildRecord,
+} from '../api'
+import { typeLabel, typeVariant } from '../composables/use-project-list'
+import { type AutoBuildScope } from './session'
+import { autoBuildBag, autoBuildEpoch, bumpAutoBuild, isAutoBuildLive, stopAutoBuildPolls, type AutoBuildBag } from './runtime'
 import { setAutoBuildBusy, useBatchActivity } from '../composables/use-batch-activity'
 import { cyclicRecIds, isOrderedBuildType, orderProjectsForBuild } from '../lib/ordered-build'
 import { syncSourcesWithLog } from '../lib/sync-log'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{ workspace?: Workspace | null }>()
-const emit = defineEmits<{ success: []; sessionChange: [] }>()
+const emit = defineEmits<{ success: [] }>()
 
 const { t } = useI18n()
 const toast = useRsToast()
-const scope = ref<AutoBuildScope>('workspace')
-const selectedRecIds = ref<string[]>([])
-const includeNonMaven = ref(true)
-const loadingPlan = ref(false)
-const running = ref(false)
-const logText = ref('')
-const planned = ref<Project[]>([])
-const warnings = ref<string[]>([])
-const projects = ref<Project[]>([])
-const analysis = ref<MavenAnalysis | null>(null)
-const active = ref<AutoBuildSession | null>(null)
-const syncHint = ref('')
-const syncWaiting = ref(false)
-let loop: Promise<void> | null = null
-let planTask: Promise<void> | null = null
+const wsId = computed(() => props.workspace?.rec_id || '')
+
+function bag(id = wsId.value): AutoBuildBag {
+  void autoBuildEpoch.value
+  return autoBuildBag(id)
+}
+
+function touch(id = wsId.value): void {
+  bumpAutoBuild()
+  if (id) setAutoBuildBusy(id, isAutoBuildLive(id))
+}
+
+const scope = computed({
+  get: () => bag().scope,
+  set: (v: AutoBuildScope) => {
+    bag().scope = v
+    touch()
+  },
+})
+const selectedRecIds = computed({
+  get: () => bag().selectedRecIds,
+  set: (v: string[]) => {
+    bag().selectedRecIds = v
+    touch()
+  },
+})
+const includeNonMaven = computed({
+  get: () => bag().includeNonMaven,
+  set: (v: boolean) => {
+    bag().includeNonMaven = v
+    touch()
+  },
+})
+const loadingPlan = computed(() => bag().loadingPlan)
+const running = computed(() => bag().running)
+const logText = computed({
+  get: () => bag().logText,
+  set: (v: string) => {
+    bag().logText = v
+    touch()
+  },
+})
+const planned = computed(() => bag().planned)
+const warnings = computed(() => bag().warnings)
+const projects = computed(() => bag().projects)
+const analysis = computed(() => bag().analysis)
+const syncHint = computed(() => bag().syncHint)
+const history = computed(() => bag().history)
+const selectedHistory = computed(() => bag().selectedHistory)
 
 const enabledProjects = computed(() => projects.value.filter((p) => p.is_enabled !== 0))
 const selectable = computed(() => [...enabledProjects.value].sort((a, b) => a.project_name.localeCompare(b.project_name)))
 const projectOptions = computed(() => selectable.value.map((p) => ({ value: p.rec_id, label: p.project_name })))
-const { releaseBusy, refresh: refreshBatch } = useBatchActivity(() => props.workspace?.rec_id || '')
-const sessionRunning = computed(() => active.value?.status === 'running' || hasRunningAutoBuildSession(props.workspace?.rec_id || ''))
+const { releaseBusy, refresh: refreshBatch } = useBatchActivity(() => wsId.value)
 const occupyTip = computed(() => {
   if (releaseBusy.value && !running.value) return t('workspaces.autoBatchBusyRelease')
-  if (running.value || sessionRunning.value) return t('workspaces.autoBatchBusyBuild')
-  if (syncWaiting.value) return t('workspaces.autoBuildSyncWait')
+  if (running.value) return t('workspaces.autoBatchBusyBuild')
   return ''
 })
 const startBlocked = computed(() => releaseBusy.value && !running.value)
-const busySelf = computed(() => running.value || loadingPlan.value || sessionRunning.value)
+const busySelf = computed(() => running.value || loadingPlan.value)
 const canSubmit = computed(() => planned.value.length > 0 && !busySelf.value && !startBlocked.value && (scope.value !== 'selected' || selectedRecIds.value.length > 0))
 const cycleIds = computed(() => (analysis.value ? cyclicRecIds(analysis.value) : new Set<string>()))
 const coordById = computed(() => {
@@ -100,264 +134,268 @@ function isSyncInProgress(e: unknown): boolean {
   return /source sync already in progress/i.test(errText(e))
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function appendLog(workspaceId: string, line: string): void {
+  const slot = autoBuildBag(workspaceId)
+  slot.logText = slot.logText ? `${slot.logText}\n${line}` : line
+  touch(workspaceId)
 }
 
-function appendLog(line: string): void {
-  logText.value = logText.value ? `${logText.value}\n${line}` : line
-  if (active.value) {
-    active.value.logText = logText.value
-    saveAutoBuildSession(active.value)
-  }
-}
-
-async function syncSourcesOrWait(workspaceId: string): Promise<Awaited<ReturnType<typeof syncSourcesWithLog>>> {
-  let noted = false
+async function syncSourcesFollow(workspaceId: string): Promise<Awaited<ReturnType<typeof syncSourcesWithLog>>> {
+  const slot = autoBuildBag(workspaceId)
   for (;;) {
     try {
-      const result = await syncSourcesWithLog(workspaceId, t, appendLog, (hint) => {
-        syncHint.value = hint
-      })
-      syncWaiting.value = false
-      return result
+      return await syncSourcesWithLog(
+        workspaceId,
+        t,
+        (line) => appendLog(workspaceId, line),
+        (hint) => {
+          slot.syncHint = hint
+          touch(workspaceId)
+        },
+      )
     } catch (e) {
-      if (!isSyncInProgress(e) || props.workspace?.rec_id !== workspaceId) {
-        syncWaiting.value = false
-        throw e
-      }
-      syncWaiting.value = true
-      if (!noted) {
-        appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncWait')}`)
-        noted = true
-      }
-      syncHint.value = t('workspaces.autoBuildSyncWait')
-      await sleep(2000)
+      if (!isSyncInProgress(e)) throw e
+      slot.syncHint = t('workspaces.autoBuildSyncWait')
+      touch(workspaceId)
+      await new Promise((resolve) => setTimeout(resolve, 1500))
     }
   }
 }
 
-async function loadProjects(): Promise<void> {
-  const id = props.workspace?.rec_id
-  projects.value = id ? await listProjects(id) : []
+async function loadProjects(workspaceId: string): Promise<void> {
+  autoBuildBag(workspaceId).projects = workspaceId ? await listProjects(workspaceId) : []
+  touch(workspaceId)
 }
 
-function applyPlan(src: MavenAnalysis | null): void {
-  planned.value = orderProjectsForBuild(enabledProjects.value, src?.full_build_order ?? [], {
-    targetRecIds: scope.value === 'selected' ? selectedRecIds.value : [],
+function applyPlan(workspaceId: string, src: MavenAnalysis | null): void {
+  const slot = autoBuildBag(workspaceId)
+  const enabled = slot.projects.filter((p) => p.is_enabled !== 0)
+  slot.planned = orderProjectsForBuild(enabled, src?.full_build_order ?? [], {
+    targetRecIds: slot.scope === 'selected' ? slot.selectedRecIds : [],
     edges: src?.internal_edges,
-    includeNonMaven: scope.value === 'workspace' && includeNonMaven.value,
+    includeNonMaven: slot.scope === 'workspace' && slot.includeNonMaven,
   })
+  touch(workspaceId)
 }
 
-function logPlan(): void {
-  if (!planned.value.length) return
-  appendLog(`[${stamp()}] ${t('workspaces.autoBuildPlanLine', { count: planned.value.length })}`)
-  planned.value.forEach((p, i) => {
-    const coord = coordById.value.get(p.rec_id)
+function logPlan(workspaceId: string): void {
+  const slot = autoBuildBag(workspaceId)
+  if (!slot.planned.length) return
+  appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildPlanLine', { count: slot.planned.length })}`)
+  const coords = new Map<string, string>()
+  for (const m of slot.analysis?.full_build_order ?? []) {
+    if (m.coordinates) coords.set(m.project_rec_id, m.coordinates)
+  }
+  slot.planned.forEach((p, i) => {
+    const coord = coords.get(p.rec_id)
     const kind = typeLabel(p.project_type)
-    appendLog(`  ${i + 1}. ${p.project_name}  [${kind}]${coord ? `  ${coord}` : ''}`)
+    appendLog(workspaceId, `  ${i + 1}. ${p.project_name}  [${kind}]${coord ? `  ${coord}` : ''}`)
   })
 }
 
-async function refreshPlan(resync: boolean): Promise<void> {
-  if (!props.workspace?.rec_id || running.value || startBlocked.value) return
-  if (planTask) return planTask
-  const workspaceId = props.workspace.rec_id
-  loadingPlan.value = true
-  planTask = (async () => {
+async function refreshPlan(workspaceId: string, resync: boolean): Promise<void> {
+  const slot = autoBuildBag(workspaceId)
+  if (!workspaceId || slot.running || (workspaceId === wsId.value && startBlocked.value)) return
+  if (slot.planTask) return slot.planTask
+  slot.loadingPlan = true
+  touch(workspaceId)
+  slot.planTask = (async () => {
     try {
-      if (!projects.value.length) await loadProjects()
-      applyPlan(analysis.value)
-      const graph = enabledProjects.value.filter((p) => isOrderedBuildType(p.project_type))
-      if (resync || !analysis.value) {
-        warnings.value = []
-        const sync = await syncSourcesOrWait(workspaceId)
-        if (props.workspace?.rec_id !== workspaceId) return
-        appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncDone', { synced: sync.synced, skipped: sync.skipped, failed: sync.failed })}`)
-        if (sync.failed_items?.length) warnings.value = [...warnings.value, ...sync.failed_items]
+      if (!slot.projects.length) await loadProjects(workspaceId)
+      applyPlan(workspaceId, slot.analysis)
+      const graph = slot.projects.filter((p) => p.is_enabled !== 0 && isOrderedBuildType(p.project_type))
+      if (resync || !slot.analysis) {
+        slot.warnings = []
+        const sync = await syncSourcesFollow(workspaceId)
+        appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildSyncDone', { synced: sync.synced, skipped: sync.skipped, failed: sync.failed })}`)
+        if (sync.failed_items?.length) slot.warnings = [...slot.warnings, ...sync.failed_items]
         if (graph.length) {
-          syncHint.value = t('workspaces.autoBuildOrderStart')
-          appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
-          analysis.value = await fetchMavenOrder(workspaceId)
-          warnings.value = [...warnings.value, ...(analysis.value.warnings ?? [])]
-          appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: analysis.value.full_build_order?.length ?? 0 })}`)
+          slot.syncHint = t('workspaces.autoBuildOrderStart')
+          touch(workspaceId)
+          appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
+          slot.analysis = await fetchMavenOrder(workspaceId)
+          slot.warnings = [...slot.warnings, ...(slot.analysis.warnings ?? [])]
+          appendLog(workspaceId, `[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: slot.analysis.full_build_order?.length ?? 0 })}`)
         } else {
-          analysis.value = null
+          slot.analysis = null
         }
       }
-      applyPlan(analysis.value)
-      logPlan()
+      applyPlan(workspaceId, slot.analysis)
+      logPlan(workspaceId)
     } catch (e) {
-      applyPlan(analysis.value)
-      appendLog(`[${stamp()}] ${errText(e)}`)
+      applyPlan(workspaceId, slot.analysis)
+      appendLog(workspaceId, `[${stamp()}] ${errText(e)}`)
       toast.error(errText(e))
     } finally {
-      loadingPlan.value = false
-      syncHint.value = ''
-      syncWaiting.value = false
-      planTask = null
+      slot.loadingPlan = false
+      slot.syncHint = ''
+      slot.planTask = null
+      touch(workspaceId)
     }
   })()
-  return planTask
+  return slot.planTask
 }
 
-async function runLoop(startIndex: number, analysisCycles: Set<string>): Promise<void> {
-  if (loop) return loop
-  loop = (async () => {
-    running.value = true
-    const session = active.value
-    let succeeded = session?.succeeded ?? 0
-    let failed = session?.failed ?? 0
-    try {
-      for (let i = startIndex; i < planned.value.length; i++) {
-        const p = planned.value[i]
-        const prev = session?.steps[p.rec_id]
-        if (prev?.outcome === 'success') continue
-        appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildProject', { name: p.project_name, num: i + 1, total: planned.value.length })}`)
-        try {
-          const job = await submitBuild(p.workspace_rec_id || props.workspace?.rec_id || '', p.rec_id)
-          let lastStep = ''
-          const done = await waitForJob(job.rec_id, 2000, (view) => {
-            const runningStep = (view.steps ?? []).find((s) => s.step_status === 'running')
-            const label = runningStep?.step_name || runningStep?.step_key || ''
-            if (label && label !== lastStep) {
-              lastStep = label
-              appendLog(`[${stamp()}] ${t('workspaces.autoBuildJobStep', { name: p.project_name, step: label })}`)
-            }
-          })
-          if (done.job_status === 'succeeded') {
-            succeeded++
-            appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildOk', { name: p.project_name, num: i + 1 })}`)
-            if (session) session.steps[p.rec_id] = { buildRecId: job.rec_id, outcome: 'success' }
-          } else {
-            failed++
-            appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildFailed', { name: p.project_name, msg: done.error_text || done.job_status })}`)
-            if (session) session.steps[p.rec_id] = { buildRecId: job.rec_id, outcome: 'failed', message: done.error_text }
-          }
-        } catch (e) {
-          failed++
-          appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildFailed', { name: p.project_name, msg: errText(e) })}`)
-          if (session) session.steps[p.rec_id] = { outcome: 'failed', message: errText(e) }
-        }
-        if (session) {
-          session.currentIndex = i + 1
-          session.succeeded = succeeded
-          session.failed = failed
-          saveAutoBuildSession(session)
-        }
-      }
-      if (failed > 0 && analysisCycles.size) {
-        const retry = planned.value.filter((p) => analysisCycles.has(p.rec_id) && session?.steps[p.rec_id]?.outcome === 'failed')
-        if (retry.length) {
-          appendLog(`[${stamp()}] ${t('workspaces.autoBuildCyclicRetry', { pass: 2, maxPasses: 2 })}`)
-          for (const p of retry) {
-            try {
-              const job = await submitBuild(p.workspace_rec_id || props.workspace?.rec_id || '', p.rec_id)
-              const done = await waitForJob(job.rec_id)
-              if (done.job_status === 'succeeded') {
-                failed--
-                succeeded++
-                appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildOk', { name: p.project_name, num: 0 })}`)
-              }
-            } catch (e) {
-              appendLog(`[${stamp()}] ${t('workspaces.autoReleaseBuildFailed', { name: p.project_name, msg: errText(e) })}`)
-            }
-          }
-        }
-      }
-      if (session) {
-        session.status = 'completed'
-        session.succeeded = succeeded
-        session.failed = failed
-        saveAutoBuildSession(session)
-      }
-      appendLog(`[${stamp()}] ${t('workspaces.autoBuildDone', { succeeded, failed })}`)
-      if (failed === 0) {
-        toast.success(t('workspaces.autoBuildSuccess', { count: succeeded }))
-        emit('success')
-      } else {
-        toast.warning(t('workspaces.autoBuildPartial', { succeeded, failed }))
-      }
-      emit('sessionChange')
-    } finally {
-      running.value = false
-      loop = null
+function stopPoll(id: string): void {
+  const slot = autoBuildBag(id)
+  if (slot.pollTimer) {
+    clearInterval(slot.pollTimer)
+    slot.pollTimer = null
+  }
+  touch(id)
+}
+
+async function pullLog(id: string, recId: string): Promise<void> {
+  if (!id || !recId) return
+  const view = await autoBuildLog(id, recId)
+  autoBuildBag(id).logText = view.content
+}
+
+async function pollOnce(id: string, showToast: boolean): Promise<boolean> {
+  if (!id) return true
+  const slot = autoBuildBag(id)
+  const st = await autoBuildStatus(id)
+  if (st.status === 'running') {
+    slot.running = true
+    slot.followRecId = st.build_rec_id || slot.followRecId
+    if (slot.followRecId) await pullLog(id, slot.followRecId)
+    touch(id)
+    return false
+  }
+  stopPoll(id)
+  slot.running = false
+  if (st.build_rec_id) await pullLog(id, st.build_rec_id)
+  else if (slot.followRecId) await pullLog(id, slot.followRecId)
+  touch(id)
+  void loadHistory(id)
+  if (st.status === 'completed') {
+    const succeeded = st.succeeded ?? 0
+    const failed = st.failed ?? 0
+    if (showToast) {
+      if (failed === 0) toast.success(t('workspaces.autoBuildSuccess', { count: succeeded }))
+      else toast.warning(t('workspaces.autoBuildPartial', { succeeded, failed }))
     }
-  })()
-  return loop
+    if (succeeded > 0) emit('success')
+  }
+  return true
+}
+
+function startPoll(id: string, showToast: boolean): void {
+  stopPoll(id)
+  void pollOnce(id, showToast)
+  const slot = autoBuildBag(id)
+  slot.pollTimer = setInterval(() => {
+    void pollOnce(id, showToast)
+  }, 2000)
+  touch(id)
+}
+
+async function loadHistory(id: string): Promise<void> {
+  if (!id) return
+  try {
+    autoBuildBag(id).history = await autoBuildHistory(id)
+  } catch {
+    autoBuildBag(id).history = []
+  }
+  touch(id)
+}
+
+function historyTone(status?: string): 'ok' | 'fail' | 'run' | 'warn' | 'muted' {
+  if (status === 'success') return 'ok'
+  if (status === 'failed') return 'fail'
+  if (status === 'partial') return 'warn'
+  if (status === 'running') return 'run'
+  return 'muted'
+}
+
+function historyTime(row: WorkspaceBuildRecord): string {
+  const value = row.started_at || row.finished_at
+  if (!value) return ''
+  const iso = value.includes('T') ? value : value.replace(' ', 'T')
+  const zoned = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(iso)
+  const d = new Date(zoned ? iso : `${iso}Z`)
+  if (Number.isNaN(d.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+async function loadHistoryLog(recId: string): Promise<void> {
+  const id = wsId.value
+  if (!id) return
+  const slot = autoBuildBag(id)
+  slot.selectedHistory = recId
+  try {
+    const view = await autoBuildLog(id, recId)
+    slot.logText = view.content
+    touch(id)
+  } catch (e) {
+    toast.error(errText(e))
+  }
 }
 
 async function onOpen(): Promise<void> {
-  if (running.value || loadingPlan.value || planTask) return
-  const id = props.workspace?.rec_id || ''
-  const saved = id ? loadAutoBuildSession(id) : null
-  if (saved?.status === 'running') {
-    logText.value = saved.logText
-    active.value = saved
-    scope.value = saved.scope
-    selectedRecIds.value = [...saved.selectedRecIds]
-    includeNonMaven.value = saved.includeNonMaven
-    running.value = true
-    await refreshBatch()
-    await loadProjects()
-    const boot = await fetchServerBootAt()
-    if (await isAutoBuildSessionStale(saved, boot)) {
-      running.value = false
-      active.value = null
-      clearAutoBuildSession(id)
-      toast.warning(t('workspaces.autoBuildStaleSession'))
-      if (!startBlocked.value) void refreshPlan(true)
-      emit('sessionChange')
-      return
-    }
-    planned.value = saved.planRecIds.map((rid) => projects.value.find((p) => p.rec_id === rid)).filter((p): p is Project => !!p)
-    appendLog(`[${stamp()}] ${t('workspaces.autoBuildResume')}`)
-    void runLoop(saved.currentIndex, analysis.value ? cyclicRecIds(analysis.value) : new Set())
+  const id = wsId.value
+  if (!id) return
+  const slot = autoBuildBag(id)
+  void refreshBatch()
+  if (slot.running || slot.pollTimer) {
+    touch(id)
+    if (slot.running && !slot.pollTimer) startPoll(id, false)
     return
   }
-  logText.value = ''
-  planned.value = []
-  warnings.value = []
+  slot.selectedHistory = ''
+  slot.logText = ''
+  touch(id)
   await refreshBatch()
-  await loadProjects()
-  active.value = null
+  await loadProjects(id)
+  await loadHistory(id)
+  const st = await autoBuildStatus(id)
+  if (st.status === 'running') {
+    slot.followRecId = st.build_rec_id || ''
+    startPoll(id, false)
+    return
+  }
   if (startBlocked.value) return
-  void refreshPlan(true)
+  void refreshPlan(id, true)
 }
 
 async function submit(): Promise<void> {
-  if (!props.workspace?.rec_id || !canSubmit.value) return
-  const header = [`[${stamp()}] ${t('workspaces.autoBuildStart')}`, t('workspaces.autoBuildPlanLine', { count: planned.value.length }), ...planned.value.map((p, i) => `  ${i + 1}. ${p.project_name}`)].join('\n')
-  const boot = await fetchServerBootAt()
-  active.value = createAutoBuildSession(props.workspace.rec_id, boot, {
-    scope: scope.value,
-    selectedRecIds: selectedRecIds.value,
-    includeNonMaven: includeNonMaven.value,
-    planRecIds: planned.value.map((p) => p.rec_id),
-    logText: header,
-  })
-  logText.value = header
-  saveAutoBuildSession(active.value)
-  emit('sessionChange')
-  await runLoop(0, analysis.value ? cyclicRecIds(analysis.value) : new Set())
+  const id = wsId.value
+  if (!id || !canSubmit.value) return
+  const slot = autoBuildBag(id)
+  try {
+    const started = await startAutoBuild({
+      workspace_rec_id: id,
+      scope: slot.scope,
+      project_rec_ids: slot.scope === 'selected' ? slot.selectedRecIds : undefined,
+      include_non_maven: slot.includeNonMaven,
+    })
+    slot.followRecId = started.build_rec_id
+    slot.running = true
+    slot.logText = `[${stamp()}] ${t('workspaces.autoBuildStart')}`
+    touch(id)
+    startPoll(id, true)
+  } catch (e) {
+    toast.error(errText(e))
+  }
 }
 
 watch(open, (v) => {
   if (v) void onOpen()
 })
-watch([scope, selectedRecIds, includeNonMaven], () => {
-  if (open.value && !running.value && !active.value) applyPlan(analysis.value)
+watch(wsId, (id, prev) => {
+  if (prev) setAutoBuildBusy(prev, isAutoBuildLive(prev))
+  if (id) setAutoBuildBusy(id, isAutoBuildLive(id))
+  if (open.value && id && id !== prev) void onOpen()
 })
-watch(
-  [running, loadingPlan, () => props.workspace?.rec_id],
-  ([run, load, id], prev) => {
-    const prevId = String(prev?.[2] ?? '')
-    if (prevId && prevId !== id) setAutoBuildBusy(prevId, false)
-    if (!id) return
-    setAutoBuildBusy(id, Boolean(run || load || hasRunningAutoBuildSession(id)))
-  },
-)
+watch([scope, selectedRecIds, includeNonMaven], () => {
+  const id = wsId.value
+  const slot = autoBuildBag(id)
+  if (open.value && id && !slot.running) applyPlan(id, slot.analysis)
+})
+onUnmounted(() => {
+  stopAutoBuildPolls()
+})
 </script>
 
 <template>
@@ -426,6 +464,28 @@ watch(
               </li>
             </ol>
             <p v-else class="hint">{{ planEmptyText }}</p>
+          </RsFieldset>
+          <RsFieldset
+            v-if="history.length"
+            :legend="t('workspaces.autoBuildSectionHist')"
+            :tooltip="t('workspaces.autoBuildSectionHistDesc')"
+            border-style="dashed"
+            title-tone="muted"
+            size="sm"
+          >
+            <ol class="history">
+              <li v-for="item in history" :key="item.rec_id">
+                <button
+                  type="button"
+                  class="history__row"
+                  :class="{ 'is-on': selectedHistory === item.rec_id }"
+                  @click="loadHistoryLog(item.rec_id)"
+                >
+                  <span class="history__no" :class="`is-${historyTone(item.status)}`">#{{ item.build_num }}</span>
+                  <span class="history__time">{{ historyTime(item) }}</span>
+                </button>
+              </li>
+            </ol>
           </RsFieldset>
         </div>
         <div class="log-col">
@@ -497,6 +557,35 @@ watch(
 }
 .hint--warn {
   color: #b45309;
+}
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.history__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.35rem 0.15rem;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.history__row.is-on {
+  font-weight: 650;
+}
+.history__no.is-ok { color: var(--rs-success, #15803d); }
+.history__no.is-fail { color: var(--rs-danger, #b91c1c); }
+.history__no.is-warn { color: var(--rs-warning, #b45309); }
+.history__no.is-run { color: var(--rs-info, #0369a1); }
+.history__time {
+  color: var(--shell-muted);
+  font-size: 0.78rem;
 }
 @media (max-width: 800px) {
   .auto-split {

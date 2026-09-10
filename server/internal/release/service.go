@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"auto-pack/server/internal/access"
+	"auto-pack/server/internal/batchlock"
 	"auto-pack/server/internal/env"
 	"auto-pack/server/internal/host/git"
 	"auto-pack/server/internal/iam"
+	"auto-pack/server/internal/job"
 	"auto-pack/server/internal/project"
 	"auto-pack/server/internal/release/notes"
 	"auto-pack/server/internal/release/order"
@@ -33,24 +35,26 @@ type Service struct {
 	projects   *project.Service
 	workspaces *workspace.Service
 	envs       *env.Service
+	jobs       *job.Service
+	gate       *batchlock.Gate
 	coord      *record.Coordinator
 	dataDir    string
 	wsRoot     string
 	depth      int
 	runCtx     context.Context
 	syncMu     sync.Mutex
-	syncing    map[string]struct{}
+	syncing    map[string]*syncBroadcast
 }
 
 // NewService constructs a release Service. runCtx is the process lifetime used by the batch goroutine.
-func NewService(runCtx context.Context, st *store.Store, guard *iam.Guard, projects *project.Service, workspaces *workspace.Service, envs *env.Service, dataDir, wsRoot string, depth int) *Service {
+func NewService(runCtx context.Context, st *store.Store, guard *iam.Guard, projects *project.Service, workspaces *workspace.Service, envs *env.Service, jobs *job.Service, gate *batchlock.Gate, dataDir, wsRoot string, depth int) *Service {
 	if runCtx == nil {
 		runCtx = context.Background()
 	}
 	return &Service{
-		st: st, guard: guard, projects: projects, workspaces: workspaces, envs: envs,
+		st: st, guard: guard, projects: projects, workspaces: workspaces, envs: envs, jobs: jobs, gate: gate,
 		coord: record.NewCoordinator(), dataDir: dataDir, wsRoot: wsRoot, depth: depth, runCtx: runCtx,
-		syncing: map[string]struct{}{},
+		syncing: map[string]*syncBroadcast{},
 	}
 }
 
@@ -79,6 +83,15 @@ func (s *Service) Start(ctx context.Context, actor iam.Actor, req StartRequest) 
 	if len(list) == 0 {
 		return StartResponse{}, ErrNoProjects
 	}
+	if err := s.gate.Try(body.WorkspaceRecID, batchlock.KindRelease); err != nil {
+		return StartResponse{}, err
+	}
+	started := false
+	defer func() {
+		if !started {
+			s.gate.Done(body.WorkspaceRecID)
+		}
+	}()
 	num, err := record.NextNum(ctx, s.st, body.WorkspaceRecID)
 	if err != nil {
 		return StartResponse{}, err
@@ -108,7 +121,8 @@ func (s *Service) Start(ctx context.Context, actor iam.Actor, req StartRequest) 
 	}
 	meta := record.Job{ReleaseRecID: recID, Tag: body.TagBranch, ReleaseBranch: body.ReleaseBranch, PostOptions: body.PostOptions}
 	if err := s.coord.Start(s.runCtx, body.WorkspaceRecID, ws.WorkspaceName, len(list), meta, func(runCtx context.Context, job *record.Job) {
-		s.runBatch(runCtx, ws, list, body, job, logPath)
+		defer s.gate.Done(body.WorkspaceRecID)
+		s.runBatch(runCtx, actor, ws, list, body, job, logPath)
 	}); err != nil {
 		_ = record.Finish(context.Background(), s.st, recID, RecordFailed, err.Error(), 0, 0, 0)
 		if errors.Is(err, ErrReleaseInProgress) {
@@ -116,6 +130,7 @@ func (s *Service) Start(ctx context.Context, actor iam.Actor, req StartRequest) 
 		}
 		return StartResponse{}, err
 	}
+	started = true
 	return StartResponse{
 		Status: JobStatusRunning, ReleaseRecID: recID, WorkspaceRecID: body.WorkspaceRecID,
 		WorkspaceName: ws.WorkspaceName, ReleaseBranch: body.ReleaseBranch, Tag: body.TagBranch,
@@ -161,7 +176,7 @@ func normalizeStart(req StartRequest) (StartRequest, error) {
 	return req, nil
 }
 
-func (s *Service) runBatch(ctx context.Context, ws workspace.Workspace, list []project.Project, body StartRequest, job *record.Job, logPath string) {
+func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Workspace, list []project.Project, body StartRequest, job *record.Job, logPath string) {
 	allowRepeat := true
 	if body.AllowRepeat != nil {
 		allowRepeat = *body.AllowRepeat
@@ -184,10 +199,10 @@ func (s *Service) runBatch(ctx context.Context, ws workspace.Workspace, list []p
 			out := Result{ProjectName: prj.ProjectName, Status: record.ResultFailed, Message: err.Error()}
 			failed++
 			results = append(results, out)
-			s.coord.AppendResult(out, released, skipped, failed)
+			s.coord.AppendResult(job, out, released, skipped, failed)
 			break
 		}
-		s.coord.SetProgress(prj.ProjectName, len(results))
+		s.coord.SetProgress(job, prj.ProjectName, len(results))
 		s.writeLog(logPath, record.FormatBatchReleaseLog(s.logParams(body, results, prj.ProjectName, false, released, skipped, failed)))
 		work := s.workDir(ws, prj)
 		out := releaser.Run(ctx, prj, Request{
@@ -205,12 +220,13 @@ func (s *Service) runBatch(ctx context.Context, ws workspace.Workspace, list []p
 			failed++
 		}
 		results = append(results, out)
-		s.coord.AppendResult(out, released, skipped, failed)
+		s.coord.AppendResult(job, out, released, skipped, failed)
 	}
-	s.coord.FinishResult(released, skipped, failed, results)
+	s.coord.FinishResult(job, released, skipped, failed, results)
+	s.writeLog(logPath, record.FormatBatchReleaseLog(s.logParams(body, results, "", true, released, skipped, failed)))
+	s.runPost(ctx, actor, ws, list, body, job, logPath, results, released)
 	status := record.ResolveStatus(released, failed)
 	summary := fmt.Sprintf("released %d, skipped %d, failed %d", released, skipped, failed)
-	s.writeLog(logPath, record.FormatBatchReleaseLog(s.logParams(body, results, "", true, released, skipped, failed)))
 	if err := record.Finish(context.Background(), s.st, job.ReleaseRecID, status, summary, released, skipped, failed); err != nil {
 		log.Printf("release finish %s: %v", job.ReleaseRecID, err)
 	}
@@ -307,7 +323,7 @@ func (s *Service) SavePostOptions(ctx context.Context, actor iam.Actor, workspac
 		}
 		recID = rec.RecID
 	}
-	if recID == "" || st.Foreign {
+	if recID == "" {
 		return "", ErrNoActive
 	}
 	raw, err := MarshalPostOptions(&opts)
@@ -317,7 +333,7 @@ func (s *Service) SavePostOptions(ctx context.Context, actor iam.Actor, workspac
 	if err := record.UpdatePostOptions(ctx, s.st, recID, raw); err != nil {
 		return "", err
 	}
-	s.coord.SetPostOptions(&opts)
+	s.coord.SetPostOptions(workspaceID, &opts)
 	return recID, nil
 }
 
@@ -369,28 +385,38 @@ func (s *Service) SyncSources(ctx context.Context, actor iam.Actor, workspaceID 
 }
 
 // SyncSourcesProgress 与 SyncSources 相同，并在每个工程开始/结束时回调，供 HTTP 流式日志。
+// 同一空间已有预同步时不报冲突，而是回放已有事件并跟到结束。
 func (s *Service) SyncSourcesProgress(ctx context.Context, actor iam.Actor, workspaceID string, progress SyncListener) (SyncResult, error) {
 	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionJobSubmit); err != nil {
 		return SyncResult{}, err
 	}
-	if err := s.beginSync(workspaceID); err != nil {
+	run, err := s.acquireSync(workspaceID)
+	if errors.Is(err, ErrSyncInProgress) {
+		return run.follow(ctx, progress)
+	}
+	if err != nil {
 		return SyncResult{}, err
 	}
 	defer s.endSync(workspaceID)
+	var out SyncResult
+	var runErr error
+	defer func() { run.finish(out, runErr) }()
 	ws, err := s.workspaces.GetRaw(ctx, workspaceID)
 	if err != nil {
+		runErr = err
 		return SyncResult{}, err
 	}
 	list, err := s.projects.ListRaw(ctx, workspaceID)
 	if err != nil {
+		runErr = err
 		return SyncResult{}, err
 	}
 	emit := func(ev SyncEvent) {
+		run.emit(ev)
 		if progress != nil {
 			progress(ev)
 		}
 	}
-	var out SyncResult
 	total := len(list)
 	emit(SyncEvent{Event: "start", Total: total})
 	for i, prj := range list {
@@ -524,17 +550,23 @@ func (s *Service) writeLog(path, content string) {
 }
 
 func (s *Service) beginSync(workspaceID string) error {
+	_, err := s.acquireSync(workspaceID)
+	return err
+}
+
+func (s *Service) acquireSync(workspaceID string) (*syncBroadcast, error) {
 	id := strings.TrimSpace(workspaceID)
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 	if s.syncing == nil {
-		s.syncing = map[string]struct{}{}
+		s.syncing = map[string]*syncBroadcast{}
 	}
-	if _, ok := s.syncing[id]; ok {
-		return ErrSyncInProgress
+	if run, ok := s.syncing[id]; ok {
+		return run, ErrSyncInProgress
 	}
-	s.syncing[id] = struct{}{}
-	return nil
+	run := newSyncBroadcast()
+	s.syncing[id] = run
+	return run, nil
 }
 
 func (s *Service) endSync(workspaceID string) {

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"auto-pack/server/internal/audit"
+	"auto-pack/server/internal/batchlock"
 	"auto-pack/server/internal/release"
 	"auto-pack/server/internal/web/httpx"
 	"auto-pack/server/internal/web/middleware"
@@ -217,7 +218,7 @@ func (c *Controller) writeErr(w http.ResponseWriter, err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, release.ErrReleaseInProgress) || errors.Is(err, release.ErrSyncInProgress) || errors.Is(err, release.ErrNoActive) {
+	if errors.Is(err, release.ErrReleaseInProgress) || errors.Is(err, release.ErrSyncInProgress) || errors.Is(err, release.ErrNoActive) || errors.Is(err, batchlock.ErrBusy) {
 		httpx.WriteError(w, http.StatusConflict, err.Error())
 		return true
 	}

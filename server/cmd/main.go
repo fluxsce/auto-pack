@@ -11,6 +11,8 @@ import (
 
 	"auto-pack/server/internal/access"
 	"auto-pack/server/internal/audit"
+	"auto-pack/server/internal/batchlock"
+	wsbuild "auto-pack/server/internal/build"
 	"auto-pack/server/internal/config"
 	"auto-pack/server/internal/crypt"
 	"auto-pack/server/internal/env"
@@ -77,8 +79,13 @@ func main() {
 	eng.SetSettings(appSettings)
 	jobs := job.NewService(st, guard, eng)
 	eng.SetSubmit(jobs.SubmitSystem)
-	releases := release.NewService(ctx, st, guard, projects, workspaces, envs, cfg.DataDir(), cfg.WorkspaceRoot, cfg.GitCloneDepth)
+	gate := batchlock.New()
+	releases := release.NewService(ctx, st, guard, projects, workspaces, envs, jobs, gate, cfg.DataDir(), cfg.WorkspaceRoot, cfg.GitCloneDepth)
 	if err := releases.RecoverInterrupted(ctx); err != nil {
+		log.Fatal(err)
+	}
+	builds := wsbuild.NewService(ctx, st, guard, projects, workspaces, jobs, releases, gate, cfg.DataDir(), cfg.WorkspaceRoot)
+	if err := builds.RecoverInterrupted(ctx); err != nil {
 		log.Fatal(err)
 	}
 	if err := eng.Start(ctx); err != nil {
@@ -99,6 +106,7 @@ func main() {
 		Jobs:       jobs,
 		Audit:      aud,
 		Release:    releases,
+		Build:      builds,
 		Frontend:   cfg.FrontendPath,
 		StartedAt:  time.Now(),
 	})

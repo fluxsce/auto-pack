@@ -3,6 +3,7 @@ package router
 import (
 	_ "auto-pack/server/internal/web/audit"
 	_ "auto-pack/server/internal/web/auth/route"
+	_ "auto-pack/server/internal/web/build"
 	_ "auto-pack/server/internal/web/envs"
 	_ "auto-pack/server/internal/web/health"
 	_ "auto-pack/server/internal/web/jobs"

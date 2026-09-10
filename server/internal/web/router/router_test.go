@@ -9,7 +9,7 @@ import (
 func TestRegisteredModules(t *testing.T) {
 	_ = Handler(mod.Deps{})
 	got := mod.Names()
-	want := []string{"audit", "auth", "envs", "health", "jobs", "projects", "release", "settings", "users", "workspaces"}
+	want := []string{"audit", "auth", "build", "envs", "health", "jobs", "projects", "release", "settings", "users", "workspaces"}
 	if len(got) != len(want) {
 		t.Fatalf("modules=%v", got)
 	}
