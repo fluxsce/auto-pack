@@ -36,6 +36,7 @@ const {
   edit,
   clone,
   remove,
+  submitJob,
   menuItems,
   onMenu,
   autoBuildOpen,
@@ -150,6 +151,9 @@ function repoCell(row: Project) {
           <span v-else class="ws-muted">{{ t('common.dash') }}</span>
         </template>
         <template #actions="{ row }">
+          <RsButton size="sm" variant="text" tone="info" :loading="busyId === row.rec_id" @click="submitJob(row)">
+            {{ t('workspaces.buildNow') }}
+          </RsButton>
           <RsButton size="sm" variant="text" tone="primary" @click="edit(row)">{{ t('common.configure') }}</RsButton>
           <RsButton size="sm" variant="text" tone="success" :loading="busyId === row.rec_id" @click="clone(row)">
             {{ t('workspaces.cloneProject') }}

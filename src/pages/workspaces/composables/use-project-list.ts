@@ -79,7 +79,7 @@ export function useProjectList() {
       sorter: (left, right) => stampMs(left.last_job_at || left.updated_at) - stampMs(right.last_job_at || right.updated_at),
     },
     { key: 'cron_expr', title: t('workspaces.cron'), width: 130, sortable: true },
-    { key: 'actions', title: t('common.actions'), width: 220, align: 'right' },
+    { key: 'actions', title: t('common.actions'), width: 300, align: 'right' },
   ])
 
   async function load(): Promise<void> {
