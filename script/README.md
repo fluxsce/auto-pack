@@ -41,18 +41,20 @@ bash script/build/linux.sh --os windows --arch amd64
 
 也可用 `pnpm package:windows` / `pnpm package:linux`。
 
-GitHub Actions：推 `master` / `main` / `v*` 或手动跑 [`.github/workflows/pack.yml`](../.github/workflows/pack.yml)，Linux 与 Windows 各出一份发行包。
+GitHub Actions：只在发版时跑。推 `v*` 标签或手动跑 [`.github/workflows/pack.yml`](../.github/workflows/pack.yml)，Linux 与 Windows 各出一份发行包。
 
 ## 发行目录
 
 ```text
-build/dist/auto-pack-{version}-{os}-{arch}/
-  bin/autopack[.exe]     控制面进程
-  web/                   控制台静态页（/autopack/）
-  configs/app.yaml.example
-  script/db/{sqlite,mysql,postgres}/
-  start / stop / restart
-  README.txt
+build/dist/auto-pack-{version}-{os}-{arch}.tar.gz | .zip   # 下载文件名带版本
+  auto-pack/                                              # 解压后不带版本
+    bin/autopack[.exe]
+    web/
+    configs/app.yaml.example
+    script/db/{sqlite,mysql,postgres}/
+    VERSION
+    start / stop / restart
+    README.txt
 ```
 
 运行时目录（启动时创建，不打进压缩包）：`data/`（库、工作空间、作业日志）、`logs/`（进程日志）、`run/`（pid）。
@@ -60,14 +62,16 @@ build/dist/auto-pack-{version}-{os}-{arch}/
 不要把源码、`node_modules`、本机 DSN / 密钥打进包。首次把 `configs/app.yaml.example` 复制为 `app.yaml` 再改密钥。
 
 ```powershell
-cd build/dist/auto-pack-2.0.0-windows-amd64
+# 解压 auto-pack-2.0.1-windows-amd64.zip 后
+cd auto-pack
 .\start.bat
 .\restart.bat
 .\stop.bat
 ```
 
 ```bash
-cd build/dist/auto-pack-2.0.0-linux-amd64
+# 解压 auto-pack-2.0.1-linux-amd64.tar.gz 后
+cd auto-pack
 chmod +x start.sh stop.sh restart.sh bin/autopack
 ./start.sh
 ./restart.sh

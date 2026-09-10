@@ -185,11 +185,11 @@ function Copy-Tree([string]$Src, [string]$Dst) {
     Copy-Item -Path (Join-Path $Src '*') -Destination $Dst -Recurse -Force
 }
 
-function New-Archive([string]$DistDir, [string]$FolderName, [string]$TargetOS) {
+function New-Archive([string]$DistDir, [string]$FolderName, [string]$ArchiveName, [string]$TargetOS) {
     $src = Join-Path $DistDir $FolderName
     $tar = Get-Command tar -ErrorAction SilentlyContinue
     if ($TargetOS -eq 'windows') {
-        $zip = Join-Path $DistDir "$FolderName.zip"
+        $zip = Join-Path $DistDir "$ArchiveName.zip"
         if (Test-Path -LiteralPath $zip) {
             Remove-Item -LiteralPath $zip -Force
         }
@@ -209,7 +209,7 @@ function New-Archive([string]$DistDir, [string]$FolderName, [string]$TargetOS) {
         Write-Host "archive $zip"
         return
     }
-    $tgz = Join-Path $DistDir "$FolderName.tar.gz"
+    $tgz = Join-Path $DistDir "$ArchiveName.tar.gz"
     if (Test-Path -LiteralPath $tgz) {
         Remove-Item -LiteralPath $tgz -Force
     }
@@ -232,11 +232,13 @@ function New-Archive([string]$DistDir, [string]$FolderName, [string]$TargetOS) {
 $Repo = Get-RepoRoot
 $Version = Read-AppVersion $Repo
 Sync-AppVersion $Repo
-$FolderName = "auto-pack-$Version-$OS-$Arch"
+# 压缩包文件名带版本；解压后目录固定 auto-pack，版本只写在 VERSION 文件里。
+$StageName = 'auto-pack'
+$ArchiveName = "auto-pack-$Version-$OS-$Arch"
 $DistDir = Join-Path $Repo 'build\dist'
-$Pkg = Join-Path $DistDir $FolderName
+$Pkg = Join-Path $DistDir $StageName
 
-Write-Step "package $FolderName"
+Write-Step "package $ArchiveName"
 if (Test-Path -LiteralPath $Pkg) {
     Remove-Item -LiteralPath $Pkg -Recurse -Force
 }
@@ -269,7 +271,7 @@ Copy-Item -LiteralPath (Join-Path $Repo 'script\package\README.txt') -Destinatio
 [System.IO.File]::WriteAllText((Join-Path $Pkg 'VERSION'), "$Version`n", $Utf8)
 
 if (-not $SkipArchive) {
-    New-Archive $DistDir $FolderName $OS
+    New-Archive $DistDir $StageName $ArchiveName $OS
 }
 
 Write-Host "ready $Pkg"

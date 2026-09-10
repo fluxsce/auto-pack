@@ -77,7 +77,7 @@ pnpm package:linux
 
 到发行目录后：`start.bat` / `./start.sh`。浏览器 http://127.0.0.1:8080/autopack/
 
-GitHub Actions（[`.github/workflows/pack.yml`](.github/workflows/pack.yml)）在 `ubuntu-22.04` / `windows-2022` 各打一份 amd64 包。私人仓库只留最近一次构建 Artifact（保留 1 天并删旧包）。PR 只验证打包，不上传。推送 `v*` 标签发 Release；手动触发可指定 `niuma-ui` 版本（默认 `latest`）。
+GitHub Actions（[`.github/workflows/pack.yml`](.github/workflows/pack.yml)）只在版本发布时打包，不跟每次提交。推送 `v*` 标签（须与 `package.json` 版本一致）会打 Linux / Windows amd64 包并上传 Release；也可在 Actions 里手动 Run。私人仓库只留最近一次构建 Artifact。
 
 ## 权限（2.0）
 

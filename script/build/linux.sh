@@ -91,11 +91,13 @@ else
   echo "node not found; AppVersion will come from ldflags" >&2
 fi
 
-FOLDER="auto-pack-${VERSION}-${OS}-${ARCH}"
+# 压缩包文件名带版本；解压后目录固定 auto-pack，版本只写在 VERSION 文件里。
+STAGE="auto-pack"
+ARCHIVE="auto-pack-${VERSION}-${OS}-${ARCH}"
 DIST="$ROOT/build/dist"
-PKG="$DIST/$FOLDER"
+PKG="$DIST/$STAGE"
 
-step "package $FOLDER"
+step "package $ARCHIVE"
 rm -rf "$PKG"
 mkdir -p "$PKG"
 
@@ -158,19 +160,19 @@ printf '%s\n' "$VERSION" >"$PKG/VERSION"
 if [[ "$SKIP_ARCHIVE" -eq 0 ]]; then
   mkdir -p "$DIST"
   if [[ "$OS" == "windows" ]]; then
-    archive="$DIST/${FOLDER}.zip"
+    archive="$DIST/${ARCHIVE}.zip"
     rm -f "$archive"
     if command -v zip >/dev/null 2>&1; then
-      (cd "$DIST" && zip -qr "$archive" "$FOLDER")
+      (cd "$DIST" && zip -qr "$archive" "$STAGE")
     else
-      tar -C "$DIST" -czf "${DIST}/${FOLDER}.tar.gz" "$FOLDER"
-      archive="${DIST}/${FOLDER}.tar.gz"
+      tar -C "$DIST" -czf "${DIST}/${ARCHIVE}.tar.gz" "$STAGE"
+      archive="${DIST}/${ARCHIVE}.tar.gz"
     fi
     echo "archive $archive"
   else
-    archive="$DIST/${FOLDER}.tar.gz"
+    archive="$DIST/${ARCHIVE}.tar.gz"
     rm -f "$archive"
-    tar -C "$DIST" -czf "$archive" "$FOLDER"
+    tar -C "$DIST" -czf "$archive" "$STAGE"
     echo "archive $archive"
   fi
 fi

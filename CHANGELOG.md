@@ -8,9 +8,13 @@
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-09-10
+
+
 ### 新增
 
-- GitHub Actions `Pack`：Linux / Windows 各打 amd64 发行包；推送 `v*` 标签发布到 GitHub Release。私人仓库只留最近一次构建产物。
+- GitHub Actions `Pack`：只在版本发布时打 Linux / Windows amd64 包（`v*` 标签或手动触发），不跟每次提交。私人仓库只留最近一次构建产物。
+- 发行压缩包文件名带版本；解压后目录固定为 `auto-pack/`，版本只写在包内 `VERSION`。
 
 ## [2.0.1] - 2026-09-10
 
