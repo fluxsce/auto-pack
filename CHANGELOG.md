@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- GitHub Actions `Pack`：Linux / Windows 各打 amd64 发行包；推送 `v*` 标签发布到 GitHub Release。私人仓库只留最近一次构建产物。
+
 ## [2.0.1] - 2026-09-10
 
 ### 新增

@@ -41,6 +41,8 @@ bash script/build/linux.sh --os windows --arch amd64
 
 也可用 `pnpm package:windows` / `pnpm package:linux`。
 
+GitHub Actions：推 `master` / `main` / `v*` 或手动跑 [`.github/workflows/pack.yml`](../.github/workflows/pack.yml)，Linux 与 Windows 各出一份发行包。
+
 ## 发行目录
 
 ```text

@@ -1,0 +1,191 @@
+# auto-pack 发行打包。Linux / Windows 各跑本机脚本。
+# 私人仓库只留最近一次构建 Artifact（保留 1 天，成功后删掉旧包），避免占满 Actions 存储。
+# niuma-ui 从 npm 拉取，不 checkout 兄弟仓。
+name: Pack
+
+on:
+  push:
+    branches: [master, main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      niuma_ui_version:
+        description: npm 上的 niuma-ui 版本（如 latest 或 1.3.1）
+        type: string
+        default: 'latest'
+
+concurrency:
+  group: pack-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  CI: 'true'
+
+jobs:
+  pack:
+    name: pack (${{ matrix.target }}-amd64)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux
+          - runner: windows-2022
+            target: windows
+    steps:
+      - name: Resolve version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "${{ github.event.inputs.niuma_ui_version }}" ]; then
+            echo "niuma_ui_version=${{ github.event.inputs.niuma_ui_version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "niuma_ui_version=${{ vars.NIUMA_UI_VERSION || 'latest' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Install JS dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          UI="${{ steps.meta.outputs.niuma_ui_version }}"
+          pnpm pkg set "dependencies.@niuma/ui=npm:niuma-ui@${UI}"
+          pnpm install --no-frozen-lockfile
+
+      - name: Verify tag matches package.json
+        if: steps.meta.outputs.version != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.version }}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag version ($TAG) != package.json version ($PKG)" >&2
+            exit 1
+          fi
+
+      - name: Pack Linux
+        if: matrix.target == 'linux'
+        run: bash script/build/linux.sh
+
+      - name: Pack Windows
+        if: matrix.target == 'windows'
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File script/build/windows.ps1
+
+      - name: Upload pack artifacts
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-pack-${{ matrix.target }}-amd64
+          path: |
+            build/dist/*.tar.gz
+            build/dist/*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  prune-artifacts:
+    name: Keep latest artifacts
+    needs: pack
+    if: ${{ success() && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Delete older auto-pack artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const keepRun = context.runId
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {
+              owner,
+              repo,
+              per_page: 100,
+            })
+            for (const artifact of artifacts) {
+              if (!artifact.name.startsWith('auto-pack-')) continue
+              const runId = artifact.workflow_run && artifact.workflow_run.id
+              if (runId === keepRun) continue
+              core.info(`delete ${artifact.name} #${artifact.id} (run ${runId})`)
+              await github.rest.actions.deleteArtifact({
+                owner,
+                repo,
+                artifact_id: artifact.id,
+              })
+            }
+
+  publish:
+    name: GitHub Release
+    needs: pack
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Download pack artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: auto-pack-*-amd64
+          merge-multiple: true
+          path: release-files
+
+      - name: Checksums
+        working-directory: release-files
+        run: |
+          set -euo pipefail
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+          ls -l
+          cat SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: auto-pack ${{ github.ref_name }}
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            release-files/*.tar.gz
+            release-files/*.zip
+            release-files/SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
