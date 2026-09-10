@@ -1,10 +1,32 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func TestAppVersionMatchesPackageJSON(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("caller")
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		t.Fatal(err)
+	}
+	if AppVersion != pkg.Version {
+		t.Fatalf("AppVersion=%s package.json=%s; run node script/sync-version.mjs", AppVersion, pkg.Version)
+	}
+}
 
 func TestWorkspaceRootDefault(t *testing.T) {
 	dir := t.TempDir()

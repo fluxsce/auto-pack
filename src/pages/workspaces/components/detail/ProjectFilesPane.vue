@@ -1,9 +1,23 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsButton, RsDialog, RsEmpty, RsIcon, RsTable, rsConfirm, useRsToast, type RsContextMenuItem, type RsTableColumn } from '@/ui'
+import {
+  RsAlert,
+  RsButton,
+  RsCodeBlock,
+  RsDialog,
+  RsEmpty,
+  RsIcon,
+  RsTable,
+  rsConfirm,
+  useRsToast,
+  type RsContextMenuItem,
+  type RsTableColumn,
+} from '@/ui'
 import {
   clearProjectFiles,
+  deleteProjectFile,
+  downloadProjectFile,
   errText,
   listProjectFiles,
   readProjectFile,
@@ -12,7 +26,7 @@ import {
   type ProjectTree,
 } from '../../api'
 import { formatStamp } from '../../composables/use-project-list'
-import { fileExt, formatBytes, keepDirsFirst } from '../../lib/project-files'
+import { fileBaseName, fileExt, formatBytes, keepDirsFirst, previewLang } from '../../lib/project-files'
 import type { ProjectRecipe } from '../../lib/project-defaults'
 import RemoteDialog from '../remote/Dialog.vue'
 
@@ -28,9 +42,15 @@ const { t } = useI18n()
 const toast = useRsToast()
 const tree = ref<ProjectTree | null>(null)
 const dir = ref('')
-const blob = ref<ProjectFileBlob | null>(null)
+const preview = ref<{
+  name: string
+  path: string
+  blob: ProjectFileBlob | null
+  binary: boolean
+} | null>(null)
 const loading = ref(false)
 const clearing = ref(false)
+const busyKey = ref('')
 const selectedKeys = ref<string[]>([])
 const pushOpen = ref(false)
 
@@ -87,7 +107,18 @@ const columns = computed<RsTableColumn<ProjectFileEntry>[]>(() => [
     minWidth: 180,
     sortable: true,
   },
+  {
+    key: 'actions',
+    title: t('common.actions'),
+    width: 148,
+    minWidth: 148,
+    align: 'right',
+    fixed: 'right',
+    ellipsis: false,
+  },
 ])
+
+const previewTitle = computed(() => preview.value?.name || t('workspaces.detail.preview'))
 
 function kindLabel(row: ProjectFileEntry): string {
   if (row.is_dir) return t('workspaces.detail.folder')
@@ -99,15 +130,17 @@ function menuItems(row: ProjectFileEntry | null): RsContextMenuItem[] {
   const target = row ?? selectedRows.value[0]
   if (!target) return []
   return [
-    { key: 'open', label: t('workspaces.detail.openEntry'), icon: target.is_dir ? 'folder' : 'file' },
+    { key: 'open', label: target.is_dir ? t('workspaces.detail.openEntry') : t('workspaces.detail.preview'), icon: target.is_dir ? 'folder' : 'file' },
+    { key: 'download', label: t('common.download'), icon: 'download' },
     { key: 'push', label: t('workspaces.detail.pushRemote'), icon: 'upload' },
+    { key: 'delete', label: t('common.delete'), icon: 'trash-2', danger: true },
   ]
 }
 
 async function load(path = dir.value): Promise<void> {
   if (!props.projectId) return
   loading.value = true
-  blob.value = null
+  preview.value = null
   selectedKeys.value = []
   try {
     tree.value = await listProjectFiles(props.projectId, path)
@@ -125,9 +158,50 @@ async function open(entry: ProjectFileEntry): Promise<void> {
     return
   }
   try {
-    blob.value = await readProjectFile(props.projectId, entry.path)
+    const blob = await readProjectFile(props.projectId, entry.path)
+    preview.value = { name: entry.name, path: entry.path, blob, binary: false }
+  } catch (e) {
+    const msg = errText(e)
+    if (msg.includes('not a text file')) {
+      preview.value = { name: entry.name, path: entry.path, blob: null, binary: true }
+      return
+    }
+    toast.error(msg)
+  }
+}
+
+async function download(entry: ProjectFileEntry): Promise<void> {
+  const name = entry.is_dir ? `${entry.name}.zip` : entry.name
+  busyKey.value = entry.path
+  try {
+    await downloadProjectFile(props.projectId, entry.path, name)
   } catch (e) {
     toast.error(errText(e))
+  } finally {
+    busyKey.value = ''
+  }
+}
+
+async function remove(entry: ProjectFileEntry): Promise<void> {
+  const ok = await rsConfirm.danger({
+    title: t('common.delete'),
+    description: t('workspaces.detail.deleteEntryConfirm', { name: entry.name }),
+    confirmText: t('common.delete'),
+  })
+  if (!ok) return
+  busyKey.value = entry.path
+  try {
+    await deleteProjectFile(props.projectId, entry.path)
+    if (preview.value?.path === entry.path || preview.value?.path.startsWith(`${entry.path}/`)) {
+      preview.value = null
+    }
+    selectedKeys.value = selectedKeys.value.filter((key) => key !== entry.path && !key.startsWith(`${entry.path}/`))
+    toast.success(t('workspaces.detail.deleteEntryDone', { name: entry.name }))
+    await load(dir.value)
+  } catch (e) {
+    toast.error(errText(e))
+  } finally {
+    busyKey.value = ''
   }
 }
 
@@ -166,8 +240,17 @@ function menuTargets(row: ProjectFileEntry | null, selected: ProjectFileEntry[])
 }
 
 function onMenu(key: string, row: ProjectFileEntry | null, selected: ProjectFileEntry[]): void {
-  if (key === 'open' && row) {
-    void open(row)
+  const target = row ?? selected[0]
+  if (key === 'open' && target) {
+    void open(target)
+    return
+  }
+  if (key === 'download' && target) {
+    void download(target)
+    return
+  }
+  if (key === 'delete' && target) {
+    void remove(target)
     return
   }
   if (key === 'push') {
@@ -176,7 +259,16 @@ function onMenu(key: string, row: ProjectFileEntry | null, selected: ProjectFile
 }
 
 function onPreviewOpen(next: boolean): void {
-  if (!next) blob.value = null
+  if (!next) preview.value = null
+}
+
+async function downloadPreview(): Promise<void> {
+  if (!preview.value) return
+  await download({
+    name: preview.value.name,
+    path: preview.value.path,
+    is_dir: false,
+  })
 }
 
 watch(() => props.projectId, () => {
@@ -227,6 +319,7 @@ watch(() => props.projectId, () => {
         <RsTable
           fill
           selectable
+          cell-focus="none"
           :columns="columns"
           :data="rows"
           :loading="loading"
@@ -246,6 +339,28 @@ watch(() => props.projectId, () => {
           <template #kind="{ row }">{{ kindLabel(row) }}</template>
           <template #size="{ row }">{{ row.is_dir ? t('common.dash') : formatBytes(row.size) }}</template>
           <template #mod_time="{ row }">{{ formatStamp(row.mod_time, t('common.dash')) }}</template>
+          <template #actions="{ row }">
+            <div class="row-ops">
+              <RsButton
+                size="sm"
+                variant="text"
+                tone="primary"
+                :loading="busyKey === row.path"
+                @click.stop="download(row)"
+              >
+                {{ t('common.download') }}
+              </RsButton>
+              <RsButton
+                size="sm"
+                variant="text"
+                tone="danger"
+                :disabled="busyKey === row.path"
+                @click.stop="remove(row)"
+              >
+                {{ t('common.delete') }}
+              </RsButton>
+            </div>
+          </template>
         </RsTable>
       </div>
       <RsEmpty
@@ -254,20 +369,38 @@ watch(() => props.projectId, () => {
       />
     </div>
     <RsDialog
-      :open="!!blob"
+      class="project-files-preview"
+      :open="!!preview"
       layout="window"
-      width="56rem"
-      height="70%"
+      width="64rem"
+      height="75%"
       draggable
       resizable
       fullscreenable
       teleport-to="body"
-      :title="t('workspaces.detail.preview')"
-      :description="blob?.path"
+      :title="previewTitle"
+      :style="{
+        '--rs-dialog-body-padding-y': '0px',
+        '--rs-dialog-body-padding-x': '0px',
+      }"
       @update:open="onPreviewOpen"
     >
       <template #body>
-        <pre class="blob">{{ blob?.content }}</pre>
+        <div v-if="preview" class="preview-body" :class="{ 'preview-body--empty': preview.binary }">
+          <RsAlert v-if="preview.blob?.truncated" type="warning" class="preview-alert">{{ t('workspaces.detail.previewTruncated') }}</RsAlert>
+          <RsEmpty v-if="preview.binary" :description="t('workspaces.detail.binaryFile')">
+            <RsButton size="sm" variant="default" tone="primary" :loading="busyKey === preview.path" @click="downloadPreview">
+              {{ t('common.download') }}
+            </RsButton>
+          </RsEmpty>
+          <RsCodeBlock
+            v-else-if="preview.blob"
+            class="preview-code"
+            :code="preview.blob.content"
+            :lang="previewLang(preview.name || fileBaseName(preview.path))"
+            :download-filename="preview.name"
+          />
+        </div>
       </template>
     </RsDialog>
     <RemoteDialog
@@ -346,15 +479,61 @@ watch(() => props.projectId, () => {
   cursor: pointer;
 }
 
-.blob {
+.row-ops {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 0.1rem;
+  white-space: nowrap;
+}
+
+.explorer :deep(.rs-table__td[data-col-key='actions']),
+.explorer :deep(.rs-table__td[data-col-key='actions'] .rs-table__cell-body) {
+  overflow: visible;
+}
+
+.preview-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.preview-body--empty {
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-alert {
+  flex-shrink: 0;
+  margin: 0.7rem 0.8rem 0;
+}
+
+.preview-code {
   flex: 1;
   min-height: 0;
-  margin: 0;
-  overflow: auto;
-  color: var(--shell-title);
-  font-family: var(--rs-font-mono);
-  font-size: 0.78rem;
-  line-height: 1.55;
-  white-space: pre-wrap;
+  display: flex;
+  flex-direction: column;
+  border: 0;
+  border-radius: 0;
+}
+
+.preview-code :deep(.rs-code-block__editor) {
+  flex: 1;
+  min-height: 0;
+}
+
+.preview-code :deep(.cm-editor) {
+  height: 100%;
+  max-height: none;
+}
+</style>
+<style>
+.project-files-preview.rs-dialog__content .rs-dialog__body {
+  padding: 0;
+  overflow: hidden;
 }
 </style>

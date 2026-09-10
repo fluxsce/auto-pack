@@ -4,9 +4,11 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-控制台版本由 `server/internal/config.AppVersion` 提供，发布时用 `-ldflags -X auto-pack/server/internal/config.AppVersion=` 注入，并与根 `package.json` 对齐。
+控制台版本以根目录 `package.json` 为准。`node script/sync-version.mjs` 写入 `server/internal/config.AppVersion`；`pnpm dev` / `build` / `test:server` / 打包前会自动跑。发行包构建仍用 `-ldflags` 再注入一次。
 
 ## [Unreleased]
+
+## [2.0.1] - 2026-09-10
 
 ### 新增
 
@@ -14,6 +16,7 @@
 
 ### 变更
 
+- 控制台 SemVer 只改 `package.json`（和本 changelog）：`script/sync-version.mjs` 同步到 `AppVersion`，开发与打包都会跑。
 - 自动发版运行日志：顶部状态不再把「跳过 0 / 失败 0」误标成警告或错误；复制按钮复制全文。刚开跑时回写发版后选项不再误报 404。
 - 自动发版运行日志顶部始终显示本次成功 / 部分失败 / 失败状态（轮询与历史回看都保留）。
 - 同步更新 POM 时去掉 Git Tag 前缀 `V`：`V9.0.0-P08` 写入 `9.0.0-P08-SNAPSHOT`。

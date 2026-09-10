@@ -1,5 +1,5 @@
 import { apiPath } from '@/api/prefix'
-import { request } from '@/api/http'
+import { downloadBlob, request } from '@/api/http'
 import type { Project, ProjectWrite } from './types'
 
 export function getProject(id: string): Promise<Project> {
@@ -141,6 +141,22 @@ export function fetchRemoteNote(
 
 export function clearProjectFiles(id: string): Promise<void> {
   return request({ method: 'POST', url: apiPath('projects', id, 'files', 'clear') })
+}
+
+export function deleteProjectFile(id: string, path: string): Promise<void> {
+  return request({ method: 'DELETE', url: apiPath('projects', id, 'file'), params: { path } })
+}
+
+export function downloadProjectFile(id: string, path: string, filename: string): Promise<void> {
+  return downloadBlob(
+    {
+      method: 'GET',
+      url: apiPath('projects', id, 'file', 'download'),
+      params: { path },
+      timeout: 180000,
+    },
+    filename,
+  )
 }
 
 export type ProjectDepRow = {

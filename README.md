@@ -11,11 +11,7 @@
 | 控制台 SemVer | `v2.0.0` | 本仓库；见 [CHANGELOG.md](CHANGELOG.md) |
 | 产品发版 Tag | `V9.0.0-P01` | 被打包工程，只出现在作业参数里 |
 
-发布控制台时注入版本：
-
-```bash
-go build -ldflags="-s -w -X auto-pack/server/internal/config.AppVersion=2.0.0" -o autopack ./cmd
-```
+发版只改根目录 `package.json` 的 `version` 和 [CHANGELOG.md](CHANGELOG.md)。`pnpm dev` / 打包会跑 `node script/sync-version.mjs`，把号写入 `server/internal/config.AppVersion`；发行包还会用 `-ldflags` 再注入一次。
 
 ## 目录
 

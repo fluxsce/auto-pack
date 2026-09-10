@@ -24,3 +24,58 @@ export function keepDirsFirst(left: ProjectFileEntry, right: ProjectFileEntry): 
   if (left.is_dir !== right.is_dir) return left.is_dir ? -1 : 1
   return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
 }
+
+const EXT_LANG: Record<string, string> = {
+  xml: 'xml',
+  xsd: 'xml',
+  xsl: 'xml',
+  svg: 'xml',
+  java: 'java',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  vue: 'vue',
+  json: 'json',
+  jsonc: 'json',
+  yml: 'yaml',
+  yaml: 'yaml',
+  md: 'markdown',
+  markdown: 'markdown',
+  go: 'go',
+  py: 'python',
+  sh: 'shell',
+  bash: 'shell',
+  zsh: 'shell',
+  cmd: 'shell',
+  bat: 'shell',
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  scss: 'css',
+  less: 'css',
+  sql: 'sql',
+  toml: 'toml',
+  rs: 'rust',
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+}
+
+/** previewLang 按文件名推断 RsCodeBlock 语言。 */
+export function previewLang(name: string): string {
+  const base = name.trim().toLowerCase()
+  if (base === 'pom.xml' || base.endsWith('.pom')) return 'xml'
+  if (base === 'dockerfile') return 'shell'
+  return EXT_LANG[fileExt(name)] || 'plaintext'
+}
+
+export function fileBaseName(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts[parts.length - 1] || path
+}

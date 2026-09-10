@@ -1,9 +1,16 @@
 {
   "name": "auto-pack",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "private": true,
   "type": "module",
   "scripts": {
+    "sync-version": "node script/sync-version.mjs",
+    "predev": "node script/sync-version.mjs",
+    "predev:server": "node script/sync-version.mjs",
+    "prebuild": "node script/sync-version.mjs",
+    "pretest:server": "node script/sync-version.mjs",
+    "prepackage:windows": "node script/sync-version.mjs",
+    "prepackage:linux": "node script/sync-version.mjs",
     "dev": "concurrently -k -n web,server -c cyan,magenta \"vite\" \"go run -C server ./cmd\"",
     "dev:web": "vite",
     "dev:server": "go run -C server ./cmd",

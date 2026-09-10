@@ -13,11 +13,6 @@ import (
 
 const defaultConfigFile = "app.yaml"
 
-// AppVersion is the console SemVer. Override at ship time:
-//
-//	go build -ldflags="-X auto-pack/server/internal/config.AppVersion=2.0.0"
-var AppVersion = "2.0.0"
-
 // Config holds runtime configuration loaded from YAML.
 type Config struct {
 	Addr          string

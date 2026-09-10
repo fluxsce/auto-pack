@@ -42,3 +42,29 @@ export async function request<T>(config: AxiosRequestConfig): Promise<T> {
   const res = await http.request<T>(config)
   return res.data
 }
+
+export async function downloadBlob(config: AxiosRequestConfig, fallbackName: string): Promise<void> {
+  const res = await http.request<Blob>({ ...config, responseType: 'blob' })
+  const type = String(res.headers['content-type'] || '')
+  if (type.includes('application/json')) {
+    const text = await res.data.text()
+    let msg = 'request failed'
+    try {
+      const parsed = JSON.parse(text) as { error?: string }
+      if (parsed.error) msg = parsed.error
+    } catch {
+      /* keep fallback */
+    }
+    throw new Error(msg)
+  }
+  const raw = String(res.headers['content-disposition'] || '')
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(raw)
+  const quoted = /filename="([^"]+)"/i.exec(raw)
+  const name = (star ? decodeURIComponent(star[1]) : quoted?.[1]) || fallbackName
+  const url = URL.createObjectURL(res.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name
+  link.click()
+  URL.revokeObjectURL(url)
+}

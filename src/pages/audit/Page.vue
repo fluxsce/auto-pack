@@ -48,6 +48,7 @@ const actionI18n: Record<string, string> = {
   'project.branch': 'audit.actions.projectBranch',
   'project.post': 'audit.actions.projectPost',
   'project.clear_files': 'audit.actions.projectClearFiles',
+  'project.delete_file': 'audit.actions.projectDeleteFile',
   'env.save': 'audit.actions.envSave',
   'env.delete': 'audit.actions.envDelete',
   'env.mail': 'audit.actions.envMail',

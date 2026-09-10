@@ -48,6 +48,12 @@ func TestListAndRead(t *testing.T) {
 	if _, _, err := ReadText(root, "../x", 0); err == nil {
 		t.Fatal("expected jail")
 	}
+	if err := os.WriteFile(filepath.Join(root, "src", "bin.dat"), []byte{0xff, 0xfe, 0x00}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReadText(root, "src/bin.dat", 0); err != ErrNotText {
+		t.Fatalf("want ErrNotText, got %v", err)
+	}
 }
 
 func TestClearDirKeepsRoot(t *testing.T) {

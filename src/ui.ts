@@ -6,6 +6,7 @@ export {
   RsButton,
   RsCard,
   RsCheckbox,
+  RsCodeBlock,
   RsContextMenu,
   RsDialog,
   RsDivider,
