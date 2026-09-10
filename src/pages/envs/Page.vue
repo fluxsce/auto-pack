@@ -16,7 +16,6 @@ import {
 } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
-import { useWorkspaceStore } from '@/stores/workspace'
 import EnvEditor from './EnvEditor.vue'
 import {
   FALLBACK_KINDS,
@@ -32,7 +31,6 @@ import './env-panel.css'
 const { t } = useI18n()
 const route = useRoute()
 const toast = useRsToast()
-const ws = useWorkspaceStore()
 const rows = ref<EnvRow[]>([])
 const kinds = ref<EnvKindSpec[]>(FALLBACK_KINDS)
 const activeKind = ref('all')
@@ -131,13 +129,11 @@ async function loadKinds(): Promise<void> {
 }
 
 async function load(): Promise<void> {
-  if (!ws.currentId) return
   try {
     rows.value =
       (await request<EnvRow[]>({
         method: 'GET',
         url: apiPath('envs'),
-        params: { workspace_rec_id: ws.currentId },
       })) ?? []
   } catch (e) {
     toast.error(e instanceof Error ? e.message : String(e))
@@ -159,13 +155,6 @@ onMounted(async () => {
   await load()
   applyQuery()
 })
-watch(
-  () => ws.currentId,
-  () => {
-    closeEditor()
-    void load()
-  },
-)
 watch(envKind, () => {
   if (editing.value) probeResult.value = null
 })
@@ -181,7 +170,6 @@ function formatProbeMessage(res: { ok: boolean; message: string; details?: Recor
 }
 
 async function probeDraft(testTo = ''): Promise<void> {
-  if (!ws.currentId) return
   if (envKind.value === 'smtp' && !testTo.trim()) {
     toast.error(t('envs.testRecipientRequired'))
     return
@@ -193,7 +181,6 @@ async function probeDraft(testTo = ''): Promise<void> {
       method: 'POST',
       url: apiPath('envs', 'probe'),
       data: {
-        workspace_rec_id: ws.currentId,
         rec_id: recId.value,
         env_kind: envKind.value,
         config: config.value,
@@ -233,14 +220,12 @@ async function confirmListTest(): Promise<void> {
 }
 
 async function probeRow(row: EnvRow, testTo = ''): Promise<void> {
-  if (!ws.currentId) return
   verifyingId.value = row.rec_id
   try {
     const res = await request<{ ok: boolean; message: string; details?: Record<string, string> }>({
       method: 'POST',
       url: apiPath('envs', 'probe'),
       data: {
-        workspace_rec_id: ws.currentId,
         rec_id: row.rec_id,
         env_kind: row.env_kind,
         test_to: testTo,
@@ -257,7 +242,6 @@ async function probeRow(row: EnvRow, testTo = ''): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  if (!ws.currentId) return
   saving.value = true
   try {
     await request({
@@ -265,7 +249,6 @@ async function save(): Promise<void> {
       url: apiPath('envs'),
       data: {
         rec_id: recId.value,
-        workspace_rec_id: ws.currentId,
         env_kind: envKind.value,
         env_name: envName.value,
         is_enabled: isEnabled.value,

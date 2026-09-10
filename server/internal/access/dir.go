@@ -20,12 +20,20 @@ func NewDirectory(st *store.Store) *Directory {
 	return &Directory{st: st}
 }
 
-// FindMember loads one workspace membership.
+// FindMember loads the caller's platform membership.
+// 成员是全局权限：按用户取最高角色（owner > operator > viewer），不按工作空间隔离。
 func (d *Directory) FindMember(ctx context.Context, workspaceID, userID string) (iam.Member, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return iam.Member{}, sql.ErrNoRows
+	}
 	q := d.st.Rebind(`SELECT workspace_rec_id, user_rec_id, member_role FROM AP_WORKSPACE_MEMBER
-		WHERE workspace_rec_id = ? AND user_rec_id = ?`)
+		WHERE user_rec_id = ?
+		ORDER BY CASE member_role WHEN 'owner' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END,
+			CASE WHEN workspace_rec_id = ? THEN 0 ELSE 1 END
+		LIMIT 1`)
 	var m iam.Member
-	err := d.st.SQL().QueryRowContext(ctx, q, workspaceID, userID).Scan(&m.WorkspaceID, &m.UserID, &m.Role)
+	err := d.st.SQL().QueryRowContext(ctx, q, userID, GlobalMemberWorkspaceID).Scan(&m.WorkspaceID, &m.UserID, &m.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return iam.Member{}, err
 	}

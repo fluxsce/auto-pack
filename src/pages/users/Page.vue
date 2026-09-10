@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   RsAvatar,
@@ -15,9 +15,10 @@ import {
 } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
-import { useWorkspaceStore } from '@/stores/workspace'
 import PageFrame from '@/components/PageFrame.vue'
 import UserDialogs from './UserDialogs.vue'
+
+const MEMBER_SCOPE = '00000000-0000-4000-8000-000000000010'
 
 type User = { rec_id: string; login_name: string; display_name: string; is_enabled: number }
 type Member = { user_rec_id: string; login_name: string; display_name: string; member_role: string }
@@ -37,7 +38,6 @@ const actionI18n: Record<string, string> = {
 
 const { t } = useI18n()
 const toast = useRsToast()
-const ws = useWorkspaceStore()
 const users = ref<User[]>([])
 const members = ref<Member[]>([])
 const actions = ref<Record<string, string[]>>({ owner: [], operator: [], viewer: [] })
@@ -93,25 +93,22 @@ function avatarTone(role: string): 'warning' | 'primary' | 'default' {
 }
 
 async function load(): Promise<void> {
-  if (!ws.currentId) return
   try {
     users.value =
       (await request<User[]>({
         method: 'GET',
         url: apiPath('users'),
-        params: { workspace_rec_id: ws.currentId },
       })) ?? []
     members.value =
       (await request<Member[]>({
         method: 'GET',
-        url: apiPath('workspaces', ws.currentId, 'members'),
+        url: apiPath('workspaces', MEMBER_SCOPE, 'members'),
       })) ?? []
     for (const role of roles) {
       actions.value[role] =
         (await request<string[]>({
           method: 'GET',
           url: apiPath('roles', role, 'actions'),
-          params: { workspace_rec_id: ws.currentId },
         })) ?? []
     }
   } catch (e) {
@@ -120,7 +117,6 @@ async function load(): Promise<void> {
 }
 
 onMounted(load)
-watch(() => ws.currentId, load)
 
 function openEdit(row: Member): void {
   editing.value = row
@@ -138,7 +134,7 @@ async function removeMember(row: Member): Promise<void> {
   try {
     await request({
       method: 'DELETE',
-      url: apiPath('workspaces', ws.currentId, 'members', row.user_rec_id),
+      url: apiPath('workspaces', MEMBER_SCOPE, 'members', row.user_rec_id),
     })
     toast.success(t('common.deleted'))
     await load()
@@ -156,7 +152,7 @@ async function saveMatrix(): Promise<void> {
       await request({
         method: 'PUT',
         url: apiPath('roles', role, 'actions'),
-        data: { workspace_rec_id: ws.currentId, actions: actions.value[role] },
+        data: { actions: actions.value[role] },
       })
     }
     toast.success(t('common.saved'))
@@ -281,7 +277,7 @@ function toggleAction(role: Role, action: string, on: boolean): void {
       v-model:user-open="userOpen"
       v-model:mem-open="memOpen"
       v-model:edit-open="editOpen"
-      :workspace-id="ws.currentId"
+      :workspace-id="MEMBER_SCOPE"
       :user-options="userOptions"
       :role-options="roleOptions"
       :editing="editing"

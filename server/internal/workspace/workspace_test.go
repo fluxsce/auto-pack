@@ -126,6 +126,79 @@ func TestDeleteWorkspaceAndProjects(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspaceKeepsMembers(t *testing.T) {
+	svc, st, ctx, actor, users := openWS(t)
+	ws, err := svc.Create(ctx, actor, "keep-mem", "保留成员")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := users.Create(ctx, actor, ws.RecID, "ops", "运维", "123456", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AddMember(ctx, actor, ws.RecID, other.RecID, iam.RoleOperator); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Delete(ctx, actor, ws.RecID); err != nil {
+		t.Fatal(err)
+	}
+	var usersLeft, memsLeft int
+	if err := st.SQL().QueryRowContext(ctx, st.Rebind(`SELECT COUNT(1) FROM AP_USER WHERE rec_id = ?`), other.RecID).Scan(&usersLeft); err != nil {
+		t.Fatal(err)
+	}
+	if usersLeft != 1 {
+		t.Fatalf("user deleted with workspace, count=%d", usersLeft)
+	}
+	if err := st.SQL().QueryRowContext(ctx, st.Rebind(`SELECT COUNT(1) FROM AP_WORKSPACE_MEMBER WHERE user_rec_id = ?`), other.RecID).Scan(&memsLeft); err != nil {
+		t.Fatal(err)
+	}
+	if memsLeft < 1 {
+		t.Fatalf("membership deleted with workspace, count=%d", memsLeft)
+	}
+}
+
+func TestMembersAreGlobal(t *testing.T) {
+	svc, ctx, actor, users := setupWS(t)
+	ws, err := svc.Create(ctx, actor, "other-ws", "另一空间")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := users.Create(ctx, actor, "", "ops", "运维", "123456", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.AddMember(ctx, actor, ws.RecID, other.RecID, iam.RoleOperator); err != nil {
+		t.Fatal(err)
+	}
+	fromDefault, err := svc.ListMembers(ctx, actor, access.DefaultWorkspaceRecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromOther, err := svc.ListMembers(ctx, actor, ws.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fromDefault) != len(fromOther) {
+		t.Fatalf("members differ by workspace: %d vs %d", len(fromDefault), len(fromOther))
+	}
+	found := false
+	for _, m := range fromDefault {
+		if m.UserRecID == other.RecID && m.MemberRole == iam.RoleOperator {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("operator not listed globally: %+v", fromDefault)
+	}
+	list, err := svc.ListForActor(ctx, iam.Actor{UserID: other.RecID, LoginName: "ops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) < 2 {
+		t.Fatalf("member should see all workspaces, got %d", len(list))
+	}
+}
+
 func TestRefuseDeleteDefaultWorkspace(t *testing.T) {
 	svc, ctx, actor, _ := setupWS(t)
 	err := svc.Delete(ctx, actor, access.DefaultWorkspaceRecID)

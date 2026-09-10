@@ -2,7 +2,6 @@ package env
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -40,7 +39,7 @@ type ProbeIn struct {
 
 // Probe checks an env draft or saved row (env.write). It does not persist.
 func (s *Service) Probe(ctx context.Context, actor iam.Actor, in ProbeIn) (ProbeResult, error) {
-	if err := s.guard.Allow(ctx, actor, in.WorkspaceRecID, iam.ActionEnvWrite); err != nil {
+	if err := s.authorizeWrite(ctx, actor, in.WorkspaceRecID); err != nil {
 		return ProbeResult{}, err
 	}
 	kind, cfg, err := s.prepareProbeConfig(ctx, in)
@@ -63,9 +62,6 @@ func (s *Service) prepareProbeConfig(ctx context.Context, in ProbeIn) (string, m
 		existing, cipherText, err := s.loadRow(ctx, in.RecID)
 		if err != nil {
 			return "", nil, err
-		}
-		if existing.WorkspaceRecID != in.WorkspaceRecID {
-			return "", nil, fmt.Errorf("workspace mismatch")
 		}
 		if kind == "" {
 			kind = existing.EnvKind

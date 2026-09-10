@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsButton, RsIcon, RsInputNumber, RsTooltip, useRsToast } from '@/ui'
 import { setRequestTimeout } from '@/api/http'
-import { useWorkspaceStore } from '@/stores/workspace'
 import { getProps, saveProps, type SystemProps } from '../api'
 
 const { t } = useI18n()
 const toast = useRsToast()
-const ws = useWorkspaceStore()
 const loading = ref(false)
 const saving = ref(false)
 const form = ref<SystemProps>({
@@ -51,10 +49,9 @@ const fields = [
 ]
 
 async function load(): Promise<void> {
-  if (!ws.currentId) return
   loading.value = true
   try {
-    const got = await getProps(ws.currentId)
+    const got = await getProps()
     form.value = {
       job_concurrency: got.job_concurrency,
       log_retention_days: got.log_retention_days,
@@ -69,10 +66,10 @@ async function load(): Promise<void> {
 }
 
 async function save(): Promise<void> {
-  if (!ws.currentId || saving.value) return
+  if (saving.value) return
   saving.value = true
   try {
-    const got = await saveProps(ws.currentId, form.value)
+    const got = await saveProps(form.value)
     form.value = got
     setRequestTimeout(got.web_timeout_sec)
     toast.success(t('common.saved'))
@@ -86,12 +83,6 @@ async function save(): Promise<void> {
 onMounted(() => {
   void load()
 })
-watch(
-  () => ws.currentId,
-  () => {
-    void load()
-  },
-)
 
 defineExpose({ reload: load, loading })
 </script>

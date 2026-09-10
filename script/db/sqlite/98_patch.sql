@@ -28,3 +28,5 @@ CREATE TABLE IF NOT EXISTS "AP_WORKSPACE_RELEASE" (
 );
 
 CREATE INDEX IF NOT EXISTS "IDX_AP_WSREL_WS" ON "AP_WORKSPACE_RELEASE" ("workspace_rec_id", "release_num");
+
+UPDATE "AP_ENV" SET "workspace_rec_id" = '' WHERE "workspace_rec_id" <> '';

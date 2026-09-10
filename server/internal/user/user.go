@@ -82,7 +82,7 @@ func (s *Service) Authenticate(ctx context.Context, loginName, password string) 
 
 // ListRoleActions 读取角色允许的动作（user.admin）。
 func (s *Service) ListRoleActions(ctx context.Context, actor iam.Actor, workspaceID, role string) ([]string, error) {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return nil, err
 	}
 	return s.dir.ListActions(ctx, role)
@@ -90,7 +90,7 @@ func (s *Service) ListRoleActions(ctx context.Context, actor iam.Actor, workspac
 
 // ReplaceRoleActions 覆盖角色动作矩阵（user.admin）。
 func (s *Service) ReplaceRoleActions(ctx context.Context, actor iam.Actor, workspaceID, role string, actions []string) error {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return err
 	}
 	return s.dir.ReplaceRoleActions(ctx, role, actions)
@@ -121,7 +121,7 @@ func (s *Service) FindByID(ctx context.Context, id string) (User, error) {
 
 // List returns all users (user.admin).
 func (s *Service) List(ctx context.Context, actor iam.Actor, workspaceID string) ([]User, error) {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return nil, err
 	}
 	q := `SELECT rec_id, login_name, display_name, password_hash, is_enabled, COALESCE(remark,'') FROM AP_USER ORDER BY login_name`
@@ -143,7 +143,7 @@ func (s *Service) List(ctx context.Context, actor iam.Actor, workspaceID string)
 
 // Create adds a user (user.admin).
 func (s *Service) Create(ctx context.Context, actor iam.Actor, workspaceID string, login, display, password string, enabled bool) (User, error) {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return User{}, err
 	}
 	login = strings.TrimSpace(login)
@@ -172,7 +172,7 @@ func (s *Service) Create(ctx context.Context, actor iam.Actor, workspaceID strin
 
 // SetEnabled toggles a user (user.admin).
 func (s *Service) SetEnabled(ctx context.Context, actor iam.Actor, workspaceID, userID string, enabled bool) error {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return err
 	}
 	flag := 1

@@ -29,12 +29,10 @@ const workspaceOptions = computed(() =>
 )
 
 onMounted(() => {
-  void ws.load().then(() => {
-    if (!ws.currentId) return
-    void getProps(ws.currentId)
-      .then((p) => setRequestTimeout(p.web_timeout_sec))
-      .catch(() => undefined)
-  })
+  void ws.load()
+  void getProps()
+    .then((p) => setRequestTimeout(p.web_timeout_sec))
+    .catch(() => undefined)
   void request<{ version?: string }>({ method: 'GET', url: apiPath('health') })
     .then((res) => {
       version.value = res.version?.trim() ?? ''

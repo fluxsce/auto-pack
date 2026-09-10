@@ -117,6 +117,29 @@ func TestVarsSaveListDelete(t *testing.T) {
 	}
 }
 
+func TestPropsWorkWithoutWorkspaceID(t *testing.T) {
+	svc, ctx := setupSettings(t)
+	actor := iam.Actor{UserID: access.DefaultAdminRecID, LoginName: "admin"}
+	got, err := svc.GetProps(ctx, actor, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.JobConcurrency != 6 {
+		t.Fatalf("%+v", got)
+	}
+	saved, err := svc.SaveProps(ctx, actor, "", settings.Props{
+		JobConcurrency:   3,
+		LogRetentionDays: 7,
+		WebTimeoutSec:    90,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.JobConcurrency != 3 || saved.LogRetentionDays != 7 || saved.WebTimeoutSec != 90 {
+		t.Fatalf("%+v", saved)
+	}
+}
+
 func TestClampProps(t *testing.T) {
 	p := settings.ClampProps(settings.Props{JobConcurrency: 0, LogRetentionDays: 400, WebTimeoutSec: 900})
 	if p.JobConcurrency != 1 || p.LogRetentionDays != 365 || p.WebTimeoutSec != 600 {

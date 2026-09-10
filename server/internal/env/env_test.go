@@ -19,6 +19,12 @@ import (
 
 func setupEnv(t *testing.T) (*env.Service, context.Context, iam.Actor) {
 	t.Helper()
+	svc, ctx, actor, _ := setupEnvStore(t)
+	return svc, ctx, actor
+}
+
+func setupEnvStore(t *testing.T) (*env.Service, context.Context, iam.Actor, *store.Store) {
+	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, store.Config{Driver: "sqlite", Path: filepath.Join(t.TempDir(), "t.db")})
 	if err != nil {
@@ -39,7 +45,39 @@ func setupEnv(t *testing.T) (*env.Service, context.Context, iam.Actor) {
 		t.Fatal(err)
 	}
 	guard := iam.NewGuard(access.NewDirectory(st))
-	return env.NewService(st, guard, cipher), ctx, iam.Actor{UserID: access.DefaultAdminRecID, LoginName: "admin"}
+	return env.NewService(st, guard, cipher), ctx, iam.Actor{UserID: access.DefaultAdminRecID, LoginName: "admin"}, st
+}
+
+func TestSaveKeepsSpecifiedRecIDOnInsert(t *testing.T) {
+	svc, ctx, actor := setupEnv(t)
+	id := "11111111-1111-4111-8111-111111111111"
+	saved, err := svc.Save(ctx, actor, env.Env{
+		RecID:          id,
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		EnvKind:        "nodejs",
+		EnvName:        "from-v1",
+		IsEnabled:      1,
+		Config:         map[string]any{"node_path": "/usr/bin/node"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.RecID != id {
+		t.Fatalf("rec_id=%s want %s", saved.RecID, id)
+	}
+	if saved.EnvKind != "node" {
+		t.Fatalf("kind=%s", saved.EnvKind)
+	}
+	got, err := svc.Get(ctx, actor, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.EnvName != "from-v1" {
+		t.Fatalf("name=%s", got.EnvName)
+	}
+	if got.WorkspaceRecID != "" {
+		t.Fatalf("workspace_rec_id=%q want empty", got.WorkspaceRecID)
+	}
 }
 
 func TestSaveGetKeepsSecretOnEmptyUpdate(t *testing.T) {
@@ -184,5 +222,36 @@ func TestListKinds(t *testing.T) {
 	svc, _, _ := setupEnv(t)
 	if len(svc.ListKinds()) < 8 {
 		t.Fatalf("kinds=%d", len(svc.ListKinds()))
+	}
+}
+
+func TestListIsGlobal(t *testing.T) {
+	svc, ctx, actor, st := setupEnvStore(t)
+	if _, err := svc.Save(ctx, actor, env.Env{
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		EnvKind:        "maven",
+		EnvName:        "mvn",
+		Config:         map[string]any{"maven_home": "/opt/maven"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	spaces := workspace.NewService(st, iam.NewGuard(access.NewDirectory(st)), t.TempDir())
+	other, err := spaces.Create(ctx, actor, "other", "其它空间")
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := svc.List(ctx, actor, other.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].EnvName != "mvn" || list[0].WorkspaceRecID != "" {
+		t.Fatalf("global list=%v", list)
+	}
+	e, cfg, err := svc.FindKind(ctx, other.RecID, "maven")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.EnvName != "mvn" || cfg["maven_home"] != "/opt/maven" {
+		t.Fatalf("global find name=%s cfg=%v", e.EnvName, cfg)
 	}
 }

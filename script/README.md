@@ -8,6 +8,7 @@
 | `build/` | 全局构建入口：编前端、编后端、组装发行目录 | 否 |
 | `run/` | 启停模板，构建时拷到发行包根目录 | 是（根上 `start` / `stop` / `restart`） |
 | `package/` | 发行包说明与 `app.yaml.example`（`frontend.path: ./web`） | 是 |
+| `migrate/` | 1.0 SQLite 环境导出，再写入 2.0 空间 | 否 |
 
 日常开发仍用仓库根目录：
 

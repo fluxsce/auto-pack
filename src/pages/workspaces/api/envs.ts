@@ -2,11 +2,10 @@ import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
 import type { EnvRow } from '@/pages/envs/kinds'
 
-export function listWorkspaceEnvs(workspaceId: string): Promise<EnvRow[]> {
+export function listWorkspaceEnvs(_workspaceId?: string): Promise<EnvRow[]> {
   return request<EnvRow[]>({
     method: 'GET',
     url: apiPath('envs'),
-    params: { workspace_rec_id: workspaceId },
   }).then((rows) => rows ?? [])
 }
 

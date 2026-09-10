@@ -37,7 +37,7 @@ func (s *Service) SendMail(ctx context.Context, actor iam.Actor, recID string, i
 	if err != nil {
 		return err
 	}
-	if err := s.guard.Allow(ctx, actor, e.WorkspaceRecID, iam.ActionEnvWrite); err != nil {
+	if err := s.authorizeWrite(ctx, actor, e.WorkspaceRecID); err != nil {
 		return err
 	}
 	kind, err := NormalizeKind(e.EnvKind)

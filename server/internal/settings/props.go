@@ -162,24 +162,16 @@ func clampInt(n, lo, hi int) int {
 	return n
 }
 
-func workspaceOrDefault(id string) string {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return access.DefaultWorkspaceRecID
-	}
-	return id
-}
-
 func (s *Service) requireRead(ctx context.Context, actor iam.Actor, workspaceID string) error {
 	if s == nil || s.guard == nil {
 		return fmt.Errorf("settings: not configured")
 	}
-	return s.guard.CanRead(ctx, actor, workspaceOrDefault(workspaceID))
+	return s.guard.CanRead(ctx, actor, access.WorkspaceOrDefault(workspaceID))
 }
 
 func (s *Service) requireWrite(ctx context.Context, actor iam.Actor, workspaceID string) error {
 	if s == nil || s.guard == nil {
 		return fmt.Errorf("settings: not configured")
 	}
-	return s.guard.Allow(ctx, actor, workspaceOrDefault(workspaceID), iam.ActionSettingsWrite)
+	return s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionSettingsWrite)
 }

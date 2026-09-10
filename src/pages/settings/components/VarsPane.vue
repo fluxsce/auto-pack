@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsButton, RsEmpty, RsIcon, RsInput, RsSwitch, RsTag, rsConfirm, useRsToast } from '@/ui'
-import { useWorkspaceStore } from '@/stores/workspace'
 import { deleteVar, listVars, saveVar, type GlobalVar } from '../api'
 
 const KEY_PAT = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 const { t } = useI18n()
 const toast = useRsToast()
-const ws = useWorkspaceStore()
 const items = ref<GlobalVar[]>([])
 const loading = ref(false)
 const saving = ref('')
@@ -31,10 +29,9 @@ function accept(rows: unknown): GlobalVar[] {
 }
 
 async function load(): Promise<void> {
-  if (!ws.currentId) return
   loading.value = true
   try {
-    const rows = accept(await listVars(ws.currentId))
+    const rows = accept(await listVars())
     items.value = rows
     for (const item of rows) {
       edits[item.key] = item.value
@@ -49,7 +46,7 @@ async function load(): Promise<void> {
 }
 
 async function persist(key: string, value: string, on: boolean): Promise<boolean> {
-  if (!ws.currentId || saving.value) return false
+  if (saving.value) return false
   const name = key.trim()
   if (!KEY_PAT.test(name)) {
     toast.error(t('settings.vars.badKey'))
@@ -57,7 +54,7 @@ async function persist(key: string, value: string, on: boolean): Promise<boolean
   }
   saving.value = name
   try {
-    const saved = await saveVar(ws.currentId, { key: name, value, is_enabled: on ? 1 : 0 })
+    const saved = await saveVar({ key: name, value, is_enabled: on ? 1 : 0 })
     edits[name] = saved.value
     enabled[name] = saved.is_enabled !== 0
     const idx = items.value.findIndex((row) => row.key === name)
@@ -102,7 +99,7 @@ function onEnabled(item: GlobalVar, value: unknown): void {
 }
 
 async function remove(key: string): Promise<void> {
-  if (!ws.currentId || saving.value) return
+  if (saving.value) return
   const ok = await rsConfirm.danger({
     title: t('common.delete'),
     description: t('settings.vars.deleteConfirm', { key }),
@@ -111,7 +108,7 @@ async function remove(key: string): Promise<void> {
   if (!ok) return
   saving.value = key
   try {
-    await deleteVar(ws.currentId, key)
+    await deleteVar(key)
     items.value = items.value.filter((row) => row.key !== key)
     delete edits[key]
     delete enabled[key]
@@ -126,12 +123,6 @@ async function remove(key: string): Promise<void> {
 onMounted(() => {
   void load()
 })
-watch(
-  () => ws.currentId,
-  () => {
-    void load()
-  },
-)
 
 defineExpose({ reload: load, loading })
 </script>

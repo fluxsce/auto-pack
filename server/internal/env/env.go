@@ -13,10 +13,11 @@ import (
 	"auto-pack/server/internal/store"
 )
 
-// Env is a workspace environment credential (secrets encrypted).
+// Env is a global environment credential (secrets encrypted).
+// workspace_rec_id 保留列兼容旧库，写入时固定为空，不按空间隔离。
 type Env struct {
 	RecID          string         `json:"rec_id"`
-	WorkspaceRecID string         `json:"workspace_rec_id"`
+	WorkspaceRecID string         `json:"workspace_rec_id,omitempty"`
 	EnvKind        string         `json:"env_kind"`
 	EnvName        string         `json:"env_name"`
 	ConfigHint     string         `json:"config_hint,omitempty"`
@@ -42,14 +43,36 @@ func (s *Service) ListKinds() []KindSpec {
 	return Catalog
 }
 
-// List returns env rows without secrets (any member).
+// List returns all env rows without secrets. SDK 环境是全局的，不按工作空间过滤。
 func (s *Service) List(ctx context.Context, actor iam.Actor, workspaceID string) ([]Env, error) {
-	if err := s.guard.CanRead(ctx, actor, workspaceID); err != nil {
+	if err := s.authorizeRead(ctx, actor, workspaceID); err != nil {
 		return nil, err
 	}
 	q := s.st.Rebind(`SELECT rec_id, workspace_rec_id, env_kind, env_name, COALESCE(config_hint,''), is_enabled
-		FROM AP_ENV WHERE workspace_rec_id = ? ORDER BY env_kind, env_name`)
-	rows, err := s.st.SQL().QueryContext(ctx, q, workspaceID)
+		FROM AP_ENV ORDER BY env_kind, env_name`)
+	return s.scanList(ctx, q)
+}
+
+func (s *Service) authorizeRead(ctx context.Context, actor iam.Actor, workspaceID string) error {
+	if ws := strings.TrimSpace(workspaceID); ws != "" {
+		if err := s.guard.CanRead(ctx, actor, ws); err == nil {
+			return nil
+		}
+	}
+	return s.guard.CanRead(ctx, actor, access.DefaultWorkspaceRecID)
+}
+
+func (s *Service) authorizeWrite(ctx context.Context, actor iam.Actor, workspaceID string) error {
+	if ws := strings.TrimSpace(workspaceID); ws != "" {
+		if err := s.guard.Allow(ctx, actor, ws, iam.ActionEnvWrite); err == nil {
+			return nil
+		}
+	}
+	return s.guard.Allow(ctx, actor, access.DefaultWorkspaceRecID, iam.ActionEnvWrite)
+}
+
+func (s *Service) scanList(ctx context.Context, q string, args ...any) ([]Env, error) {
+	rows, err := s.st.SQL().QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -71,7 +94,7 @@ func (s *Service) Get(ctx context.Context, actor iam.Actor, recID string) (Env, 
 	if err != nil {
 		return Env{}, err
 	}
-	if err := s.guard.CanRead(ctx, actor, e.WorkspaceRecID); err != nil {
+	if err := s.authorizeRead(ctx, actor, e.WorkspaceRecID); err != nil {
 		return Env{}, err
 	}
 	cfg, err := s.decryptMap(cipherText)
@@ -85,9 +108,10 @@ func (s *Service) Get(ctx context.Context, actor iam.Actor, recID string) (Env, 
 // Save writes an env (env.write). Secret fields in config are encrypted as a JSON blob.
 // Empty secret fields on update keep the stored ciphertext values.
 func (s *Service) Save(ctx context.Context, actor iam.Actor, e Env) (Env, error) {
-	if err := s.guard.Allow(ctx, actor, e.WorkspaceRecID, iam.ActionEnvWrite); err != nil {
+	if err := s.authorizeWrite(ctx, actor, e.WorkspaceRecID); err != nil {
 		return Env{}, err
 	}
+	e.WorkspaceRecID = ""
 	kind, err := NormalizeKind(e.EnvKind)
 	if err != nil {
 		return Env{}, err
@@ -101,23 +125,24 @@ func (s *Service) Save(ctx context.Context, actor iam.Actor, e Env) (Env, error)
 	if err != nil {
 		return Env{}, err
 	}
+	insert := e.RecID == ""
 	if e.RecID != "" {
-		existing, cipherText, err := s.loadRow(ctx, e.RecID)
-		if err != nil {
+		existing, stored, err := s.loadRow(ctx, e.RecID)
+		if errors.Is(err, sql.ErrNoRows) {
+			insert = true
+		} else if err != nil {
 			return Env{}, err
+		} else {
+			existKind, normErr := NormalizeKind(existing.EnvKind)
+			if normErr != nil || existKind != kind {
+				return Env{}, errors.New("env_kind cannot change")
+			}
+			old, err := s.decryptMap(stored)
+			if err != nil {
+				return Env{}, err
+			}
+			cfg = MergeSecrets(kind, cfg, old)
 		}
-		if existing.WorkspaceRecID != e.WorkspaceRecID {
-			return Env{}, errors.New("workspace mismatch")
-		}
-		existKind, normErr := NormalizeKind(existing.EnvKind)
-		if normErr != nil || existKind != kind {
-			return Env{}, errors.New("env_kind cannot change")
-		}
-		old, err := s.decryptMap(cipherText)
-		if err != nil {
-			return Env{}, err
-		}
-		cfg = MergeSecrets(kind, cfg, old)
 	}
 	if err := ValidateConfig(kind, cfg); err != nil {
 		return Env{}, err
@@ -131,16 +156,18 @@ func (s *Service) Save(ctx context.Context, actor iam.Actor, e Env) (Env, error)
 		return Env{}, err
 	}
 	hint := ConfigHint(kind, cfg)
-	if e.IsEnabled == 0 && e.RecID == "" {
-		e.IsEnabled = 1
-	}
-	if e.RecID == "" {
-		e.RecID = access.NewID()
+	if insert {
+		if e.RecID == "" {
+			e.RecID = access.NewID()
+			if e.IsEnabled == 0 {
+				e.IsEnabled = 1
+			}
+		}
 		ins := s.st.Rebind(`INSERT INTO AP_ENV (rec_id, workspace_rec_id, env_kind, env_name, config_cipher, config_hint, is_enabled)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`)
 		_, err = s.st.SQL().ExecContext(ctx, ins, e.RecID, e.WorkspaceRecID, e.EnvKind, e.EnvName, cipherText, hint, e.IsEnabled)
 	} else {
-		upd := s.st.Rebind(`UPDATE AP_ENV SET env_kind=?, env_name=?, config_cipher=?, config_hint=?, is_enabled=? WHERE rec_id=?`)
+		upd := s.st.Rebind(`UPDATE AP_ENV SET workspace_rec_id='', env_kind=?, env_name=?, config_cipher=?, config_hint=?, is_enabled=? WHERE rec_id=?`)
 		_, err = s.st.SQL().ExecContext(ctx, upd, e.EnvKind, e.EnvName, cipherText, hint, e.IsEnabled, e.RecID)
 	}
 	if err != nil {
@@ -158,7 +185,7 @@ func (s *Service) Delete(ctx context.Context, actor iam.Actor, recID string) err
 	if err != nil {
 		return err
 	}
-	if err := s.guard.Allow(ctx, actor, e.WorkspaceRecID, iam.ActionEnvWrite); err != nil {
+	if err := s.authorizeWrite(ctx, actor, e.WorkspaceRecID); err != nil {
 		return err
 	}
 	q := s.st.Rebind(`DELETE FROM AP_ENV WHERE rec_id = ?`)
@@ -185,27 +212,21 @@ func (s *Service) DecryptRow(ctx context.Context, recID string) (Env, map[string
 	return e, m, nil
 }
 
-// FindKind returns the first enabled env of a kind in a workspace (engine).
+// FindKind returns the first enabled env of a kind (global vault).
 func (s *Service) FindKind(ctx context.Context, workspaceID, kind string) (Env, map[string]any, error) {
+	_ = workspaceID
 	codes := KindCodes(kind)
 	if len(codes) == 0 {
 		return Env{}, nil, sql.ErrNoRows
 	}
 	holders := strings.TrimRight(strings.Repeat("?,", len(codes)), ",")
-	args := make([]any, 0, 1+len(codes))
-	args = append(args, workspaceID)
+	args := make([]any, 0, len(codes))
 	for _, c := range codes {
 		args = append(args, c)
 	}
 	q := s.st.Rebind(`SELECT rec_id, workspace_rec_id, env_kind, env_name, COALESCE(config_hint,''), is_enabled, config_cipher
-		FROM AP_ENV WHERE workspace_rec_id = ? AND env_kind IN (` + holders + `) AND is_enabled = 1 ORDER BY env_name LIMIT 1`)
-	var e Env
-	var cipherText string
-	err := s.st.SQL().QueryRowContext(ctx, q, args...).Scan(
-		&e.RecID, &e.WorkspaceRecID, &e.EnvKind, &e.EnvName, &e.ConfigHint, &e.IsEnabled, &cipherText)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Env{}, nil, err
-	}
+		FROM AP_ENV WHERE env_kind IN (` + holders + `) AND is_enabled = 1 ORDER BY env_name LIMIT 1`)
+	e, cipherText, err := s.scanKindRow(ctx, q, args...)
 	if err != nil {
 		return Env{}, nil, err
 	}
@@ -214,6 +235,17 @@ func (s *Service) FindKind(ctx context.Context, workspaceID, kind string) (Env, 
 		return Env{}, nil, err
 	}
 	return e, m, nil
+}
+
+func (s *Service) scanKindRow(ctx context.Context, q string, args ...any) (Env, string, error) {
+	var e Env
+	var cipherText string
+	err := s.st.SQL().QueryRowContext(ctx, q, args...).Scan(
+		&e.RecID, &e.WorkspaceRecID, &e.EnvKind, &e.EnvName, &e.ConfigHint, &e.IsEnabled, &cipherText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Env{}, "", err
+	}
+	return e, cipherText, err
 }
 
 func (s *Service) loadRow(ctx context.Context, recID string) (Env, string, error) {

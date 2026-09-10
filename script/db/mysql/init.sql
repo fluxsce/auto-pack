@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS `AP_PROJECT` (
 -- 环境凭据。密钥字段只存 APENC1 密文。
 CREATE TABLE IF NOT EXISTS `AP_ENV` (
   `rec_id` VARCHAR(36) NOT NULL COMMENT '主键 UUID',
-  `workspace_rec_id` VARCHAR(36) NOT NULL COMMENT '所属空间',
+  `workspace_rec_id` VARCHAR(36) NOT NULL COMMENT '历史列，SDK 环境为全局，写入空串',
   `env_kind` VARCHAR(64) NOT NULL COMMENT 'git / ftp / smtp / ssh / jdk / maven / node',
   `env_name` VARCHAR(128) NOT NULL COMMENT '显示名',
   `config_cipher` LONGTEXT NOT NULL COMMENT '配置 JSON 密文',

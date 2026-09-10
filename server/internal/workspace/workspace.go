@@ -35,7 +35,7 @@ type Member struct {
 }
 
 var (
-	// ErrLastOwner 空间必须至少保留一名所有者，否则无人能再管成员。
+	// ErrLastOwner 平台必须至少保留一名所有者，否则无人能再管成员。
 	ErrLastOwner = errors.New("cannot demote or remove the last owner")
 	// ErrDefaultWorkspace 默认工作空间不可删除。
 	ErrDefaultWorkspace = errors.New("cannot delete the default workspace")
@@ -64,30 +64,78 @@ func SeedDefaultWorkspace(ctx context.Context, st *store.Store) error {
 	if err := st.SQL().QueryRowContext(ctx, q).Scan(&n); err != nil {
 		return err
 	}
-	if n > 0 {
-		return nil
+	if n == 0 {
+		ins := st.Rebind(`INSERT INTO AP_WORKSPACE (rec_id, workspace_code, workspace_name, owner_user_id, remark)
+			VALUES (?, ?, ?, ?, ?)`)
+		if _, err := st.SQL().ExecContext(ctx, ins, access.DefaultWorkspaceRecID, "default", "默认工作空间",
+			access.DefaultAdminRecID, "系统初始化"); err != nil {
+			return err
+		}
+		mem := st.Rebind(`INSERT INTO AP_WORKSPACE_MEMBER (rec_id, workspace_rec_id, user_rec_id, member_role)
+			VALUES (?, ?, ?, ?)`)
+		if _, err := st.SQL().ExecContext(ctx, mem, access.NewID(), access.DefaultWorkspaceRecID, access.DefaultAdminRecID, iam.RoleOwner); err != nil {
+			return err
+		}
 	}
-	ins := st.Rebind(`INSERT INTO AP_WORKSPACE (rec_id, workspace_code, workspace_name, owner_user_id, remark)
-		VALUES (?, ?, ?, ?, ?)`)
-	if _, err := st.SQL().ExecContext(ctx, ins, access.DefaultWorkspaceRecID, "default", "默认工作空间",
-		access.DefaultAdminRecID, "系统初始化"); err != nil {
-		return err
-	}
-	mem := st.Rebind(`INSERT INTO AP_WORKSPACE_MEMBER (rec_id, workspace_rec_id, user_rec_id, member_role)
-		VALUES (?, ?, ?, ?)`)
-	_, err := st.SQL().ExecContext(ctx, mem, access.NewID(), access.DefaultWorkspaceRecID, access.DefaultAdminRecID, iam.RoleOwner)
-	return err
+	return EnsureGlobalMembers(ctx, st)
 }
 
-// ListForActor returns workspaces the actor belongs to.
+// EnsureGlobalMembers 给已有成员补一条 workspace_rec_id 为空的全局权限行，角色取该用户最高角色。
+func EnsureGlobalMembers(ctx context.Context, st *store.Store) error {
+	q := st.Rebind(`SELECT user_rec_id, workspace_rec_id, member_role FROM AP_WORKSPACE_MEMBER`)
+	rows, err := st.SQL().QueryContext(ctx, q)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type rec struct {
+		user, ws, role string
+	}
+	byUser := map[string][]rec{}
+	for rows.Next() {
+		var r rec
+		if err := rows.Scan(&r.user, &r.ws, &r.role); err != nil {
+			return err
+		}
+		byUser[r.user] = append(byUser[r.user], r)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	ins := st.Rebind(`INSERT INTO AP_WORKSPACE_MEMBER (rec_id, workspace_rec_id, user_rec_id, member_role)
+		VALUES (?, ?, ?, ?)`)
+	for userID, list := range byUser {
+		hasGlobal := false
+		best := iam.RoleViewer
+		for _, r := range list {
+			if r.ws == access.GlobalMemberWorkspaceID {
+				hasGlobal = true
+			}
+			best = betterRole(best, r.role)
+		}
+		if hasGlobal {
+			continue
+		}
+		if _, err := st.SQL().ExecContext(ctx, ins, access.NewID(), access.GlobalMemberWorkspaceID, userID, best); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListForActor returns all workspaces when the actor has any membership.
+// 成员是全局权限，能进控制台就能看到全部空间。
 func (s *Service) ListForActor(ctx context.Context, actor iam.Actor) ([]Workspace, error) {
-	q := s.st.Rebind(`SELECT w.rec_id, w.workspace_code, w.workspace_name, w.owner_user_id, COALESCE(w.remark,''), m.member_role,
+	q := s.st.Rebind(`SELECT w.rec_id, w.workspace_code, w.workspace_name, w.owner_user_id, COALESCE(w.remark,''),
+		(SELECT m.member_role FROM AP_WORKSPACE_MEMBER m WHERE m.user_rec_id = ?
+			ORDER BY CASE m.member_role WHEN 'owner' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END,
+				CASE WHEN m.workspace_rec_id = ? THEN 0 ELSE 1 END
+			LIMIT 1),
 		(SELECT COUNT(1) FROM AP_PROJECT p WHERE p.workspace_rec_id = w.rec_id)
 		FROM AP_WORKSPACE w
-		INNER JOIN AP_WORKSPACE_MEMBER m ON m.workspace_rec_id = w.rec_id
-		WHERE m.user_rec_id = ?
+		WHERE EXISTS (SELECT 1 FROM AP_WORKSPACE_MEMBER m WHERE m.user_rec_id = ?)
 		ORDER BY w.workspace_name`)
-	rows, err := s.st.SQL().QueryContext(ctx, q, actor.UserID)
+	rows, err := s.st.SQL().QueryContext(ctx, q, actor.UserID, access.GlobalMemberWorkspaceID, actor.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -144,81 +192,102 @@ func (s *Service) Create(ctx context.Context, actor iam.Actor, code, name string
 	return w, nil
 }
 
-// ListMembers returns members (user.admin).
+// ListMembers returns platform members (user.admin). 同一用户多行时只回最高角色。
 func (s *Service) ListMembers(ctx context.Context, actor iam.Actor, workspaceID string) ([]Member, error) {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return nil, err
 	}
 	q := s.st.Rebind(`SELECT m.rec_id, m.workspace_rec_id, m.user_rec_id, u.login_name, u.display_name, m.member_role
 		FROM AP_WORKSPACE_MEMBER m
 		INNER JOIN AP_USER u ON u.rec_id = m.user_rec_id
-		WHERE m.workspace_rec_id = ?
-		ORDER BY m.member_role, u.login_name`)
-	rows, err := s.st.SQL().QueryContext(ctx, q, workspaceID)
+		ORDER BY u.login_name`)
+	rows, err := s.st.SQL().QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []Member
+	best := map[string]Member{}
+	order := []string{}
 	for rows.Next() {
 		var m Member
 		if err := rows.Scan(&m.RecID, &m.WorkspaceRecID, &m.UserRecID, &m.LoginName, &m.DisplayName, &m.MemberRole); err != nil {
 			return nil, err
 		}
-		out = append(out, m)
+		cur, ok := best[m.UserRecID]
+		if !ok {
+			best[m.UserRecID] = m
+			order = append(order, m.UserRecID)
+			continue
+		}
+		if roleRank(m.MemberRole) < roleRank(cur.MemberRole) ||
+			(roleRank(m.MemberRole) == roleRank(cur.MemberRole) && m.WorkspaceRecID == access.GlobalMemberWorkspaceID) {
+			best[m.UserRecID] = m
+		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]Member, 0, len(order))
+	for _, id := range order {
+		row := best[id]
+		row.WorkspaceRecID = access.GlobalMemberWorkspaceID
+		out = append(out, row)
+	}
+	return out, nil
 }
 
-// AddMember adds or updates a member (user.admin).
+// AddMember adds or updates a platform member (user.admin).
 func (s *Service) AddMember(ctx context.Context, actor iam.Actor, workspaceID, userID, role string) error {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return err
 	}
 	role = strings.TrimSpace(role)
 	if role != iam.RoleOwner && role != iam.RoleOperator && role != iam.RoleViewer {
 		return errors.New("member_role must be owner, operator or viewer")
 	}
-	q := s.st.Rebind(`SELECT rec_id FROM AP_WORKSPACE_MEMBER WHERE workspace_rec_id = ? AND user_rec_id = ?`)
-	var existing string
-	err := s.st.SQL().QueryRowContext(ctx, q, workspaceID, userID).Scan(&existing)
-	if err == nil {
-		if role != iam.RoleOwner {
-			if err := s.guardLastOwner(ctx, workspaceID, userID); err != nil {
-				return err
-			}
+	if role != iam.RoleOwner {
+		if err := s.guardLastOwner(ctx, userID); err != nil {
+			return err
 		}
-		upd := s.st.Rebind(`UPDATE AP_WORKSPACE_MEMBER SET member_role = ? WHERE rec_id = ?`)
-		_, err = s.st.SQL().ExecContext(ctx, upd, role, existing)
+	}
+	upd := s.st.Rebind(`UPDATE AP_WORKSPACE_MEMBER SET member_role = ? WHERE user_rec_id = ?`)
+	if _, err := s.st.SQL().ExecContext(ctx, upd, role, userID); err != nil {
 		return err
+	}
+	q := s.st.Rebind(`SELECT rec_id FROM AP_WORKSPACE_MEMBER WHERE user_rec_id = ? AND workspace_rec_id = ?`)
+	var existing string
+	err := s.st.SQL().QueryRowContext(ctx, q, userID, access.GlobalMemberWorkspaceID).Scan(&existing)
+	if err == nil {
+		return nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	ins := s.st.Rebind(`INSERT INTO AP_WORKSPACE_MEMBER (rec_id, workspace_rec_id, user_rec_id, member_role)
 		VALUES (?, ?, ?, ?)`)
-	_, err = s.st.SQL().ExecContext(ctx, ins, access.NewID(), workspaceID, userID, role)
+	_, err = s.st.SQL().ExecContext(ctx, ins, access.NewID(), access.GlobalMemberWorkspaceID, userID, role)
 	return err
 }
 
-// RemoveMember deletes a membership (user.admin).
+// RemoveMember revokes a user's membership on the whole platform (user.admin).
 func (s *Service) RemoveMember(ctx context.Context, actor iam.Actor, workspaceID, userID string) error {
-	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionUserAdmin); err != nil {
+	if err := s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionUserAdmin); err != nil {
 		return err
 	}
-	if err := s.guardLastOwner(ctx, workspaceID, userID); err != nil {
+	if err := s.guardLastOwner(ctx, userID); err != nil {
 		return err
 	}
-	q := s.st.Rebind(`DELETE FROM AP_WORKSPACE_MEMBER WHERE workspace_rec_id = ? AND user_rec_id = ?`)
-	_, err := s.st.SQL().ExecContext(ctx, q, workspaceID, userID)
+	q := s.st.Rebind(`DELETE FROM AP_WORKSPACE_MEMBER WHERE user_rec_id = ?`)
+	_, err := s.st.SQL().ExecContext(ctx, q, userID)
 	return err
 }
 
-// guardLastOwner 拒绝降级或移出空间内唯一的所有者。
-func (s *Service) guardLastOwner(ctx context.Context, workspaceID, userID string) error {
-	q := s.st.Rebind(`SELECT member_role FROM AP_WORKSPACE_MEMBER WHERE workspace_rec_id = ? AND user_rec_id = ?`)
+// guardLastOwner 拒绝降级或移出平台内唯一的所有者。
+func (s *Service) guardLastOwner(ctx context.Context, userID string) error {
+	q := s.st.Rebind(`SELECT member_role FROM AP_WORKSPACE_MEMBER WHERE user_rec_id = ?
+		ORDER BY CASE member_role WHEN 'owner' THEN 0 WHEN 'operator' THEN 1 ELSE 2 END LIMIT 1`)
 	var role string
-	err := s.st.SQL().QueryRowContext(ctx, q, workspaceID, userID).Scan(&role)
+	err := s.st.SQL().QueryRowContext(ctx, q, userID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -228,9 +297,9 @@ func (s *Service) guardLastOwner(ctx context.Context, workspaceID, userID string
 	if role != iam.RoleOwner {
 		return nil
 	}
-	cnt := s.st.Rebind(`SELECT COUNT(1) FROM AP_WORKSPACE_MEMBER WHERE workspace_rec_id = ? AND member_role = ?`)
+	cnt := s.st.Rebind(`SELECT COUNT(DISTINCT user_rec_id) FROM AP_WORKSPACE_MEMBER WHERE member_role = ?`)
 	var n int
-	if err := s.st.SQL().QueryRowContext(ctx, cnt, workspaceID, iam.RoleOwner).Scan(&n); err != nil {
+	if err := s.st.SQL().QueryRowContext(ctx, cnt, iam.RoleOwner).Scan(&n); err != nil {
 		return err
 	}
 	if n <= 1 {
@@ -337,7 +406,7 @@ func (s *Service) Clone(ctx context.Context, actor iam.Actor, req CloneRequest) 
 	return CloneResult{Workspace: ws, ProjectsCloned: copied}, nil
 }
 
-// Delete 删除空间及其工程、环境、作业与成员。默认空间不可删；有运行中作业时拒绝。
+// Delete 删除空间及其工程与作业。成员和 SDK 环境是权限/凭据，不随空间删除。默认空间不可删；有运行中作业时拒绝。
 func (s *Service) Delete(ctx context.Context, actor iam.Actor, id string) error {
 	if id == access.DefaultWorkspaceRecID {
 		return ErrDefaultWorkspace
@@ -369,10 +438,6 @@ func (s *Service) Delete(ctx context.Context, actor iam.Actor, id string) error 
 		}
 		prjs := tx.Rebind(`DELETE FROM AP_PROJECT WHERE workspace_rec_id = ?`)
 		if _, err := tx.SQL().ExecContext(ctx, prjs, id); err != nil {
-			return err
-		}
-		envs := tx.Rebind(`DELETE FROM AP_ENV WHERE workspace_rec_id = ?`)
-		if _, err := tx.SQL().ExecContext(ctx, envs, id); err != nil {
 			return err
 		}
 		mems := tx.Rebind(`DELETE FROM AP_WORKSPACE_MEMBER WHERE workspace_rec_id = ?`)
@@ -477,6 +542,26 @@ func defaultFlag(id string) int {
 		return 1
 	}
 	return 0
+}
+
+func roleRank(role string) int {
+	switch role {
+	case iam.RoleOwner:
+		return 0
+	case iam.RoleOperator:
+		return 1
+	case iam.RoleViewer:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func betterRole(a, b string) string {
+	if roleRank(b) < roleRank(a) {
+		return b
+	}
+	return a
 }
 
 func nullStr(s string) any {
