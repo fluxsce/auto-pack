@@ -1,12 +1,12 @@
-# 2.0 runtime
+# 2.0 runtime（只忽略仓库根下的运行时目录，不要误伤 script/run）
 server/data/
 server/bin/
 server/logs/
 /server/autopack
 *.exe
-data/
-logs/
-run/
+/data/
+/logs/
+/run/
 
 # 本机运行配置（DSN / 密钥）。仓库只收 *.example
 server/configs/app.yaml
@@ -26,8 +26,8 @@ legacy/backend/logs/
 legacy/frontend/node_modules/
 legacy/frontend/dist/
 
-# Release packages
-build/
+# Release packages（只忽略仓库根 build/dist，不要误伤 script/build）
+/build/
 
 # OS / IDE
 .DS_Store
