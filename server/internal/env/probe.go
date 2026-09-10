@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -252,7 +253,54 @@ func probeHomeOrBin(ctx context.Context, home, bin, fallback string, args ...str
 			return ProbeResult{OK: true, Message: "home ok", Details: map[string]string{"home": home}}
 		}
 	}
-	return probeBinary(ctx, firstNonEmpty(bin, fallback), args...)
+	return probeBinary(ctx, resolveToolchainBin(firstNonEmpty(bin, fallback), fallback), args...)
+}
+
+// resolveToolchainBin 把安装根、bin 目录或可执行文件收成实际二进制。
+// 例如 /usr/local/node-v22.17.0/bin → .../bin/node，避免 exec 目录得到 permission denied。
+func resolveToolchainBin(configured, name string) string {
+	p := strings.TrimSpace(configured)
+	if p == "" {
+		return name
+	}
+	st, err := os.Stat(p)
+	if err != nil || !st.IsDir() {
+		return p
+	}
+	for _, cand := range toolchainBinCandidates(p, name) {
+		if info, err := os.Stat(cand); err == nil && info.Mode().IsRegular() {
+			return cand
+		}
+	}
+	return filepath.Join(p, name)
+}
+
+func toolchainBinCandidates(dir, name string) []string {
+	names := toolchainExeNames(name)
+	out := make([]string, 0, len(names)*2)
+	for _, n := range names {
+		out = append(out, filepath.Join(dir, n))
+	}
+	for _, n := range names {
+		out = append(out, filepath.Join(dir, "bin", n))
+	}
+	return out
+}
+
+func toolchainExeNames(name string) []string {
+	if runtime.GOOS != "windows" {
+		return []string{name}
+	}
+	switch name {
+	case "node":
+		return []string{"node.exe"}
+	case "npm":
+		return []string{"npm.cmd", "npm.exe", "npm"}
+	case "npx":
+		return []string{"npx.cmd", "npx.exe", "npx"}
+	default:
+		return []string{name + ".exe", name + ".cmd", name}
+	}
 }
 
 func probeBinary(ctx context.Context, name string, args ...string) ProbeResult {
@@ -267,8 +315,14 @@ func probeBinary(ctx context.Context, name string, args ...string) ProbeResult {
 			return ProbeResult{OK: false, Message: err.Error()}
 		}
 		path = looked
-	} else if _, err := os.Stat(name); err != nil {
-		return ProbeResult{OK: false, Message: err.Error()}
+	} else {
+		st, err := os.Stat(name)
+		if err != nil {
+			return ProbeResult{OK: false, Message: err.Error()}
+		}
+		if st.IsDir() {
+			return ProbeResult{OK: false, Message: name + " is a directory; set the node/java/mvn executable"}
+		}
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	out, err := cmd.CombinedOutput()

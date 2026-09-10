@@ -37,19 +37,24 @@ const projects = ref<Project[]>([])
 const analysis = ref<MavenAnalysis | null>(null)
 const active = ref<AutoBuildSession | null>(null)
 const syncHint = ref('')
+const syncWaiting = ref(false)
 let loop: Promise<void> | null = null
+let planTask: Promise<void> | null = null
 
 const enabledProjects = computed(() => projects.value.filter((p) => p.is_enabled !== 0))
 const selectable = computed(() => [...enabledProjects.value].sort((a, b) => a.project_name.localeCompare(b.project_name)))
 const projectOptions = computed(() => selectable.value.map((p) => ({ value: p.rec_id, label: p.project_name })))
 const { releaseBusy, refresh: refreshBatch } = useBatchActivity(() => props.workspace?.rec_id || '')
+const sessionRunning = computed(() => active.value?.status === 'running' || hasRunningAutoBuildSession(props.workspace?.rec_id || ''))
 const occupyTip = computed(() => {
   if (releaseBusy.value && !running.value) return t('workspaces.autoBatchBusyRelease')
-  if (running.value) return t('workspaces.autoBatchBusyBuild')
+  if (running.value || sessionRunning.value) return t('workspaces.autoBatchBusyBuild')
+  if (syncWaiting.value) return t('workspaces.autoBuildSyncWait')
   return ''
 })
 const startBlocked = computed(() => releaseBusy.value && !running.value)
-const canSubmit = computed(() => planned.value.length > 0 && !running.value && !loadingPlan.value && !startBlocked.value && (scope.value !== 'selected' || selectedRecIds.value.length > 0))
+const busySelf = computed(() => running.value || loadingPlan.value || sessionRunning.value)
+const canSubmit = computed(() => planned.value.length > 0 && !busySelf.value && !startBlocked.value && (scope.value !== 'selected' || selectedRecIds.value.length > 0))
 const cycleIds = computed(() => (analysis.value ? cyclicRecIds(analysis.value) : new Set<string>()))
 const coordById = computed(() => {
   const map = new Map<string, string>()
@@ -91,11 +96,44 @@ function stamp(): string {
   return new Date().toLocaleString()
 }
 
+function isSyncInProgress(e: unknown): boolean {
+  return /source sync already in progress/i.test(errText(e))
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function appendLog(line: string): void {
   logText.value = logText.value ? `${logText.value}\n${line}` : line
   if (active.value) {
     active.value.logText = logText.value
     saveAutoBuildSession(active.value)
+  }
+}
+
+async function syncSourcesOrWait(workspaceId: string): Promise<Awaited<ReturnType<typeof syncSourcesWithLog>>> {
+  let noted = false
+  for (;;) {
+    try {
+      const result = await syncSourcesWithLog(workspaceId, t, appendLog, (hint) => {
+        syncHint.value = hint
+      })
+      syncWaiting.value = false
+      return result
+    } catch (e) {
+      if (!isSyncInProgress(e) || props.workspace?.rec_id !== workspaceId) {
+        syncWaiting.value = false
+        throw e
+      }
+      syncWaiting.value = true
+      if (!noted) {
+        appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncWait')}`)
+        noted = true
+      }
+      syncHint.value = t('workspaces.autoBuildSyncWait')
+      await sleep(2000)
+    }
   }
 }
 
@@ -124,37 +162,44 @@ function logPlan(): void {
 
 async function refreshPlan(resync: boolean): Promise<void> {
   if (!props.workspace?.rec_id || running.value || startBlocked.value) return
+  if (planTask) return planTask
+  const workspaceId = props.workspace.rec_id
   loadingPlan.value = true
-  try {
-    if (!projects.value.length) await loadProjects()
-    applyPlan(analysis.value)
-    const graph = enabledProjects.value.filter((p) => isOrderedBuildType(p.project_type))
-    if (resync || !analysis.value) {
-      warnings.value = []
-      const sync = await syncSourcesWithLog(props.workspace.rec_id, t, appendLog, (hint) => {
-        syncHint.value = hint
-      })
-      appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncDone', { synced: sync.synced, skipped: sync.skipped, failed: sync.failed })}`)
-      if (sync.failed_items?.length) warnings.value = [...warnings.value, ...sync.failed_items]
-      if (graph.length) {
-        syncHint.value = t('workspaces.autoBuildOrderStart')
-        appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
-        analysis.value = await fetchMavenOrder(props.workspace.rec_id)
-        warnings.value = [...warnings.value, ...(analysis.value.warnings ?? [])]
-        appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: analysis.value.full_build_order?.length ?? 0 })}`)
-      } else {
-        analysis.value = null
+  planTask = (async () => {
+    try {
+      if (!projects.value.length) await loadProjects()
+      applyPlan(analysis.value)
+      const graph = enabledProjects.value.filter((p) => isOrderedBuildType(p.project_type))
+      if (resync || !analysis.value) {
+        warnings.value = []
+        const sync = await syncSourcesOrWait(workspaceId)
+        if (props.workspace?.rec_id !== workspaceId) return
+        appendLog(`[${stamp()}] ${t('workspaces.autoBuildSyncDone', { synced: sync.synced, skipped: sync.skipped, failed: sync.failed })}`)
+        if (sync.failed_items?.length) warnings.value = [...warnings.value, ...sync.failed_items]
+        if (graph.length) {
+          syncHint.value = t('workspaces.autoBuildOrderStart')
+          appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderStart')}`)
+          analysis.value = await fetchMavenOrder(workspaceId)
+          warnings.value = [...warnings.value, ...(analysis.value.warnings ?? [])]
+          appendLog(`[${stamp()}] ${t('workspaces.autoBuildOrderDone', { count: analysis.value.full_build_order?.length ?? 0 })}`)
+        } else {
+          analysis.value = null
+        }
       }
+      applyPlan(analysis.value)
+      logPlan()
+    } catch (e) {
+      applyPlan(analysis.value)
+      appendLog(`[${stamp()}] ${errText(e)}`)
+      toast.error(errText(e))
+    } finally {
+      loadingPlan.value = false
+      syncHint.value = ''
+      syncWaiting.value = false
+      planTask = null
     }
-    applyPlan(analysis.value)
-    logPlan()
-  } catch (e) {
-    applyPlan(analysis.value)
-    toast.error(errText(e))
-  } finally {
-    loadingPlan.value = false
-    syncHint.value = ''
-  }
+  })()
+  return planTask
 }
 
 async function runLoop(startIndex: number, analysisCycles: Set<string>): Promise<void> {
@@ -244,32 +289,38 @@ async function runLoop(startIndex: number, analysisCycles: Set<string>): Promise
 }
 
 async function onOpen(): Promise<void> {
-  logText.value = ''
-  planned.value = []
-  warnings.value = []
-  await refreshBatch()
-  await loadProjects()
+  if (running.value || loadingPlan.value || planTask) return
   const id = props.workspace?.rec_id || ''
-  const saved = loadAutoBuildSession(id)
+  const saved = id ? loadAutoBuildSession(id) : null
   if (saved?.status === 'running') {
+    logText.value = saved.logText
+    active.value = saved
+    scope.value = saved.scope
+    selectedRecIds.value = [...saved.selectedRecIds]
+    includeNonMaven.value = saved.includeNonMaven
+    running.value = true
+    await refreshBatch()
+    await loadProjects()
     const boot = await fetchServerBootAt()
     if (await isAutoBuildSessionStale(saved, boot)) {
+      running.value = false
+      active.value = null
       clearAutoBuildSession(id)
       toast.warning(t('workspaces.autoBuildStaleSession'))
       if (!startBlocked.value) void refreshPlan(true)
       emit('sessionChange')
       return
     }
-    active.value = saved
-    scope.value = saved.scope
-    selectedRecIds.value = [...saved.selectedRecIds]
-    includeNonMaven.value = saved.includeNonMaven
-    logText.value = saved.logText
     planned.value = saved.planRecIds.map((rid) => projects.value.find((p) => p.rec_id === rid)).filter((p): p is Project => !!p)
     appendLog(`[${stamp()}] ${t('workspaces.autoBuildResume')}`)
     void runLoop(saved.currentIndex, analysis.value ? cyclicRecIds(analysis.value) : new Set())
     return
   }
+  logText.value = ''
+  planned.value = []
+  warnings.value = []
+  await refreshBatch()
+  await loadProjects()
   active.value = null
   if (startBlocked.value) return
   void refreshPlan(true)
@@ -329,7 +380,7 @@ watch(
           <RsFieldset
             :legend="t('workspaces.autoBuildScope')"
             :tooltip="t('workspaces.autoBuildScopeTip')"
-            :disabled="running || loadingPlan || startBlocked"
+            :disabled="busySelf || startBlocked"
             border-style="dashed"
             title-tone="muted"
             size="sm"
@@ -391,7 +442,7 @@ watch(
     </template>
     <template #footer>
       <RsButton variant="ghost" :disabled="running || startBlocked" @click="open = false">{{ t('common.cancel') }}</RsButton>
-      <RsButton :loading="running" :disabled="!canSubmit" @click="submit">{{ t('workspaces.autoBuildExecute') }}</RsButton>
+      <RsButton :loading="running || loadingPlan" :disabled="!canSubmit" @click="submit">{{ t('workspaces.autoBuildExecute') }}</RsButton>
     </template>
   </RsDialog>
 </template>

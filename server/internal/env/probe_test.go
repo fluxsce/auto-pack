@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,38 @@ func TestRunProbeJDKMissingHome(t *testing.T) {
 	res := runProbe(context.Background(), "jdk", map[string]any{"java_home": filepath.Join(t.TempDir(), "missing")}, "")
 	if res.OK {
 		t.Fatal("missing home must fail")
+	}
+}
+
+func TestResolveToolchainBinFromNodeHome(t *testing.T) {
+	root := t.TempDir()
+	bin := filepath.Join(root, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(bin, toolchainExeNames("node")[0])
+	if err := os.WriteFile(node, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolveToolchainBin(bin, "node"); got != node {
+		t.Fatalf("bin dir: got %s want %s", got, node)
+	}
+	if got := resolveToolchainBin(root, "node"); got != node {
+		t.Fatalf("home dir: got %s want %s", got, node)
+	}
+	if got := resolveToolchainBin(node, "node"); got != node {
+		t.Fatalf("file: got %s want %s", got, node)
+	}
+}
+
+func TestProbeBinaryRejectsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	res := probeBinary(context.Background(), dir, "-v")
+	if res.OK {
+		t.Fatal("directory must fail")
+	}
+	if !strings.Contains(res.Message, "directory") {
+		t.Fatalf("want directory hint, got %s", res.Message)
 	}
 }
 
