@@ -22,7 +22,7 @@
     "test:server": "go test -C server ./..."
   },
   "dependencies": {
-    "@niuma/ui": "link:../niuma-ui",
+    "@niuma/ui": "npm:niuma-ui@latest",
     "axios": "^1.13.2",
     "pinia": "^3.0.4",
     "vue": "^3.5.39",

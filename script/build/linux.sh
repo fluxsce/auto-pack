@@ -58,6 +58,20 @@ cd "$ROOT"
 
 step() { printf '==> %s\n' "$1"; }
 
+# 发行打包机常是干净 clone：没有 node_modules，vue-tsc 不在 PATH。
+# @niuma/ui 走 npm:niuma-ui，不依赖旁路仓库。
+ensure_web_deps() {
+  command -v pnpm >/dev/null || { echo "pnpm not found" >&2; exit 1; }
+  if [[ ! -d "$ROOT/node_modules" || ! -e "$ROOT/node_modules/.bin/vue-tsc" ]]; then
+    step "pnpm install (node_modules missing)"
+    if [[ -f "$ROOT/pnpm-lock.yaml" ]]; then
+      pnpm install --frozen-lockfile
+    else
+      pnpm install
+    fi
+  fi
+}
+
 VERSION=""
 if command -v python3 >/dev/null 2>&1; then
   VERSION="$(python3 -c 'import json; print(json.load(open("package.json", encoding="utf-8"))["version"])' 2>/dev/null || true)"
@@ -86,8 +100,8 @@ rm -rf "$PKG"
 mkdir -p "$PKG"
 
 if [[ "$SKIP_WEB" -eq 0 ]]; then
+  ensure_web_deps
   step "pnpm build (web -> server/web)"
-  command -v pnpm >/dev/null || { echo "pnpm not found" >&2; exit 1; }
   pnpm build
 else
   [[ -f "$ROOT/server/web/index.html" ]] || { echo "SkipWeb but server/web/index.html missing" >&2; exit 1; }

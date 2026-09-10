@@ -54,21 +54,41 @@ function Sync-AppVersion([string]$Repo) {
     }
 }
 
-function Invoke-Frontend([string]$Repo) {
-    Write-Step 'pnpm build (web -> server/web)'
-    Push-Location $Repo
+function Invoke-Pnpm([string]$WorkDir, [string[]]$PnpmArgs) {
+    Push-Location $WorkDir
     try {
-        $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
-        if (-not $pnpm) {
-            throw 'pnpm not found. Install Node >= 20 and pnpm 9.'
-        }
-        & pnpm build
+        & pnpm @PnpmArgs
         if ($LASTEXITCODE -ne 0) {
-            throw "pnpm build failed ($LASTEXITCODE)"
+            throw "pnpm $($PnpmArgs -join ' ') failed ($LASTEXITCODE) in $WorkDir"
         }
     } finally {
         Pop-Location
     }
+}
+
+function Ensure-WebDeps([string]$Repo) {
+    $pnpm = Get-Command pnpm -ErrorAction SilentlyContinue
+    if (-not $pnpm) {
+        throw 'pnpm not found. Install Node >= 20 and pnpm 9.'
+    }
+    $vueTsc = Join-Path $Repo 'node_modules\.bin\vue-tsc'
+    $vueTscCmd = Join-Path $Repo 'node_modules\.bin\vue-tsc.cmd'
+    if (-not (Test-Path -LiteralPath (Join-Path $Repo 'node_modules') -PathType Container) -or
+        (-not (Test-Path -LiteralPath $vueTsc) -and -not (Test-Path -LiteralPath $vueTscCmd))) {
+        Write-Step 'pnpm install (node_modules missing)'
+        $lock = Join-Path $Repo 'pnpm-lock.yaml'
+        if (Test-Path -LiteralPath $lock -PathType Leaf) {
+            Invoke-Pnpm $Repo @('install', '--frozen-lockfile')
+        } else {
+            Invoke-Pnpm $Repo @('install')
+        }
+    }
+}
+
+function Invoke-Frontend([string]$Repo) {
+    Ensure-WebDeps $Repo
+    Write-Step 'pnpm build (web -> server/web)'
+    Invoke-Pnpm $Repo @('build')
     $index = Join-Path $Repo 'server\web\index.html'
     if (-not (Test-Path -LiteralPath $index -PathType Leaf)) {
         throw "frontend missing: $index"

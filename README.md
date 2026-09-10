@@ -45,7 +45,7 @@ legacy/                 # v1.0.0 试用版
 ## 启动
 
 ```bash
-# 需本机有 ../niuma-ui 与 Go
+# 需 Node >= 20、pnpm、Go；UI 从 npm 装 niuma-ui
 # 首次：复制示例配置，再按本机改 DSN / 密钥（app.yaml 不进 git）
 #   Copy-Item server/configs/app.yaml.example server/configs/app.yaml
 pnpm install
