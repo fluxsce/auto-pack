@@ -47,7 +47,7 @@ const {
 
 <template>
   <div class="ws-pane">
-    <RsCard class="ws-pane__card" variant="outlined" elevated radius="lg" :title="t('workspaces.listTitle')" :padding="false">
+    <RsCard class="ws-pane__card" fill variant="outlined" elevated radius="lg" :title="t('workspaces.listTitle')" :padding="false">
     <template #actions>
       <RsButton size="sm" variant="ghost" @click="openImport('new')">{{ t('workspaces.importWorkspace') }}</RsButton>
       <RsButton size="sm" @click="openCreate">{{ t('workspaces.newWorkspace') }}</RsButton>
@@ -139,8 +139,10 @@ const {
 .ws-pane {
   min-width: 0;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .ws-pane__card {
@@ -149,13 +151,23 @@ const {
   min-height: 0;
 }
 
+.ws-pane__card :deep(.rs-card__body) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .ws-toolbar {
+  flex-shrink: 0;
   padding: 0.75rem 0.85rem 0.15rem;
 }
 
 .ws-list {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 0.55rem;
   padding: 0.7rem 0.75rem 0.85rem;
   overflow: auto;

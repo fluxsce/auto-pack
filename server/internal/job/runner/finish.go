@@ -13,8 +13,18 @@ import (
 )
 
 func (e *Engine) afterSuccess(ctx context.Context, j job.Job, w io.Writer) {
-	if j.JobType == job.TypeBuild {
+	// 工作空间批次已按拓扑排队，成功后再按 depends_on 入队会重复构建。
+	if j.JobType == job.TypeBuild && !skipBatchSideEffects(j) {
 		e.enqueueDependents(ctx, j, w)
+	}
+}
+
+func skipBatchSideEffects(j job.Job) bool {
+	switch strings.TrimSpace(job.DecodePayload(j.PayloadJSON).Origin) {
+	case job.OriginAutoBuild, job.OriginAutoRelease:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -59,6 +69,9 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 	if w == nil {
 		w = io.Discard
 	}
+	if skipBatchSideEffects(j) {
+		return
+	}
 	if e.st != nil && j.RecID != "" {
 		if latest, err := job.JobByID(ctx, e.st, j.RecID); err == nil {
 			j = latest
@@ -97,7 +110,8 @@ func (e *Engine) sendActionMail(ctx context.Context, j job.Job, prj project.Proj
 		sc.To = to
 	}
 	if len(sc.Recipients()) == 0 {
-		return fmt.Errorf("smtp: no recipients")
+		logLine(w, "已跳过邮件：未配置收件人")
+		return nil
 	}
 	subject, body := composeNotifyMail(j, prj, e.workspaceTitle(ctx, j.WorkspaceRecID), act, ok, errMsg)
 	if project.ShouldAttachMailLog(act, ok) {

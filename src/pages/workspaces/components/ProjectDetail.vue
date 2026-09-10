@@ -99,12 +99,6 @@ const sections = computed(() =>
             :log="logText"
             :live="live"
           />
-          <ProjectHistoryPane
-            v-else-if="tab === 'history'"
-            :jobs="jobs"
-            :selected-id="selectedJobId"
-            @select="selectJob"
-          />
           <ProjectFilesPane
             v-else-if="tab === 'files' && project"
             :project-id="project.rec_id"

@@ -31,6 +31,10 @@ func (e *Engine) stepPost(ctx context.Context, j job.Job, prj project.Project, p
 			continue
 		}
 		if project.IsEmailAction(act.Kind) {
+			if skipBatchSideEffects(j) {
+				logLine(w, "%d. %s：跳过（工作空间批次不按工程发信）", n, title)
+				continue
+			}
 			logLine(w, "%d. %s：作业结束后发送（%s）", n, title, when)
 			continue
 		}

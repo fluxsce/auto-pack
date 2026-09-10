@@ -494,6 +494,7 @@ async function save(): Promise<void> {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .editor {

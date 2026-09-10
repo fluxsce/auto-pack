@@ -41,7 +41,7 @@ func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspace
 		WorkspaceRecID: workspaceID,
 		ProjectRecID:   projectID,
 		JobType:        job.TypeBuild,
-		Payload:        job.Payload{SkipSync: skipSync, Origin: "auto_build"},
+		Payload:        job.Payload{SkipSync: skipSync, Origin: job.OriginAutoBuild},
 	})
 	if err != nil {
 		return Outcome{Message: err.Error()}

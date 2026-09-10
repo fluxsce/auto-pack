@@ -24,6 +24,13 @@ const (
 )
 
 const (
+	// OriginAutoBuild 工作空间自动构建提交的工程作业。
+	OriginAutoBuild = "auto_build"
+	// OriginAutoRelease 发版后自动构建提交的工程作业。
+	OriginAutoRelease = "auto_release"
+)
+
+const (
 	StatusQueued    = "queued"
 	StatusRunning   = "running"
 	StatusSucceeded = "succeeded"

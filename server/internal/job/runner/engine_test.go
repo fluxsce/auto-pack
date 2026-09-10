@@ -54,8 +54,34 @@ func TestSkipSync(t *testing.T) {
 	}, job.Payload{SkipSync: true}); !skip || !strings.Contains(reason, "already synced") {
 		t.Fatalf("skip_sync %v %q", skip, reason)
 	}
-	if originLabel("auto_build") != "工作空间自动构建" {
-		t.Fatal(originLabel("auto_build"))
+	if originLabel(job.OriginAutoBuild) != "工作空间自动构建" {
+		t.Fatal(originLabel(job.OriginAutoBuild))
+	}
+}
+
+func TestSkipBatchSideEffects(t *testing.T) {
+	if !skipBatchSideEffects(job.Job{PayloadJSON: `{"origin":"auto_build"}`}) {
+		t.Fatal("auto_build")
+	}
+	if !skipBatchSideEffects(job.Job{PayloadJSON: `{"origin":"auto_release"}`}) {
+		t.Fatal("auto_release")
+	}
+	if skipBatchSideEffects(job.Job{PayloadJSON: `{}`}) {
+		t.Fatal("manual")
+	}
+	e := NewEngine(nil, nil, nil, t.TempDir(), "", 0)
+	called := 0
+	e.submit = func(context.Context, job.SubmitRequest) (job.Job, error) {
+		called++
+		return job.Job{}, nil
+	}
+	var buf strings.Builder
+	e.afterSuccess(context.Background(), job.Job{
+		JobType:     job.TypeBuild,
+		PayloadJSON: `{"origin":"auto_build"}`,
+	}, &buf)
+	if called != 0 {
+		t.Fatalf("auto_build should not enqueue dependents, called=%d", called)
 	}
 }
 

@@ -194,6 +194,7 @@ function repoCell(row: Project) {
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .ws-pane__card {

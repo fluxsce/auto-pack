@@ -45,9 +45,9 @@ func (e *Engine) stepSync(ctx context.Context, j job.Job, prj project.Project, p
 
 func originLabel(origin string) string {
 	switch origin {
-	case "auto_build":
+	case job.OriginAutoBuild:
 		return "工作空间自动构建"
-	case "auto_release":
+	case job.OriginAutoRelease:
 		return "发版后自动构建"
 	default:
 		return origin
