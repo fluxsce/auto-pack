@@ -19,6 +19,7 @@ import { parseRecipe, type ProjectRecipe } from '../../lib/project-defaults'
 import {
   backupFilePath,
   defaultBackupDir,
+  mergeScePushEntries,
   resolvePushLayout,
   uploadFileName,
 } from '../../lib/workspace-ftp'
@@ -67,8 +68,9 @@ let noteTimer: ReturnType<typeof setTimeout> | undefined
 
 const workspace = computed(() => ws.list.find((item) => item.rec_id === props.workspaceId))
 const paths = computed(() => props.entries.map((item) => item.path).filter(Boolean))
+const previewEntries = computed(() => mergeScePushEntries(props.entries))
 const previewFileName = computed(() => {
-  const first = props.entries[0]
+  const first = previewEntries.value[0]
   return first ? uploadFileName(first.name, first.is_dir) : 'package'
 })
 const canSubmit = computed(() => {
@@ -112,7 +114,7 @@ function syncBackupDefault(): void {
 }
 
 function collectSuccess(): SuccessItem[] {
-  return props.entries.map((item) => {
+  return previewEntries.value.map((item) => {
     const fileName = uploadFileName(item.name, item.is_dir)
     return {
       path: item.path,
@@ -350,7 +352,7 @@ watch(
         <div class="form-col">
           <PushPanel
             v-model:form="form"
-            :entries="entries"
+            :entries="previewEntries"
             :env-options="envOptions"
             :disabled="running"
             :remote-note="remoteNote"

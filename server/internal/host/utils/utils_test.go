@@ -197,6 +197,40 @@ func TestZipFileAndDir(t *testing.T) {
 	}
 }
 
+func TestZipSourcesKeepsOriginalDirNames(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "sce-vdatahub-d12-web")
+	b := filepath.Join(root, "sce-vdatahub-d13-web")
+	if err := os.MkdirAll(a, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a, "a.js"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b, "b.js"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "merged.zip")
+	if err := ZipSources([]string{a, b}, dest, nil); err != nil {
+		t.Fatal(err)
+	}
+	zr, err := zip.OpenReader(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	names := map[string]bool{}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	if !names["sce-vdatahub-d12-web/a.js"] || !names["sce-vdatahub-d13-web/b.js"] {
+		t.Fatalf("entries=%v", names)
+	}
+}
+
 func TestPushLayout(t *testing.T) {
 	dir, upd := PushLayout("/deploy/update", "app.jar")
 	if dir != "/deploy/update" || upd != "/deploy/update/app.jar" {

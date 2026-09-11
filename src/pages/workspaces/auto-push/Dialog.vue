@@ -34,7 +34,10 @@ import { statusVariant, typeLabel, typeVariant } from '../composables/use-projec
 import {
   backupFilePath,
   defaultBackupDir,
+  isSceStaticDirEntry,
+  mergeScePushEntries,
   resolvePushLayout,
+  sceMergeZipName,
   uploadFileName,
 } from '../lib/workspace-ftp'
 import { buildMergedFtpNotifyFields, type FtpNotifyEmailFields } from '../lib/ftp-notify-email'
@@ -101,7 +104,14 @@ const previewEntries = computed<ProjectFileEntry[]>(() => {
       out.push(entry)
     }
   }
-  return out
+  return mergeScePushEntries(out)
+})
+const sceMergeHint = computed(() => {
+  const raw = queue.value
+    .flatMap((row) => (projectPaths.value[String(row.rec_id)] ?? []).map(pathToEntry))
+    .filter(isSceStaticDirEntry)
+  if (raw.length < 2) return ''
+  return t('workspaces.autoPushMergeSce', { count: raw.length, name: sceMergeZipName(raw.map((item) => item.name)) })
 })
 const previewFileName = computed(() => {
   const first = previewEntries.value[0]
@@ -174,8 +184,7 @@ function syncBackupDefault(): void {
 }
 
 function collectSuccess(row: Project, rels: string[]): SuccessItem[] {
-  return rels.map((rel) => {
-    const entry = pathToEntry(rel)
+  return mergeScePushEntries(rels.map(pathToEntry)).map((entry) => {
     const fileName = uploadFileName(entry.name, entry.is_dir)
     return {
       path: `${row.rec_id}:${entry.path}`,
@@ -186,6 +195,52 @@ function collectSuccess(row: Project, rels: string[]): SuccessItem[] {
       projectType: row.project_type,
     }
   })
+}
+
+function isSceRel(rel: string): boolean {
+  return isSceStaticDirEntry(pathToEntry(rel))
+}
+
+type PushJob = {
+  project: Project
+  artifacts: string[]
+  mergeSources?: { project_rec_id: string; path: string }[]
+  successRels: string[]
+  mergeHint?: string
+}
+
+function buildPushJobs(): PushJob[] {
+  const sce: { project: Project; rel: string }[] = []
+  for (const row of queue.value) {
+    for (const rel of projectPaths.value[String(row.rec_id)] ?? []) {
+      if (isSceRel(rel)) sce.push({ project: row, rel })
+    }
+  }
+  const jobs: PushJob[] = []
+  if (sce.length >= 2) {
+    const anchor = sce[0].project
+    const same = sce.filter((item) => item.project.rec_id === anchor.rec_id).map((item) => item.rel)
+    const others = sce
+      .filter((item) => item.project.rec_id !== anchor.rec_id)
+      .map((item) => ({ project_rec_id: String(item.project.rec_id), path: item.rel }))
+    jobs.push({
+      project: anchor,
+      artifacts: same,
+      mergeSources: others.length ? others : undefined,
+      successRels: sce.map((item) => item.rel),
+      mergeHint: t('workspaces.autoPushMergeSce', {
+        count: sce.length,
+        name: sceMergeZipName(sce.map((item) => pathToEntry(item.rel).name)),
+      }),
+    })
+  }
+  for (const row of queue.value) {
+    const rels = projectPaths.value[String(row.rec_id)] ?? []
+    const keep = sce.length >= 2 ? rels.filter((rel) => !isSceRel(rel)) : rels
+    if (!keep.length) continue
+    jobs.push({ project: row, artifacts: keep, successRels: keep })
+  }
+  return jobs
 }
 
 function syncSelectedProjects(): void {
@@ -358,6 +413,37 @@ async function loadRemoteNote(): Promise<void> {
   }
 }
 
+async function runPushJob(wsId: string, item: PushJob): Promise<boolean> {
+  const job = await submitJob(wsId, item.project.rec_id, 'ftp_push', {
+    env_rec_id: form.value.envRecId,
+    remote_path: form.value.pushPath.trim(),
+    backup_path: form.value.backupPath.trim(),
+    pusher: form.value.pusher.trim(),
+    task_ref: form.value.taskRef.trim(),
+    detail: form.value.detail.trim(),
+    artifacts: [...item.artifacts],
+    merge_sources: item.mergeSources,
+    notes: notes(),
+  })
+  toast.success(t('workspaces.remote.queued'))
+  const status = await followJob(job.rec_id)
+  if (status !== 'succeeded') {
+    append(t('workspaces.autoReleaseFtpFailed', { name: item.project.project_name, msg: status }), 'error')
+    return false
+  }
+  successItems.value = [...successItems.value, ...collectSuccess(item.project, item.successRels)]
+  append(t('workspaces.autoReleaseFtpOk', { name: item.project.project_name }), 'success')
+  return true
+}
+
+function finishPush(ok: number, failed: number): void {
+  append(t('workspaces.autoPushDone', { succeeded: ok, failed }), pushDoneLevel(ok, failed))
+  if (failed > 0) toast.warning(t('workspaces.autoPushPartial', { succeeded: ok, failed }))
+  else toast.success(t('workspaces.autoPushSuccess', { count: ok }))
+  if (ok > 0) void openNotify()
+  emit('success')
+}
+
 async function submit(): Promise<void> {
   const wsId = props.workspace?.rec_id
   if (!wsId || !canSubmit.value) return
@@ -369,50 +455,26 @@ async function submit(): Promise<void> {
   let ok = 0
   let failed = 0
   logLines.value = []
-  append(t('workspaces.autoPushStart', { count: queue.value.length }), 'info')
+  const jobs = buildPushJobs()
+  append(t('workspaces.autoPushStart', { count: jobs.length }), 'info')
   jobStatus.value = 'queued'
   try {
-    for (const [i, p] of queue.value.entries()) {
+    for (const [i, item] of jobs.entries()) {
       if (cancelled) {
         append(t('workspaces.autoPushCanceled'), 'warn')
         break
       }
-      const rels = projectPaths.value[String(p.rec_id)] ?? []
-      const header = `[${new Date().toLocaleString()}] ${i + 1}/${queue.value.length} ${t('workspaces.autoReleaseFtpProject', { name: p.project_name })}`
-      append(header, 'info')
+      append(`[${new Date().toLocaleString()}] ${i + 1}/${jobs.length} ${t('workspaces.autoReleaseFtpProject', { name: item.project.project_name })}`, 'info')
+      if (item.mergeHint) append(item.mergeHint, 'info')
       try {
-        const job = await submitJob(wsId, p.rec_id, 'ftp_push', {
-          env_rec_id: form.value.envRecId,
-          remote_path: form.value.pushPath.trim(),
-          backup_path: form.value.backupPath.trim(),
-          pusher: form.value.pusher.trim(),
-          task_ref: form.value.taskRef.trim(),
-          detail: form.value.detail.trim(),
-          artifacts: [...rels],
-          notes: notes(),
-        })
-        toast.success(t('workspaces.remote.queued'))
-        const status = await followJob(job.rec_id)
-        if (status === 'succeeded') {
-          ok += 1
-          successItems.value = [...successItems.value, ...collectSuccess(p, rels)]
-          append(t('workspaces.autoReleaseFtpOk', { name: p.project_name }), 'success')
-        } else {
-          failed += 1
-          append(t('workspaces.autoReleaseFtpFailed', { name: p.project_name, msg: status }), 'error')
-        }
+        if (await runPushJob(wsId, item)) ok += 1
+        else failed += 1
       } catch (e) {
         failed += 1
-        append(t('workspaces.autoReleaseFtpFailed', { name: p.project_name, msg: errText(e) }), 'error')
+        append(t('workspaces.autoReleaseFtpFailed', { name: item.project.project_name, msg: errText(e) }), 'error')
       }
     }
-    if (!cancelled) {
-      append(t('workspaces.autoPushDone', { succeeded: ok, failed }), pushDoneLevel(ok, failed))
-      if (failed > 0) toast.warning(t('workspaces.autoPushPartial', { succeeded: ok, failed }))
-      else toast.success(t('workspaces.autoPushSuccess', { count: ok }))
-      if (ok > 0) void openNotify()
-      emit('success')
-    }
+    if (!cancelled) finishPush(ok, failed)
   } finally {
     running.value = false
   }
@@ -497,6 +559,7 @@ onUnmounted(() => {
               />
             </RsCard>
           </section>
+          <p v-if="sceMergeHint" class="hint">{{ sceMergeHint }}</p>
           <PushPanel
             v-model:form="form"
             :entries="previewEntries"
@@ -576,6 +639,12 @@ onUnmounted(() => {
 
 .proj-card {
   min-width: 0;
+}
+
+.hint {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  color: var(--shell-muted);
 }
 
 .log-head {

@@ -112,29 +112,36 @@ type Step struct {
 
 // Payload is the JSON stored on AP_JOB.payload_json.
 type Payload struct {
-	Tag         string   `json:"tag,omitempty"`
-	Branch      string   `json:"branch,omitempty"`
-	FromBranch  string   `json:"from_branch,omitempty"`
-	Force       *bool    `json:"force,omitempty"`
-	Notes       string   `json:"notes,omitempty"`
-	UpdatePOM   bool     `json:"update_pom,omitempty"`
-	POMVersion  string   `json:"pom_version,omitempty"`
-	RemotePath  string   `json:"remote_path,omitempty"`
-	BackupPath  string   `json:"backup_path,omitempty"`
-	Pusher      string   `json:"pusher,omitempty"`
-	TaskRef     string   `json:"task_ref,omitempty"`
-	Detail      string   `json:"detail,omitempty"`
-	Artifact    string   `json:"artifact,omitempty"`
-	Artifacts   []string `json:"artifacts,omitempty"`
-	Command     string   `json:"command,omitempty"`
-	EnvRecID    string   `json:"env_rec_id,omitempty"`
-	CloneURL    string   `json:"clone_url,omitempty"`
-	CloneDir    string   `json:"clone_dir,omitempty"`
-	DependChain []string `json:"depend_chain,omitempty"`
+	Tag          string        `json:"tag,omitempty"`
+	Branch       string        `json:"branch,omitempty"`
+	FromBranch   string        `json:"from_branch,omitempty"`
+	Force        *bool         `json:"force,omitempty"`
+	Notes        string        `json:"notes,omitempty"`
+	UpdatePOM    bool          `json:"update_pom,omitempty"`
+	POMVersion   string        `json:"pom_version,omitempty"`
+	RemotePath   string        `json:"remote_path,omitempty"`
+	BackupPath   string        `json:"backup_path,omitempty"`
+	Pusher       string        `json:"pusher,omitempty"`
+	TaskRef      string        `json:"task_ref,omitempty"`
+	Detail       string        `json:"detail,omitempty"`
+	Artifact     string        `json:"artifact,omitempty"`
+	Artifacts    []string      `json:"artifacts,omitempty"`
+	MergeSources []MergeSource `json:"merge_sources,omitempty"`
+	Command      string        `json:"command,omitempty"`
+	EnvRecID     string        `json:"env_rec_id,omitempty"`
+	CloneURL     string        `json:"clone_url,omitempty"`
+	CloneDir     string        `json:"clone_dir,omitempty"`
+	DependChain  []string      `json:"depend_chain,omitempty"`
 	// SkipSync 批次已统一预同步时跳过作业内再次 fetch/checkout。
 	SkipSync bool `json:"skip_sync,omitempty"`
 	// Origin 标记作业来源，供工程构建历史区分手动构建与自动构建/发版后构建。
 	Origin string `json:"origin,omitempty"`
+}
+
+// MergeSource 是跨工程合并进同一压缩包的路径，须与当前作业同属一个工作空间。
+type MergeSource struct {
+	ProjectRecID string `json:"project_rec_id"`
+	Path         string `json:"path"`
 }
 
 // BatchSubmitRequest queues the same job type for matching projects in a workspace.

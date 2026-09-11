@@ -60,7 +60,43 @@ func (e *Engine) stepFTP(ctx context.Context, j job.Job, prj project.Project, p 
 		return err
 	}
 	defer store.Close()
-	return e.pushWithBackup(store, remote, work, p, recipe, w)
+	extras, err := e.resolveMergeSources(ctx, j, p)
+	if err != nil {
+		return err
+	}
+	return e.pushWithBackup(store, remote, work, p, recipe, extras, w)
+}
+
+func (e *Engine) resolveMergeSources(ctx context.Context, j job.Job, p job.Payload) ([]project.PushSource, error) {
+	if len(p.MergeSources) == 0 {
+		return nil, nil
+	}
+	if e.projects == nil {
+		return nil, fmt.Errorf("merge sources: project service required")
+	}
+	out := make([]project.PushSource, 0, len(p.MergeSources))
+	seen := map[string]struct{}{}
+	for _, src := range p.MergeSources {
+		id := strings.TrimSpace(src.ProjectRecID)
+		rel := strings.TrimSpace(src.Path)
+		if id == "" || rel == "" {
+			return nil, fmt.Errorf("merge source project and path required")
+		}
+		key := id + "\x00" + rel
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		prj, err := e.projects.GetRaw(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("merge source %s: %w", id, err)
+		}
+		if prj.WorkspaceRecID != j.WorkspaceRecID {
+			return nil, fmt.Errorf("merge source %s outside workspace", id)
+		}
+		out = append(out, project.PushSource{Work: e.workDir(ctx, j, prj, job.Payload{}), Rel: rel})
+	}
+	return out, nil
 }
 
 func openRemote(kind string, cfg map[string]any) (remoteStore, error) {
@@ -72,12 +108,17 @@ func openRemote(kind string, cfg map[string]any) (remoteStore, error) {
 	}
 }
 
-func (e *Engine) pushWithBackup(store remoteStore, pushPath, work string, p job.Payload, recipe project.Recipe, w io.Writer) error {
+func (e *Engine) pushWithBackup(store remoteStore, pushPath, work string, p job.Payload, recipe project.Recipe, extras []project.PushSource, w io.Writer) error {
 	var files []string
 	var err error
-	if len(p.Artifacts) > 0 {
+	if len(p.Artifacts) > 0 || len(extras) > 0 {
 		var cleanup func()
-		files, cleanup, err = project.CollectPushPaths(work, p.Artifacts)
+		srcs := make([]project.PushSource, 0, len(p.Artifacts)+len(extras))
+		for _, rel := range p.Artifacts {
+			srcs = append(srcs, project.PushSource{Work: work, Rel: rel})
+		}
+		srcs = append(srcs, extras...)
+		files, cleanup, err = project.CollectPushSources(srcs)
 		if cleanup != nil {
 			defer cleanup()
 		}
@@ -92,7 +133,11 @@ func (e *Engine) pushWithBackup(store remoteStore, pushPath, work string, p job.
 	for _, local := range files {
 		name := filepath.Base(local)
 		if strings.Contains(filepath.ToSlash(local), "ap-ftp-push-") && strings.HasSuffix(strings.ToLower(name), ".zip") {
-			logLine(w, "目录已压缩为 %s", name)
+			if project.IsSceMergeZipName(name) {
+				logLine(w, "sce 前端目录已合并为 %s", name)
+			} else {
+				logLine(w, "目录已压缩为 %s", name)
+			}
 		}
 		pair, err := pushOne(store, pushPath, local, name, p.BackupPath, pushTime, w)
 		if err != nil {

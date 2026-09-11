@@ -112,6 +112,7 @@ export type JobPayload = {
   detail?: string
   artifact?: string
   artifacts?: string[]
+  merge_sources?: { project_rec_id: string; path: string }[]
 }
 
 export type BatchSubmitResult = {

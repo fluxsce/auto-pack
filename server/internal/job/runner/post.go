@@ -182,7 +182,11 @@ func (e *Engine) uploadArtifacts(work string, p job.Payload, recipe project.Reci
 	for _, local := range files {
 		name := filepath.Base(local)
 		if strings.Contains(filepath.ToSlash(local), "ap-ftp-push-") && strings.HasSuffix(strings.ToLower(name), ".zip") {
-			logLine(w, "目录已压缩为 %s", name)
+			if project.IsSceMergeZipName(name) {
+				logLine(w, "sce 前端目录已合并为 %s", name)
+			} else {
+				logLine(w, "目录已压缩为 %s", name)
+			}
 		}
 		if err := put(local, name); err != nil {
 			return err

@@ -242,6 +242,84 @@ func TestCollectPushPaths(t *testing.T) {
 	}
 }
 
+func TestSceMergeZipName(t *testing.T) {
+	if got := project.SceMergeZipName([]string{"sce-vdatahub-d12-web", "sce-vdatahub-d13-web"}); got != "sce-vdatahub.zip" {
+		t.Fatalf("vdatahub: %q", got)
+	}
+	if got := project.SceMergeZipName([]string{"sce-foo", "sce-bar"}); got != "sce.zip" {
+		t.Fatalf("generic: %q", got)
+	}
+	if !project.IsSceStaticDirName("sce-vdatahub-d12-web") || project.IsSceStaticDirName("target") {
+		t.Fatal("IsSceStaticDirName")
+	}
+}
+
+func TestCollectPushPathsMergesSceDirs(t *testing.T) {
+	work := t.TempDir()
+	a := filepath.Join(work, "sce-vdatahub-d12-web")
+	b := filepath.Join(work, "sce-vdatahub-d13-web")
+	other := filepath.Join(work, "dist")
+	if err := os.MkdirAll(filepath.Join(a, "js"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b, "css"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a, "js", "a.js"), []byte("from-a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b, "css", "b.css"), []byte("from-b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "app.js"), []byte("app"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, cleanup, err := project.CollectPushPaths(work, []string{"sce-vdatahub-d12-web", "sce-vdatahub-d13-web", "dist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	names := map[string]bool{}
+	var merged string
+	for _, f := range files {
+		names[filepath.Base(f)] = true
+		if filepath.Base(f) == "sce-vdatahub.zip" {
+			merged = f
+		}
+	}
+	if !names["sce-vdatahub.zip"] || !names["dist.zip"] {
+		t.Fatalf("got %v", files)
+	}
+	if names["sce-vdatahub-d12-web.zip"] || names["sce-vdatahub-d13-web.zip"] {
+		t.Fatal("sce dirs should merge into one zip")
+	}
+	zr, err := zip.OpenReader(merged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	inZip := map[string]bool{}
+	for _, f := range zr.File {
+		inZip[f.Name] = true
+	}
+	if !inZip["sce-vdatahub-d12-web/js/a.js"] || !inZip["sce-vdatahub-d13-web/css/b.css"] {
+		t.Fatalf("merged entries %v", inZip)
+	}
+
+	single, singleCleanup, err := project.CollectPushPaths(work, []string{"sce-vdatahub-d12-web"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer singleCleanup()
+	if len(single) != 1 || filepath.Base(single[0]) != "sce-vdatahub-d12-web.zip" {
+		t.Fatalf("single sce dir should stay individual: %v", single)
+	}
+}
+
 func TestRecipeActionsAndDepends(t *testing.T) {
 	legacy := project.ParseRecipe(`{"ftp_env_rec_id":"f1","remote_path":"/opt"}`)
 	acts := legacy.Actions()

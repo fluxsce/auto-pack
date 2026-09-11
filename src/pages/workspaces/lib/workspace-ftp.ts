@@ -105,3 +105,53 @@ export function backupFilePath(pushPathRaw: string, fileName: string, backupPath
 export function uploadFileName(name: string, isDir: boolean): string {
   return isDir ? `${name}.zip` : name
 }
+
+const SCE_PREFIX = 'sce'
+const SCE_VDATAHUB = 'sce-vdatahub'
+
+function sceDirStem(name: string): string {
+  const n = name.trim().toLowerCase()
+  return n.endsWith('.zip') ? n.slice(0, -4) : n
+}
+
+/** 目录名是否为前端静态资源树（sce 开头）。 */
+export function isSceStaticDirName(name: string): boolean {
+  return sceDirStem(name).startsWith(SCE_PREFIX)
+}
+
+function isVdatahubStaticDirName(name: string): boolean {
+  const n = sceDirStem(name)
+  return n === SCE_VDATAHUB || n.startsWith(`${SCE_VDATAHUB}-`) || n.startsWith(`${SCE_VDATAHUB}_`)
+}
+
+/** 两个及以上 sce 目录合并后的 zip 文件名（不含路径）。 */
+export function sceMergeZipName(names: string[]): string {
+  if (names.length && names.every(isVdatahubStaticDirName)) return `${SCE_VDATAHUB}.zip`
+  return `${SCE_PREFIX}.zip`
+}
+
+export function isSceStaticDirEntry(entry: { name: string; is_dir: boolean }): boolean {
+  return entry.is_dir && isSceStaticDirName(entry.name)
+}
+
+/** 把 2 个及以上 sce 目录收成一项，供预览 / 备份 / 成功列表使用。 */
+export function mergeScePushEntries<T extends { name: string; path: string; is_dir: boolean }>(entries: T[]): T[] {
+  const sce = entries.filter(isSceStaticDirEntry)
+  if (sce.length < 2) return entries
+  const stem = sceDirStem(sceMergeZipName(sce.map((item) => item.name)))
+  const merged = { ...sce[0], name: stem, path: `${stem}.zip`, is_dir: true }
+  const scePaths = new Set(sce.map((item) => item.path))
+  const out: T[] = []
+  let placed = false
+  for (const item of entries) {
+    if (!scePaths.has(item.path)) {
+      out.push(item)
+      continue
+    }
+    if (!placed) {
+      out.push(merged)
+      placed = true
+    }
+  }
+  return out
+}

@@ -2,10 +2,12 @@ package utils
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -20,6 +22,89 @@ func ZipFile(src, dest string) error {
 	}
 	return writeZip(dest, func(w *zip.Writer) error {
 		return addFile(w, src, filepath.Base(src))
+	})
+}
+
+// ZipSources 把多个目录打进同一个 dest zip。每个源以自身目录名为根（a/x、b/y）。
+// 同名条目后者覆盖。skip 为 true 时跳过该目录或文件。
+func ZipSources(srcs []string, dest string, skip ZipSkip) error {
+	type pending struct {
+		abs string
+	}
+	files := map[string]pending{}
+	dirs := map[string]struct{}{}
+	for _, src := range srcs {
+		src = strings.TrimSpace(src)
+		if src == "" {
+			continue
+		}
+		st, err := os.Stat(src)
+		if err != nil {
+			return err
+		}
+		rootName := strings.TrimSpace(filepath.Base(src))
+		if rootName == "" || rootName == "." {
+			return ErrNotDir
+		}
+		if !st.IsDir() {
+			files[rootName] = pending{abs: src}
+			continue
+		}
+		dirs[rootName+"/"] = struct{}{}
+		walkErr := filepath.WalkDir(src, func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if path != src && skip != nil && skip(d.Name(), d.IsDir()) {
+				if d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if path == src {
+				return nil
+			}
+			rel, err := filepath.Rel(src, path)
+			if err != nil {
+				return err
+			}
+			entry := filepath.ToSlash(filepath.Join(rootName, rel))
+			if d.IsDir() {
+				dirs[strings.TrimSuffix(entry, "/")+"/"] = struct{}{}
+				return nil
+			}
+			files[entry] = pending{abs: path}
+			return nil
+		})
+		if walkErr != nil {
+			return walkErr
+		}
+	}
+	if len(files) == 0 && len(dirs) == 0 {
+		return fmt.Errorf("no files to zip")
+	}
+	return writeZip(dest, func(w *zip.Writer) error {
+		dirNames := make([]string, 0, len(dirs))
+		for name := range dirs {
+			dirNames = append(dirNames, name)
+		}
+		sort.Strings(dirNames)
+		for _, name := range dirNames {
+			if _, err := w.Create(name); err != nil {
+				return err
+			}
+		}
+		fileNames := make([]string, 0, len(files))
+		for name := range files {
+			fileNames = append(fileNames, name)
+		}
+		sort.Strings(fileNames)
+		for _, name := range fileNames {
+			if err := addFile(w, files[name].abs, name); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
