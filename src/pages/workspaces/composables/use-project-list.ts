@@ -166,8 +166,7 @@ export function useProjectList() {
       const choice = await chooseBuildNow(row, workspaceId, t, toast)
       if (choice === 'abort') return
       if (choice === 'ordered') {
-        autoBuildOpen.value = true
-        toast.info(t('workspaces.buildNowOrderOpen'))
+        await load()
         return
       }
       await submitBuild(workspaceId, row.rec_id)

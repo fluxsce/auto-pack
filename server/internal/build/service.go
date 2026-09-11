@@ -102,6 +102,7 @@ func (s *Service) Start(ctx context.Context, actor iam.Actor, req StartRequest) 
 	logPath := filepath.Join(logDir, recID+".log")
 	filter, _ := json.Marshal(map[string]any{
 		"scope": body.Scope, "project_rec_ids": body.ProjectRecIDs, "include_non_maven": body.IncludeNonMaven,
+		"exact_targets": body.ExactTargets,
 	})
 	rec := Record{
 		RecID: recID, WorkspaceRecID: body.WorkspaceRecID, BuildNum: num, Status: RecordRunning,
@@ -183,7 +184,11 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 	if body.Scope != "selected" {
 		targets = nil
 	}
-	queue := order.Queue(list, analysis, order.QueueOpts{TargetRecIDs: targets, IncludeOthers: body.Scope == "workspace" && body.IncludeNonMaven})
+	queue := order.Queue(list, analysis, order.QueueOpts{
+		TargetRecIDs:  targets,
+		IncludeOthers: body.Scope == "workspace" && body.IncludeNonMaven,
+		ExactTargets:  body.Scope == "selected" && body.ExactTargets,
+	})
 	if len(queue) == 0 {
 		s.appendLog(logPath, stamp()+" 没有可构建的工程")
 		_ = record.Finish(context.Background(), s.st, job.BuildRecID, record.RecordFailed, "no projects", 0, 0, 0)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsAlert, RsButton, RsCheckbox, RsDialog, RsFieldset, RsFormItem, RsLog, RsRadio, RsRadioItem, RsSelect, RsTag, useRsToast } from '@/ui'
 import type { Workspace } from '@/stores/workspace'
@@ -16,7 +16,7 @@ import {
 } from '../api'
 import { typeLabel, typeVariant } from '../composables/use-project-list'
 import { type AutoBuildScope } from './session'
-import { autoBuildBag, autoBuildEpoch, bumpAutoBuild, isAutoBuildLive, stopAutoBuildPolls, type AutoBuildBag } from './runtime'
+import { autoBuildBag, autoBuildEpoch, bumpAutoBuild, isAutoBuildLive, type AutoBuildBag } from './runtime'
 import { setAutoBuildBusy, useBatchActivity } from '../composables/use-batch-activity'
 import { cyclicRecIds, isOrderedBuildType, orderProjectsForBuild } from '../lib/ordered-build'
 
@@ -308,7 +308,7 @@ async function onOpen(): Promise<void> {
   void refreshBatch()
   if (slot.running || slot.pollTimer) {
     touch(id)
-    if (slot.running && !slot.pollTimer) startPoll(id, false)
+    startPoll(id, false)
     return
   }
   slot.selectedHistory = ''
@@ -360,9 +360,6 @@ watch([scope, selectedRecIds, includeNonMaven], () => {
   const id = wsId.value
   const slot = autoBuildBag(id)
   if (open.value && id && !slot.running) applyPlan(id, slot.analysis)
-})
-onUnmounted(() => {
-  stopAutoBuildPolls()
 })
 </script>
 

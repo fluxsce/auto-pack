@@ -21,6 +21,8 @@ func IsOrderedType(projectType string) bool {
 type QueueOpts struct {
 	TargetRecIDs   []string
 	IncludeOthers  bool
+	// ExactTargets keeps TargetRecIDs as-is (no pom.xml upstream expansion).
+	ExactTargets bool
 }
 
 // Queue returns enabled projects in dependency order, then leftovers, then optional non-graph projects.
@@ -55,7 +57,9 @@ func Queue(list []project.Project, analysis MavenAnalysis, opts QueueOpts) []pro
 		for id := range targets {
 			needed[id] = struct{}{}
 		}
-		collectUpstream(analysis.InternalEdges, needed)
+		if !opts.ExactTargets {
+			collectUpstream(analysis.InternalEdges, needed)
+		}
 	}
 	out := make([]project.Project, 0, len(needed))
 	seen := map[string]struct{}{}

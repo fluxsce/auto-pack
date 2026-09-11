@@ -8,6 +8,8 @@ type StartRequest struct {
 	Scope           string   `json:"scope"`
 	ProjectRecIDs   []string `json:"project_rec_ids"`
 	IncludeNonMaven bool     `json:"include_non_maven"`
+	// ExactTargets 为 true 时只构建 project_rec_ids，不再按 pom.xml 展开全部上游。
+	ExactTargets bool `json:"exact_targets"`
 }
 
 // StartResponse is returned with HTTP 202.

@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsButton, RsCard, RsIcon, RsTag } from '@/ui'
-import AutoBuildDialog from '../auto-build/Dialog.vue'
 import { typeLabel, typeVariant } from '../composables/use-project-list'
 import { useProjectDetail } from '../composables/use-project-detail'
 import { projectDetailIcons, projectDetailTabs } from '../lib/project-detail'
@@ -23,8 +22,6 @@ const {
   latest,
   loading,
   building,
-  autoBuildOpen,
-  current,
   live,
   tab,
   recipe,
@@ -34,7 +31,6 @@ const {
   configure,
   buildNow,
   selectJob,
-  loadProject,
 } = useProjectDetail()
 
 const sections = computed(() =>
@@ -119,7 +115,6 @@ const sections = computed(() =>
         </div>
       </div>
     </RsCard>
-    <AutoBuildDialog v-model:open="autoBuildOpen" :workspace="current" @success="loadProject" />
   </div>
 </template>
 

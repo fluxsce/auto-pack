@@ -22,6 +22,25 @@ func TestQueueSelectedPullsUpstream(t *testing.T) {
 	}
 }
 
+func TestQueueExactTargetsSkipsSucceededUpstream(t *testing.T) {
+	list := []project.Project{
+		{RecID: "a", ProjectName: "A", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "b", ProjectName: "B", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "c", ProjectName: "C", ProjectType: "maven", IsEnabled: 1},
+	}
+	analysis := MavenAnalysis{
+		FullBuildOrder: []MavenModule{{ProjectRecID: "a"}, {ProjectRecID: "b"}, {ProjectRecID: "c"}},
+		InternalEdges: []MavenEdge{
+			{ConsumerRecID: "b", ProviderRecID: "a"},
+			{ConsumerRecID: "c", ProviderRecID: "b"},
+		},
+	}
+	got := Queue(list, analysis, QueueOpts{TargetRecIDs: []string{"a", "c"}, ExactTargets: true})
+	if len(got) != 2 || got[0].RecID != "a" || got[1].RecID != "c" {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestQueueWorkspaceIncludesOthers(t *testing.T) {
 	list := []project.Project{
 		{RecID: "a", ProjectName: "A", ProjectType: "maven", IsEnabled: 1},

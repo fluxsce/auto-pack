@@ -1,23 +1,55 @@
-import { rsConfirm, useRsToast } from '@/ui'
-import { fetchMavenOrder, startAutoBuild, type MavenAnalysis, type Project } from '../api'
+import { useRsToast } from '@/ui'
+import { autoBuildStatus, fetchMavenOrder, listProjects, startAutoBuild, type MavenAnalysis, type Project } from '../api'
 import { autoBuildBag, bumpAutoBuild, isAutoBuildLive } from '../auto-build/runtime'
 import { setAutoBuildBusy } from '../composables/use-batch-activity'
-import { isOrderedBuildType, joinPreview, unmatchedCoords, upstreamModules } from './ordered-build'
+import { isOrderedBuildType, joinPreview, missingUpstreamProjects, unmatchedCoords } from './ordered-build'
 
 export type BuildNowChoice = 'single' | 'ordered' | 'abort'
 
 type Translate = (key: string, params?: Record<string, string | number>) => string
 
-/** 按「选中工程 + pom.xml 上游」立刻开跑；对话框只跟进度，不再让用户重选范围。 */
+function followAutoBuild(workspaceId: string): void {
+  const slot = autoBuildBag(workspaceId)
+  if (slot.pollTimer) return
+  const tick = async (): Promise<void> => {
+    try {
+      const st = await autoBuildStatus(workspaceId)
+      if (st.status === 'running') {
+        slot.running = true
+        slot.followRecId = st.build_rec_id || slot.followRecId
+        setAutoBuildBusy(workspaceId, true)
+        bumpAutoBuild()
+        return
+      }
+      if (slot.pollTimer) {
+        clearInterval(slot.pollTimer)
+        slot.pollTimer = null
+      }
+      slot.running = false
+      setAutoBuildBusy(workspaceId, false)
+      bumpAutoBuild()
+    } catch {
+      /* 跟进失败不打断批次 */
+    }
+  }
+  void tick()
+  slot.pollTimer = setInterval(() => {
+    void tick()
+  }, 2000)
+}
+
+/** 按给定工程列表开跑；exact 时不展开 pom.xml 全部上游。不打开自动构建对话框。 */
 export async function startSelectedAutoBuild(
   workspaceId: string,
   projectIds: string[],
   analysis?: MavenAnalysis | null,
+  exact = false,
 ): Promise<void> {
   const started = await startAutoBuild({
     workspace_rec_id: workspaceId,
     scope: 'selected',
     project_rec_ids: projectIds,
+    exact_targets: exact,
   })
   const slot = autoBuildBag(workspaceId)
   slot.scope = 'selected'
@@ -28,11 +60,12 @@ export async function startSelectedAutoBuild(
   slot.selectedHistory = ''
   bumpAutoBuild()
   setAutoBuildBusy(workspaceId, true)
+  followAutoBuild(workspaceId)
 }
 
 /**
- * 立即构建 POM / npm 工程前先读工作空间依赖图：
- * 有同空间上游则建议走自动构建；只有空间外 SNAPSHOT 则警告后仍可单建。
+ * 立即构建：分析当前工程 pom.xml / package.json 依赖，补齐空间内尚未成功的上游，再构建本工程。
+ * 不弹确认、不打开自动构建对话框。
  */
 export async function chooseBuildNow(
   project: Project,
@@ -52,40 +85,27 @@ export async function chooseBuildNow(
     toast.warning(t('workspaces.buildNowAnalyzeFail'))
     return 'single'
   }
-  const upstreams = upstreamModules(project.rec_id, analysis)
+  const peers = await listProjects(workspaceId).catch(() => [] as Project[])
+  const { missing, disabled } = missingUpstreamProjects(project.rec_id, analysis, peers)
   const unmatched = unmatchedCoords(project.rec_id, analysis)
-  if (!upstreams.length && !unmatched.length) return 'single'
-
-  if (upstreams.length) {
-    const list = joinPreview(
-      upstreams.map((m) => (m.coordinates ? `${m.project_name}（${m.coordinates}）` : m.project_name)),
-    )
-    const extra = unmatched.length ? `\n${t('workspaces.buildNowBothExtra', { list: joinPreview(unmatched) })}` : ''
-    const ok = await rsConfirm.confirm({
-      title: t('workspaces.buildNowUpstreamTitle'),
-      description: `${t('workspaces.buildNowUpstreamDesc', {
-        name: project.project_name,
-        count: upstreams.length,
-        list,
-      })}${extra}`,
-      confirmText: t('workspaces.buildNowUpstreamConfirm'),
-      cancelText: t('workspaces.buildNowUpstreamCancel'),
-    })
-    if (ok) {
-      await startSelectedAutoBuild(workspaceId, [project.rec_id], analysis)
-      return 'ordered'
-    }
-    return 'single'
+  if (disabled.length) {
+    toast.warning(t('workspaces.buildNowDisabledSkip', { list: joinPreview(disabled.map((p) => p.project_name)) }))
   }
-
-  const ok = await rsConfirm.warning({
-    title: t('workspaces.buildNowUnmatchedTitle'),
-    description: t('workspaces.buildNowUnmatchedDesc', {
-      name: project.project_name,
-      list: joinPreview(unmatched),
+  if (unmatched.length) {
+    toast.warning(t('workspaces.buildNowUnmatchedHint', { list: joinPreview(unmatched) }))
+  }
+  if (!missing.length) return 'single'
+  await startSelectedAutoBuild(
+    workspaceId,
+    [...missing.map((p) => p.rec_id), project.rec_id],
+    analysis,
+    true,
+  )
+  toast.info(
+    t('workspaces.buildNowFilled', {
+      count: missing.length,
+      list: joinPreview(missing.map((p) => p.project_name)),
     }),
-    confirmText: t('workspaces.buildNowUnmatchedConfirm'),
-    cancelText: t('common.cancel'),
-  })
-  return ok ? 'single' : 'abort'
+  )
+  return 'ordered'
 }

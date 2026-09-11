@@ -332,18 +332,11 @@ export default {
     cloneProjectDone: 'Cloned as {name}',
     buildNow: 'Build now',
     buildQueued: 'Build job queued',
-    buildNowOrderOpen: 'Started this project plus pom.xml upstreams',
+    buildNowFilled: 'Analyzed dependencies; will build {count} missing upstream(s) first ({list}), then this project',
     buildNowAnalyzeFail: 'Could not read pom.xml dependencies; building this project only',
-    buildNowUpstreamTitle: 'Build upstream modules from pom.xml first',
-    buildNowUpstreamDesc:
-      '“{name}” depends on {count} workspace module(s) in pom.xml: {list}. Building it alone will fail with “The POM for … is missing” if those SNAPSHOTs are not in the local Maven repo.',
-    buildNowUpstreamConfirm: 'Build in order',
-    buildNowUpstreamCancel: 'This project only',
-    buildNowBothExtra: 'Also missing from this workspace: {list}',
-    buildNowUnmatchedTitle: 'pom.xml has out-of-workspace dependencies',
-    buildNowUnmatchedDesc:
-      '“{name}” depends on SNAPSHOT / same-group modules that are not registered here: {list}. The platform cannot invent those jars from pom.xml. Add the projects to this workspace, or install them into the local Maven repository first.',
-    buildNowUnmatchedConfirm: 'Build this project anyway',
+    buildNowDisabledSkip: 'These upstreams are disabled and cannot be filled in: {list}',
+    buildNowUnmatchedHint:
+      'This project also depends on modules not in this workspace: {list}. Add them here or install them into the local Maven repository first.',
     viewJobs: 'View jobs',
     detail: {
       title: 'Project detail',

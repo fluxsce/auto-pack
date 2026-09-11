@@ -43,6 +43,7 @@ export function startAutoBuild(body: {
   scope: 'workspace' | 'selected'
   project_rec_ids?: string[]
   include_non_maven?: boolean
+  exact_targets?: boolean
 }): Promise<AutoBuildStart> {
   return request<AutoBuildStart>({ method: 'POST', url: apiPath('build'), data: body })
 }

@@ -38,9 +38,9 @@ export function useProjectDetail() {
   const selectedJobId = ref('')
   const loading = ref(false)
   const building = ref(false)
-  const autoBuildOpen = ref(false)
   let pollId = 0
   let pageAlive = true
+  let awaitingBatchJob = false
 
   const projectId = computed(() => String(route.params.id ?? ''))
   const tab = computed(() => asProjectDetailTab(route.query.tab))
@@ -113,6 +113,11 @@ export function useProjectDetail() {
     const qid = String(route.query.job ?? '')
     if (qid && jobs.value.some((item) => item.rec_id === qid)) {
       selectedJobId.value = qid
+      awaitingBatchJob = false
+    } else if (awaitingBatchJob) {
+      const fresh = jobs.value.find((item) => LIVE.has(item.job_status))
+      selectedJobId.value = fresh?.rec_id ?? ''
+      if (fresh) awaitingBatchJob = false
     } else if (!selectedJobId.value || !jobs.value.some((item) => item.rec_id === selectedJobId.value)) {
       selectedJobId.value = jobs.value[0]?.rec_id ?? ''
       resetLog()
@@ -192,8 +197,11 @@ export function useProjectDetail() {
       const choice = await chooseBuildNow(row, workspaceId, t, toast)
       if (choice === 'abort') return
       if (choice === 'ordered') {
-        autoBuildOpen.value = true
-        toast.info(t('workspaces.buildNowOrderOpen'))
+        awaitingBatchJob = true
+        selectedJobId.value = ''
+        resetLog()
+        goTab('console')
+        await loadJobs()
         return
       }
       const job = await submitBuild(workspaceId, projectId.value)
@@ -252,7 +260,6 @@ export function useProjectDetail() {
     latest,
     loading,
     building,
-    autoBuildOpen,
     live,
     tab,
     current,
