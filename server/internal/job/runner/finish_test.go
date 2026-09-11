@@ -16,12 +16,30 @@ import (
 	"auto-pack/server/internal/store"
 )
 
-func TestNotifyLogsBatchSkip(t *testing.T) {
+func TestNotifyKeepsAutoBuildMail(t *testing.T) {
 	var buf bytes.Buffer
 	e := &Engine{}
-	e.notify(context.Background(), job.Job{PayloadJSON: `{"origin":"auto_build"}`}, true, "", &buf)
-	if !strings.Contains(buf.String(), "邮件通知：跳过（工作空间批次不按工程发信）") {
-		t.Fatalf("%s", buf.String())
+	e.notify(context.Background(), job.Job{JobType: job.TypeBuild, PayloadJSON: `{"origin":"auto_build"}`}, false, "exit status 1", &buf)
+	got := buf.String()
+	if strings.Contains(got, "工作空间批次不按工程发信") {
+		t.Fatalf("auto_build should still notify\n%s", got)
+	}
+	if !strings.Contains(got, "== 邮件通知 ==") || !strings.Contains(got, "邮件通知：跳过（空间未配置 SMTP）") {
+		t.Fatalf("%s", got)
+	}
+}
+
+func TestNotifySkipsWorkspaceFallbackWhenWhenMisses(t *testing.T) {
+	var buf bytes.Buffer
+	e := &Engine{}
+	prj := project.Project{RecipeJSON: `{"post_actions":[{"kind":"email","when":"failure","to":"ops@x.com"}]}`}
+	e.notifyWithProject(context.Background(), job.Job{JobType: job.TypeBuild}, prj, true, "", &buf)
+	got := buf.String()
+	if !strings.Contains(got, "邮件通知：跳过（仅失败，本次作业成功）") {
+		t.Fatalf("%s", got)
+	}
+	if strings.Contains(got, "尝试空间默认 SMTP") || strings.Contains(got, "空间未配置 SMTP") {
+		t.Fatalf("when-miss should not fall back\n%s", got)
 	}
 }
 

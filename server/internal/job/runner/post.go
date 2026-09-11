@@ -15,13 +15,19 @@ import (
 	"auto-pack/server/internal/project"
 )
 
-func (e *Engine) stepPost(ctx context.Context, j job.Job, prj project.Project, p job.Payload, work string, w io.Writer) error {
+// stepPost 按后置 when 执行：邮件等到作业结束再发；上传和脚本按本次作业成败匹配。
+func (e *Engine) stepPost(ctx context.Context, j job.Job, prj project.Project, p job.Payload, work string, w io.Writer, ok bool) error {
 	recipe := project.ParseRecipe(prj.RecipeJSON)
 	actions := recipe.Actions()
 	if len(actions) == 0 {
 		logLine(w, "无构建后操作")
 		return nil
 	}
+	status := "成功"
+	if !ok {
+		status = "失败"
+	}
+	emailN := 0
 	for i, act := range actions {
 		n := i + 1
 		title := postActionTitle(act.Kind)
@@ -31,21 +37,11 @@ func (e *Engine) stepPost(ctx context.Context, j job.Job, prj project.Project, p
 			continue
 		}
 		if project.IsEmailAction(act.Kind) {
-			if skipBatchSideEffects(j) {
-				logLine(w, "%d. %s：跳过（工作空间批次不按工程发信）", n, title)
-				continue
-			}
-			logLine(w, "%d. %s：作业结束后发送（%s）", n, title, when)
-			if to := strings.TrimSpace(act.To); to != "" {
-				logLine(w, "%d. %s：收件人 %s", n, title, to)
-			}
-			if subj := strings.TrimSpace(act.Subject); subj != "" {
-				logLine(w, "%d. %s：主题 %s", n, title, subj)
-			}
+			emailN++
 			continue
 		}
-		if !project.ActionMatches(act, true) {
-			logLine(w, "%d. %s：跳过（%s）", n, title, when)
+		if !project.ActionMatches(act, ok) {
+			logLine(w, "%d. %s：跳过（%s，本次作业%s）", n, title, when, status)
 			continue
 		}
 		logLine(w, "%d. %s：开始（%s）", n, title, when)
@@ -54,6 +50,9 @@ func (e *Engine) stepPost(ctx context.Context, j job.Job, prj project.Project, p
 			return fmt.Errorf("%s: %w", act.Kind, err)
 		}
 		logLine(w, "%d. %s：完成", n, title)
+	}
+	if emailN > 0 {
+		logLine(w, "邮件通知：%d 条留到作业结束，按后置条件发送", emailN)
 	}
 	return nil
 }

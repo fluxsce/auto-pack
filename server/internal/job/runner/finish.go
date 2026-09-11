@@ -14,12 +14,13 @@ import (
 
 func (e *Engine) afterSuccess(ctx context.Context, j job.Job, w io.Writer) {
 	// 工作空间批次已按拓扑排队，成功后再按 depends_on 入队会重复构建。
-	if j.JobType == job.TypeBuild && !skipBatchSideEffects(j) {
+	if j.JobType == job.TypeBuild && !skipDependentEnqueue(j) {
 		e.enqueueDependents(ctx, j, w)
 	}
 }
 
-func skipBatchSideEffects(j job.Job) bool {
+// skipDependentEnqueue 工作空间批次已按拓扑排队，不再按工程 depends_on 入队下游。
+func skipDependentEnqueue(j job.Job) bool {
 	switch strings.TrimSpace(job.DecodePayload(j.PayloadJSON).Origin) {
 	case job.OriginAutoBuild, job.OriginAutoRelease:
 		return true
@@ -69,10 +70,6 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 	if w == nil {
 		w = io.Discard
 	}
-	if skipBatchSideEffects(j) {
-		logLine(w, "邮件通知：跳过（工作空间批次不按工程发信）")
-		return
-	}
 	if e.st != nil && j.RecID != "" {
 		if latest, err := job.JobByID(ctx, e.st, j.RecID); err == nil {
 			j = latest
@@ -84,6 +81,13 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 			prj = p
 		}
 	}
+	e.notifyWithProject(ctx, j, prj, ok, errMsg, w)
+}
+
+func (e *Engine) notifyWithProject(ctx context.Context, j job.Job, prj project.Project, ok bool, errMsg string, w io.Writer) {
+	if w == nil {
+		w = io.Discard
+	}
 	logLine(w, "== 邮件通知 ==")
 	status := "成功"
 	if !ok {
@@ -91,6 +95,7 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 	}
 	sent := 0
 	hadEmail := false
+	matched := 0
 	for _, act := range project.ParseRecipe(prj.RecipeJSON).Actions() {
 		if !project.IsEmailAction(act.Kind) {
 			continue
@@ -104,6 +109,7 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 			logLine(w, "邮件通知：跳过（%s，本次作业%s）", postWhenTitle(project.ActionWhen(act)), status)
 			continue
 		}
+		matched++
 		if err := e.sendActionMail(ctx, j, prj, act, ok, errMsg, w); err != nil {
 			logLine(w, "邮件通知：失败 %v", err)
 			continue
@@ -111,6 +117,10 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 		sent++
 	}
 	if sent > 0 {
+		return
+	}
+	// 工程已配置后置邮件且条件未命中：遵守 when，不再改走空间默认 SMTP。
+	if hadEmail && matched == 0 {
 		return
 	}
 	if hadEmail {

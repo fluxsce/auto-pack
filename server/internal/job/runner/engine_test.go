@@ -59,14 +59,14 @@ func TestSkipSync(t *testing.T) {
 	}
 }
 
-func TestSkipBatchSideEffects(t *testing.T) {
-	if !skipBatchSideEffects(job.Job{PayloadJSON: `{"origin":"auto_build"}`}) {
+func TestSkipDependentEnqueue(t *testing.T) {
+	if !skipDependentEnqueue(job.Job{PayloadJSON: `{"origin":"auto_build"}`}) {
 		t.Fatal("auto_build")
 	}
-	if !skipBatchSideEffects(job.Job{PayloadJSON: `{"origin":"auto_release"}`}) {
+	if !skipDependentEnqueue(job.Job{PayloadJSON: `{"origin":"auto_release"}`}) {
 		t.Fatal("auto_release")
 	}
-	if skipBatchSideEffects(job.Job{PayloadJSON: `{}`}) {
+	if skipDependentEnqueue(job.Job{PayloadJSON: `{}`}) {
 		t.Fatal("manual")
 	}
 	e := NewEngine(nil, nil, nil, t.TempDir(), "", 0)

@@ -244,9 +244,9 @@ export default {
       always: 'Always',
     },
     postWhenHint: {
-      success: 'Runs after a successful job. Uploads and scripts need a successful build for artifacts.',
-      failure: 'Runs after a failed job. Use this for alerts. Uploads and scripts are skipped on failure.',
-      always: 'Runs on success or failure. Email is sent in both cases; uploads still run only in the success post step.',
+      success: 'Runs after a successful job.',
+      failure: 'Runs after a failed job. Email, scripts, and uploads all follow this condition.',
+      always: 'Runs on success or failure. Email, scripts, and uploads all run.',
     },
     postKindHint: {
       ftp: 'Upload build artifacts to an FTP directory.',

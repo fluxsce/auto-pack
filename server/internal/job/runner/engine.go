@@ -188,29 +188,41 @@ func (e *Engine) runJob(ctx context.Context, id string) {
 		e.notify(ctx, j, false, err.Error(), logw)
 		return
 	}
+	// 前面步骤失败后仍跑 post，让仅失败 / 始终 的后置能按 when 执行。
+	var failErr error
 	for _, st := range steps {
 		j, _ = job.JobByID(ctx, e.st, id)
 		if j.JobStatus == job.StatusCanceled {
 			_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepCanceled, "", false, true)
 			return
 		}
+		if failErr != nil && st.StepKey != "post" {
+			_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepSkipped, "previous step failed", false, true)
+			continue
+		}
 		_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepRunning, "", true, false)
 		logLine(logw, "== %s ==", st.StepName)
-		if err := e.execStep(ctx, j, st, logw); err != nil {
+		if err := e.execStep(ctx, j, st, logw, failErr == nil); err != nil {
 			_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepFailed, err.Error(), false, true)
-			_ = job.SetJobStatus(ctx, e.st, id, job.StatusFailed, err.Error(), false, true)
+			if failErr == nil {
+				_ = job.SetJobStatus(ctx, e.st, id, job.StatusFailed, err.Error(), false, true)
+				failErr = err
+			}
 			logLine(logw, "失败 %s: %v", st.StepName, err)
-			e.notify(ctx, j, false, err.Error(), logw)
-			return
+			continue
 		}
 		_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepSucceeded, "", false, true)
+	}
+	if failErr != nil {
+		e.notify(ctx, j, false, failErr.Error(), logw)
+		return
 	}
 	_ = job.SetJobStatus(ctx, e.st, id, job.StatusSucceeded, "", false, true)
 	e.notify(ctx, j, true, "", logw)
 	e.afterSuccess(ctx, j, logw)
 }
 
-func (e *Engine) execStep(ctx context.Context, j job.Job, st job.Step, w io.Writer) error {
+func (e *Engine) execStep(ctx context.Context, j job.Job, st job.Step, w io.Writer, ok bool) error {
 	payload := job.DecodePayload(j.PayloadJSON)
 	var prj project.Project
 	if j.ProjectRecID != "" && e.projects != nil {
@@ -240,7 +252,7 @@ func (e *Engine) execStep(ctx context.Context, j job.Job, st job.Step, w io.Writ
 	case "ftp":
 		return e.stepFTP(ctx, j, prj, payload, work, w)
 	case "post":
-		return e.stepPost(ctx, j, prj, payload, work, w)
+		return e.stepPost(ctx, j, prj, payload, work, w, ok)
 	default:
 		return fmt.Errorf("unknown step %s", st.StepKey)
 	}
