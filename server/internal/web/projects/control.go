@@ -142,7 +142,7 @@ func (c *Controller) Files(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	tree, err := c.workspaces.ListCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"))
+	tree, err := c.workspaces.ListCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"), checkoutAbs(p))
 	if writePathErr(w, err) {
 		return
 	}
@@ -156,7 +156,7 @@ func (c *Controller) ClearFiles(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	err = c.workspaces.ClearCheckout(r.Context(), actor, p.WorkspaceRecID, p.WorkRelPath)
+	err = c.workspaces.ClearCheckout(r.Context(), actor, p.WorkspaceRecID, p.WorkRelPath, checkoutAbs(p))
 	c.audit.Note(r.Context(), actor, p.WorkspaceRecID, audit.ActionProjectClearFiles, "project", p.RecID, "clear checkout "+p.ProjectName, err)
 	if writePathErr(w, err) {
 		return
@@ -172,7 +172,7 @@ func (c *Controller) Deps(w http.ResponseWriter, r *http.Request) {
 	}
 	q := c.depsQuery(r.Context(), p)
 	q.Refresh = r.URL.Query().Get("refresh") == "1"
-	deps, err := c.workspaces.ListDeps(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, q)
+	deps, err := c.workspaces.ListDeps(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, checkoutAbs(p), q)
 	if writePathErr(w, err) {
 		return
 	}
@@ -227,7 +227,7 @@ func (c *Controller) File(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	blob, err := c.workspaces.ReadCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"))
+	blob, err := c.workspaces.ReadCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"), checkoutAbs(p))
 	if writePathErr(w, err) {
 		return
 	}
@@ -240,7 +240,7 @@ func (c *Controller) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	target, err := c.workspaces.StatCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"))
+	target, err := c.workspaces.StatCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"), checkoutAbs(p))
 	if writePathErr(w, err) {
 		return
 	}
@@ -276,7 +276,7 @@ func (c *Controller) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.URL.Query().Get("path")
-	err = c.workspaces.RemoveCheckout(r.Context(), actor, p.WorkspaceRecID, p.WorkRelPath, rel)
+	err = c.workspaces.RemoveCheckout(r.Context(), actor, p.WorkspaceRecID, p.WorkRelPath, rel, checkoutAbs(p))
 	c.audit.Note(r.Context(), actor, p.WorkspaceRecID, audit.ActionProjectDeleteFile, "project", p.RecID, "delete "+rel, err)
 	if writePathErr(w, err) {
 		return
@@ -379,6 +379,10 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func checkoutAbs(p project.Project) string {
+	return project.AbsLocalSource(project.ParseRecipe(p.RecipeJSON))
 }
 
 func firstNonEmpty(values ...string) string {

@@ -22,9 +22,13 @@ func (e *Engine) workDir(ctx context.Context, j job.Job, prj project.Project, p 
 		}
 		return workspace.ProjectDir(e.wsRoot, e.workspaceCode(ctx, j.WorkspaceRecID), j.WorkspaceRecID, p.CloneDir)
 	}
+	recipe := project.ParseRecipe(prj.RecipeJSON)
+	if abs := project.AbsLocalSource(recipe); abs != "" {
+		return abs
+	}
 	rel := strings.TrimSpace(prj.WorkRelPath)
 	if rel == "" {
-		rel = project.WorkRel(prj.ProjectName, project.ParseRecipe(prj.RecipeJSON))
+		rel = project.WorkRel(prj.ProjectName, recipe)
 	}
 	if rel == "" {
 		rel = j.RecID

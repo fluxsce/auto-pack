@@ -17,7 +17,7 @@ import {
   type Project,
 } from '../api'
 import { isAutoBuildLive } from '../auto-build/runtime'
-import { parseRecipe, workRel } from '../lib/project-defaults'
+import { checkoutDisplay, parseRecipe } from '../lib/project-defaults'
 import { asProjectDetailTab, type ProjectDetailTab } from '../lib/project-detail'
 
 const LIVE = new Set(['queued', 'running'])
@@ -44,12 +44,9 @@ export function useProjectDetail() {
   const tab = computed(() => asProjectDetailTab(route.query.tab))
   const current = computed(() => ws.list.find((item) => item.rec_id === (project.value?.workspace_rec_id || ws.currentId)))
   const recipe = computed(() => parseRecipe(project.value?.recipe_json || '', project.value?.project_type || 'maven'))
-  const checkoutPath = computed(() => {
-    const root = current.value?.root_dir?.replace(/[/\\]+$/, '') ?? ''
-    const name = project.value?.project_name || ''
-    const rel = project.value?.work_rel_path || (name ? workRel(name, recipe.value) : '')
-    return root && rel ? `${root}/${rel}` : rel
-  })
+  const checkoutPath = computed(() =>
+    checkoutDisplay(current.value?.root_dir || '', project.value?.project_name || '', recipe.value, project.value?.work_rel_path),
+  )
   const latest = computed(() => jobs.value[0] ?? null)
   const selected = computed(() => jobs.value.find((item) => item.rec_id === selectedJobId.value) ?? latest.value)
   const live = computed(() => !!selected.value && LIVE.has(selected.value.job_status))

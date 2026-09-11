@@ -302,9 +302,13 @@ func (s *Service) Log(ctx context.Context, actor iam.Actor, workspaceID, buildID
 }
 
 func (s *Service) workDir(ws workspace.Workspace, prj project.Project) string {
+	recipe := project.ParseRecipe(prj.RecipeJSON)
+	if abs := project.AbsLocalSource(recipe); abs != "" {
+		return abs
+	}
 	rel := strings.TrimSpace(prj.WorkRelPath)
 	if rel == "" {
-		rel = project.WorkRel(prj.ProjectName, project.ParseRecipe(prj.RecipeJSON))
+		rel = project.WorkRel(prj.ProjectName, recipe)
 	}
 	return workspace.ProjectDir(s.wsRoot, ws.WorkspaceCode, ws.RecID, rel)
 }

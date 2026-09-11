@@ -290,7 +290,7 @@ func TestClearCheckoutKeepsProjectDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proj, "pom.xml"), []byte("<p/>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.ClearCheckout(ctx, actor, ws.RecID, "demo-app"); err != nil {
+	if err := svc.ClearCheckout(ctx, actor, ws.RecID, "demo-app", ""); err != nil {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(proj)
@@ -309,7 +309,7 @@ func TestClearCheckoutKeepsProjectDir(t *testing.T) {
 	if err := svc.AddMember(ctx, actor, ws.RecID, viewer.RecID, iam.RoleViewer); err != nil {
 		t.Fatal(err)
 	}
-	err = svc.ClearCheckout(ctx, iam.Actor{UserID: viewer.RecID, LoginName: "look"}, ws.RecID, "demo-app")
+	err = svc.ClearCheckout(ctx, iam.Actor{UserID: viewer.RecID, LoginName: "look"}, ws.RecID, "demo-app", "")
 	if !errors.Is(err, iam.ErrForbidden) {
 		t.Fatalf("viewer: %v", err)
 	}

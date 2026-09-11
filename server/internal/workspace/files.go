@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"auto-pack/server/internal/host/utils"
 	"auto-pack/server/internal/iam"
@@ -50,8 +51,8 @@ type Tree struct {
 }
 
 // ListCheckout 列举工程检出目录下的一层文件。rel 相对工程目录，禁止 ..。
-func (s *Service) ListCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel string) (Tree, error) {
-	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel)
+func (s *Service) ListCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel, absLocal string) (Tree, error) {
+	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel, absLocal)
 	if err != nil {
 		return Tree{}, err
 	}
@@ -73,8 +74,8 @@ func (s *Service) ListCheckout(ctx context.Context, actor iam.Actor, workspaceID
 }
 
 // ReadCheckout 读取工程检出目录内的文本文件。
-func (s *Service) ReadCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel string) (FileBlob, error) {
-	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel)
+func (s *Service) ReadCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel, absLocal string) (FileBlob, error) {
+	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel, absLocal)
 	if err != nil {
 		return FileBlob{}, err
 	}
@@ -94,8 +95,8 @@ type CheckoutTarget struct {
 }
 
 // StatCheckout 解析工程检出目录内的文件或子目录。rel 不能为空。
-func (s *Service) StatCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel string) (CheckoutTarget, error) {
-	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel)
+func (s *Service) StatCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel, absLocal string) (CheckoutTarget, error) {
+	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel, absLocal)
 	if err != nil {
 		return CheckoutTarget{}, err
 	}
@@ -112,11 +113,11 @@ func (s *Service) StatCheckout(ctx context.Context, actor iam.Actor, workspaceID
 
 // RemoveCheckout 删除工程检出目录内的文件或子目录。需要 project.write。
 // 禁止删除工程根、工作空间根或配置的 workspace.root。
-func (s *Service) RemoveCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel string) error {
+func (s *Service) RemoveCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel, absLocal string) error {
 	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionProjectWrite); err != nil {
 		return err
 	}
-	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel)
+	base, rel, err := s.checkoutPath(ctx, actor, workspaceID, workRel, rel, absLocal)
 	if err != nil {
 		return err
 	}
@@ -145,11 +146,11 @@ func SkipNestedGit(name string, isDir bool) bool {
 
 // ClearCheckout 清空工程检出目录内的文件，保留目录本身。需要 project.write。
 // 禁止清空工作空间根或配置的 workspace.root。
-func (s *Service) ClearCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel string) error {
+func (s *Service) ClearCheckout(ctx context.Context, actor iam.Actor, workspaceID, workRel, absLocal string) error {
 	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionProjectWrite); err != nil {
 		return err
 	}
-	base, _, err := s.checkoutPath(ctx, actor, workspaceID, workRel, "")
+	base, _, err := s.checkoutPath(ctx, actor, workspaceID, workRel, "", absLocal)
 	if err != nil {
 		return err
 	}
@@ -167,7 +168,7 @@ func (s *Service) ClearCheckout(ctx context.Context, actor iam.Actor, workspaceI
 	return utils.ClearDir(base, "")
 }
 
-func (s *Service) checkoutPath(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel string) (string, string, error) {
+func (s *Service) checkoutPath(ctx context.Context, actor iam.Actor, workspaceID, workRel, rel, absLocal string) (string, string, error) {
 	w, err := s.getForActor(ctx, actor, workspaceID)
 	if err != nil {
 		return "", "", err
@@ -176,9 +177,14 @@ func (s *Service) checkoutPath(ctx context.Context, actor iam.Actor, workspaceID
 	if err != nil {
 		return "", "", err
 	}
-	base := ProjectDir(s.root, w.WorkspaceCode, w.RecID, workRel)
-	if !utils.UnderRoot(s.root, base) {
-		return "", "", utils.ErrOutside
+	base := strings.TrimSpace(absLocal)
+	if base != "" {
+		base = filepath.Clean(base)
+	} else {
+		base = ProjectDir(s.root, w.WorkspaceCode, w.RecID, workRel)
+		if !utils.UnderRoot(s.root, base) {
+			return "", "", utils.ErrOutside
+		}
 	}
 	if dest := utils.JoinUnder(base, rel); !utils.UnderRoot(base, dest) {
 		return "", "", utils.ErrOutside

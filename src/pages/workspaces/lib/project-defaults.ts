@@ -69,18 +69,33 @@ export function emptyRecipe(type = 'maven'): ProjectRecipe {
   }
 }
 
-/** 与后端 WorkRel 对齐：本地模式才叠相对子路径。 */
+/** 本机绝对目录（POSIX /... 或 Windows X:/...）。 */
+export function isAbsLocalPath(value: string): boolean {
+  const path = value.trim().replaceAll('\\', '/')
+  if (!path || path.includes('..')) return false
+  if (path.startsWith('/')) return true
+  return /^[A-Za-z]:\//.test(path)
+}
+
+/** 与后端 WorkRel 对齐：本地相对子路径才叠到工程名下；绝对路径不拼进空间根。 */
 export function workRel(name: string, recipe: ProjectRecipe): string {
-  const extra = (recipe.local_source_path || '')
-    .trim()
-    .replaceAll('\\', '/')
-    .split('/')
-    .filter(Boolean)
-    .join('/')
-  if (recipe.scm_mode === 'local' && extra) {
+  const raw = (recipe.local_source_path || '').trim().replaceAll('\\', '/')
+  if (recipe.scm_mode === 'local' && raw && !isAbsLocalPath(raw)) {
+    const extra = raw.split('/').filter(Boolean).join('/')
     return name ? `${name}/${extra}` : extra
   }
   return name
+}
+
+/** 界面/作业看到的源码目录：本地绝对路径原样用，否则空间根 + workRel。 */
+export function checkoutDisplay(root: string, name: string, recipe: ProjectRecipe, storedRel = ''): string {
+  const raw = (recipe.local_source_path || '').trim()
+  if (recipe.scm_mode === 'local' && isAbsLocalPath(raw)) {
+    return raw.replaceAll('\\', '/')
+  }
+  const rel = storedRel.trim() || workRel(name, recipe)
+  const base = root.replace(/[/\\]+$/, '')
+  return base && rel ? `${base}/${rel}` : rel
 }
 
 function migrateActions(stored: Partial<ProjectRecipe>): PostAction[] {

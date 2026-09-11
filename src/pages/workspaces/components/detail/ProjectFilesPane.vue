@@ -102,18 +102,11 @@ const columns = computed<RsTableColumn<ProjectFileEntry>[]>(() => [
     sorter: (left, right) => keepDirsFirst(left, right) || (left.mod_time || '').localeCompare(right.mod_time || ''),
   },
   {
-    key: 'path',
-    title: t('workspaces.detail.relPath'),
-    minWidth: 180,
-    sortable: true,
-  },
-  {
     key: 'actions',
     title: t('common.actions'),
-    width: 148,
-    minWidth: 148,
+    width: 160,
+    minWidth: 160,
     align: 'right',
-    fixed: 'right',
     ellipsis: false,
   },
 ])

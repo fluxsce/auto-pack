@@ -56,8 +56,8 @@ type depsCache struct {
 }
 
 // ListDeps 扫描检出清单。Maven 走插件 JSON 有效树，POM 未变时读缓存。
-func (s *Service) ListDeps(ctx context.Context, actor iam.Actor, workspaceID, workRel string, q DepsQuery) (Deps, error) {
-	base, _, err := s.checkoutPath(ctx, actor, workspaceID, workRel, "")
+func (s *Service) ListDeps(ctx context.Context, actor iam.Actor, workspaceID, workRel, absLocal string, q DepsQuery) (Deps, error) {
+	base, _, err := s.checkoutPath(ctx, actor, workspaceID, workRel, "", absLocal)
 	if err != nil {
 		return Deps{}, err
 	}

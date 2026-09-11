@@ -24,6 +24,7 @@ import {
   defaultBuild,
   emptyRecipe,
   envKindsForType,
+  checkoutDisplay,
   parseRecipe,
   projectTypes,
   serializeRecipe,
@@ -81,12 +82,13 @@ const sections = computed(() =>
     icon: projectSectionIcons[id],
   })),
 )
-const checkoutPath = computed(() => {
-  const root = current.value?.root_dir?.replace(/[/\\]+$/, '') ?? ''
-  const name = form.value.project_name.trim() || t('workspaces.projectName')
-  const rel = workRel(name, recipe.value)
-  return root ? `${root}/${rel}` : rel
-})
+const checkoutPath = computed(() =>
+  checkoutDisplay(
+    current.value?.root_dir || '',
+    form.value.project_name.trim() || t('workspaces.projectName'),
+    recipe.value,
+  ),
+)
 const toolchainKinds = computed(() => envKindsForType(form.value.project_type))
 const branchTags = computed(() => ['main', 'develop', 'release'])
 const cronState = computed(() => cronValidity(form.value.cron_expr))
@@ -590,7 +592,9 @@ async function save(): Promise<void> {
 }
 
 .editor__history {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
   min-height: 0;
   margin-top: 0.35rem;
   padding: 0.7rem 0.65rem 0.75rem;

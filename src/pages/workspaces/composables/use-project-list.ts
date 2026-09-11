@@ -38,7 +38,7 @@ export function useProjectList() {
 
   const filtered = computed(() => {
     const q = query.value.trim().toLowerCase()
-    return projects.value.filter((row) => {
+    const rows = projects.value.filter((row) => {
       if (typeFilter.value && row.project_type !== typeFilter.value) return false
       if (statusFilter.value === 'never') {
         if (row.last_job_status) return false
@@ -57,6 +57,12 @@ export function useProjectList() {
         .join('\n')
         .toLowerCase()
       return hay.includes(q)
+    })
+    return rows.sort((a, b) => {
+      const localA = projectSource(a).kind === 'local' ? 0 : 1
+      const localB = projectSource(b).kind === 'local' ? 0 : 1
+      if (localA !== localB) return localA - localB
+      return a.project_name.localeCompare(b.project_name)
     })
   })
 

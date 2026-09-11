@@ -46,6 +46,10 @@ func TestRecipeLocalSkipsSync(t *testing.T) {
 	if got := project.WorkRel("demo-app", r); got != "demo-app/src" {
 		t.Fatalf("workrel=%s", got)
 	}
+	abs := project.ParseRecipe(`{"scm_mode":"local","local_source_path":"/home/appinstall/V10.0.0-P05"}`)
+	if project.AbsLocalSource(abs) == "" || project.WorkRel("V10.0.0-P05", abs) != "V10.0.0-P05" {
+		t.Fatalf("abs local workrel=%s source=%s", project.WorkRel("V10.0.0-P05", abs), project.AbsLocalSource(abs))
+	}
 	legacy := project.ParseRecipe(`{"command":"echo"}`)
 	if legacy.IsLocal() || !legacy.ShouldSync() {
 		t.Fatal("legacy defaults to git pull when URL exists")

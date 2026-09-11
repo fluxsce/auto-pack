@@ -113,9 +113,38 @@ func (r Recipe) ShouldSync() bool {
 	return *r.AutoSync
 }
 
-// WorkRel is the checkout path under the workspace: project name, plus a local subdirectory.
+// IsAbsLocalPath reports a host absolute directory (POSIX /... or Windows X:/...).
+func IsAbsLocalPath(raw string) bool {
+	p := strings.TrimSpace(filepath.ToSlash(raw))
+	if p == "" || strings.Contains(p, "..") {
+		return false
+	}
+	if strings.HasPrefix(p, "/") {
+		return true
+	}
+	return len(p) >= 3 && p[1] == ':' && p[2] == '/'
+}
+
+// AbsLocalSource is the on-disk directory when scm_mode=local and the path is absolute.
+// Relative local_source_path still lives under the workspace checkout.
+func AbsLocalSource(r Recipe) string {
+	if !r.IsLocal() {
+		return ""
+	}
+	p := strings.TrimSpace(r.LocalSourcePath)
+	if !IsAbsLocalPath(p) {
+		return ""
+	}
+	return filepath.Clean(filepath.FromSlash(p))
+}
+
+// WorkRel is the checkout path under the workspace: project name, plus a relative local subdirectory.
+// Absolute local_source_path is not folded in; callers should use AbsLocalSource for the real directory.
 func WorkRel(name string, r Recipe) string {
 	name = strings.TrimSpace(name)
+	if AbsLocalSource(r) != "" {
+		return name
+	}
 	extra := filepath.ToSlash(strings.TrimSpace(r.LocalSourcePath))
 	extra = strings.Trim(extra, "/")
 	if r.IsLocal() && extra != "" {

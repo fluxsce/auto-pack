@@ -205,7 +205,9 @@ const sections = computed(() =>
 }
 
 .detail__history {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
   min-height: 0;
   margin-top: 0.35rem;
   padding: 0.7rem 0.65rem 0.75rem;
