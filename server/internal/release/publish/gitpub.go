@@ -181,8 +181,8 @@ func writeCommitPushBranch(
 		return fmt.Errorf("branch is empty")
 	}
 	if len(files) == 0 {
-		log.Step("分支 %s 无待写入发版文件，跳过提交", branch)
-		return nil
+		log.Step("分支 %s 无待写入发版文件，跳过提交，仍推送分支以便打 Tag", branch)
+		return pushBranchWithRepeatFallback(ctx, workDir, opt, branch, allowRepeat, log)
 	}
 	relPaths := make([]string, 0, len(files))
 	for p := range files {
