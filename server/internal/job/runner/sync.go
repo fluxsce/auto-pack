@@ -55,8 +55,13 @@ func originLabel(origin string) string {
 }
 
 func logHeadCommit(ctx context.Context, work string, opt git.Options, w io.Writer) {
-	if line := git.LastUserCommit(ctx, work, opt); line != "" {
-		logLine(w, "最新用户提交 %s", line)
+	head := git.HeadCommit(ctx, work, opt)
+	if head != "" {
+		logLine(w, "当前 HEAD %s", head)
+	}
+	user := git.LastUserCommit(ctx, work, opt)
+	if user != "" && user != head {
+		logLine(w, "最新用户提交 %s", user)
 	}
 }
 

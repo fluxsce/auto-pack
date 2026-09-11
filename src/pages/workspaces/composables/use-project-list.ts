@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { rsConfirm, useRsToast, type RsContextMenuItem, type RsSelectModelValue, type RsTableColumn } from '@/ui'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { asSelectString, deleteProject, errText, listProjects, submitBuild, type Project } from '../api'
+import { chooseBuildNow } from '../lib/build-now'
 import { parseRecipe, projectTypes } from '../lib/project-defaults'
 
 export type TagVariant = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info'
@@ -162,6 +163,13 @@ export function useProjectList() {
     if (!workspaceId) return
     busyId.value = row.rec_id
     try {
+      const choice = await chooseBuildNow(row, workspaceId, t, toast)
+      if (choice === 'abort') return
+      if (choice === 'ordered') {
+        autoBuildOpen.value = true
+        toast.info(t('workspaces.buildNowOrderOpen'))
+        return
+      }
       await submitBuild(workspaceId, row.rec_id)
       toast.success(t('workspaces.buildQueued'))
       await load()

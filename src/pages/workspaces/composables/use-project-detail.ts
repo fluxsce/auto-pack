@@ -17,6 +17,7 @@ import {
   type Project,
 } from '../api'
 import { isAutoBuildLive } from '../auto-build/runtime'
+import { chooseBuildNow } from '../lib/build-now'
 import { checkoutDisplay, parseRecipe } from '../lib/project-defaults'
 import { asProjectDetailTab, type ProjectDetailTab } from '../lib/project-detail'
 
@@ -37,6 +38,7 @@ export function useProjectDetail() {
   const selectedJobId = ref('')
   const loading = ref(false)
   const building = ref(false)
+  const autoBuildOpen = ref(false)
   let pollId = 0
   let pageAlive = true
 
@@ -183,9 +185,17 @@ export function useProjectDetail() {
 
   async function buildNow(): Promise<void> {
     const workspaceId = project.value?.workspace_rec_id || ws.currentId
-    if (!workspaceId || !projectId.value) return
+    const row = project.value
+    if (!workspaceId || !projectId.value || !row) return
     building.value = true
     try {
+      const choice = await chooseBuildNow(row, workspaceId, t, toast)
+      if (choice === 'abort') return
+      if (choice === 'ordered') {
+        autoBuildOpen.value = true
+        toast.info(t('workspaces.buildNowOrderOpen'))
+        return
+      }
       const job = await submitBuild(workspaceId, projectId.value)
       selectedJobId.value = job.rec_id
       toast.success(t('workspaces.buildQueued'))
@@ -242,6 +252,7 @@ export function useProjectDetail() {
     latest,
     loading,
     building,
+    autoBuildOpen,
     live,
     tab,
     current,

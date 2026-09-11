@@ -72,3 +72,43 @@ export function cyclicRecIds(analysis: MavenAnalysis): Set<string> {
   }
   return ids
 }
+
+/** 从 pom.xml / package.json 图里取出目标工程的工作空间上游模块（不含自身）。 */
+export function upstreamModules(projectId: string, analysis: MavenAnalysis | null | undefined): MavenModule[] {
+  if (!analysis || !projectId) return []
+  const needed = new Set<string>([projectId])
+  collectUpstream(analysis.internal_edges ?? [], needed)
+  needed.delete(projectId)
+  const byId = new Map((analysis.full_build_order ?? []).map((m) => [m.project_rec_id, m]))
+  const out: MavenModule[] = []
+  for (const m of analysis.full_build_order ?? []) {
+    if (!needed.has(m.project_rec_id)) continue
+    out.push(m)
+    needed.delete(m.project_rec_id)
+  }
+  for (const id of needed) {
+    const m = byId.get(id)
+    if (m) out.push(m)
+  }
+  return out
+}
+
+/** 目标工程 pom.xml 里对不上工作空间的 SNAPSHOT / 同组依赖。 */
+export function unmatchedCoords(projectId: string, analysis: MavenAnalysis | null | undefined): string[] {
+  if (!analysis || !projectId) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const row of analysis.unmatched_deps ?? []) {
+    if (row.consumer_rec_id !== projectId) continue
+    const coord = row.coordinates.trim()
+    if (!coord || seen.has(coord)) continue
+    seen.add(coord)
+    out.push(coord)
+  }
+  return out
+}
+
+export function joinPreview(items: string[], max = 8): string {
+  if (items.length <= max) return items.join('、')
+  return `${items.slice(0, max).join('、')} 等 ${items.length} 个`
+}

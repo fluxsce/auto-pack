@@ -226,6 +226,15 @@ func ShortHead(ctx context.Context, dir string, opt Options) string {
 	return out
 }
 
+// HeadCommit 返回当前 HEAD 的一行摘要（短哈希 作者 时间 说明），含 auto-pack 发版提交。
+func HeadCommit(ctx context.Context, dir string, opt Options) string {
+	raw, err := runOut(ctx, dir, opt, "log", "-1", "--format=%h %an %ad %s", "--date=format:%Y-%m-%d %H:%M")
+	if err != nil || raw == "" {
+		return ShortHead(ctx, dir, opt)
+	}
+	return raw
+}
+
 // LastUserCommit 返回工作区最近一次非 auto-pack 提交的一行摘要（短哈希 作者 时间 说明）。
 // 近段全是发版机器人提交时退回 HEAD。读不到提交时返回空串。
 func LastUserCommit(ctx context.Context, dir string, opt Options) string {

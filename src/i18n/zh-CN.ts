@@ -332,6 +332,18 @@ export default {
     cloneProjectDone: '已克隆为 {name}',
     buildNow: '立即构建',
     buildQueued: '已入队构建作业',
+    buildNowOrderOpen: '已按 pom.xml 依赖顺序开始构建（本工程 + 上游）',
+    buildNowAnalyzeFail: '未能解析 pom.xml 依赖，改为仅构建本工程',
+    buildNowUpstreamTitle: '建议按 pom.xml 依赖顺序构建',
+    buildNowUpstreamDesc:
+      '「{name}」的 pom.xml 依赖本空间 {count} 个模块：{list}。单独立即构建时，本地仓库若没有这些 SNAPSHOT，会出现 The POM for … is missing。',
+    buildNowUpstreamConfirm: '按依赖构建',
+    buildNowUpstreamCancel: '仅本工程',
+    buildNowBothExtra: '另外还有未登记在本空间的依赖：{list}',
+    buildNowUnmatchedTitle: 'pom.xml 有空间外依赖',
+    buildNowUnmatchedDesc:
+      '「{name}」依赖这些未登记在本空间的 SNAPSHOT / 同组模块：{list}。平台无法从 pom.xml 变出 jar，请先把对应工程加入空间，或 install 到 Maven 本地仓库。',
+    buildNowUnmatchedConfirm: '仍构建本工程',
     viewJobs: '查看作业',
     detail: {
       title: '工程详情',

@@ -96,10 +96,17 @@ export type MavenCycle = {
   project_names?: string[]
 }
 
+export type UnmatchedDep = {
+  consumer_rec_id: string
+  consumer_name: string
+  coordinates: string
+}
+
 export type MavenAnalysis = {
   full_build_order: MavenModule[]
   internal_edges: MavenEdge[]
   cyclic_groups?: MavenCycle[]
+  unmatched_deps?: UnmatchedDep[]
   warnings?: string[]
 }
 

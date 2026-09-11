@@ -186,3 +186,34 @@ func TestAnalyzeMavenWorkspaceCycleSortedByName(t *testing.T) {
 		t.Fatalf("want name order, got %+v", out.FullBuildOrder)
 	}
 }
+
+func TestAnalyzeMavenWorkspaceUnmatchedSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "app")
+	_ = os.MkdirAll(app, 0o755)
+	if err := os.WriteFile(filepath.Join(app, "pom.xml"), []byte(`<project>
+		<groupId>com.flux.wmsv6</groupId><artifactId>app</artifactId>
+		<dependencies>
+			<dependency>
+				<groupId>com.flux.wmsv6</groupId>
+				<artifactId>flux-collaboration-storage</artifactId>
+				<version>10.0.0-P05-01-SNAPSHOT</version>
+			</dependency>
+			<dependency>
+				<groupId>org.springframework</groupId>
+				<artifactId>spring-core</artifactId>
+				<version>6.1.0</version>
+			</dependency>
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{{RecID: "1", ProjectName: "app", ProjectType: "maven"}}
+	out := AnalyzeMavenWorkspace(list, func(project.Project) string { return app })
+	if len(out.UnmatchedDeps) != 1 {
+		t.Fatalf("unmatched %+v", out.UnmatchedDeps)
+	}
+	if out.UnmatchedDeps[0].Coordinates != "com.flux.wmsv6:flux-collaboration-storage:10.0.0-P05-01-SNAPSHOT" {
+		t.Fatalf("coord %s", out.UnmatchedDeps[0].Coordinates)
+	}
+}

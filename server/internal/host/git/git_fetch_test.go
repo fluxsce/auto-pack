@@ -172,6 +172,10 @@ func TestLastUserCommitSkipsPack(t *testing.T) {
 	if !strings.Contains(got, "fix: user change") || strings.Contains(got, "chore: tag") {
 		t.Fatal(got)
 	}
+	head := HeadCommit(context.Background(), dir, Options{})
+	if !strings.Contains(head, "chore: tag") {
+		t.Fatalf("HEAD should be pack commit, got %s", head)
+	}
 }
 
 func mustWrite(t *testing.T, path, body string) {

@@ -17,6 +17,7 @@ import (
 var (
 	rePomGroup    = regexp.MustCompile(`(?s)<groupId>\s*([^<]+?)\s*</groupId>`)
 	rePomArtifact = regexp.MustCompile(`(?s)<artifactId>\s*([^<]+?)\s*</artifactId>`)
+	rePomVersion  = regexp.MustCompile(`(?s)<version>\s*([^<]+?)\s*</version>`)
 	rePomDepBlock = regexp.MustCompile(`(?s)<dependency>.*?</dependency>`)
 	rePomParent   = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
 	rePomDepMgmt  = regexp.MustCompile(`(?s)<dependencyManagement>.*?</dependencyManagement>`)
@@ -47,17 +48,33 @@ type MavenCycle struct {
 
 // MavenAnalysis is the workspace Maven graph used by auto-build.
 type MavenAnalysis struct {
-	FullBuildOrder []MavenModule `json:"full_build_order"`
-	InternalEdges  []MavenEdge   `json:"internal_edges"`
-	CyclicGroups   []MavenCycle  `json:"cyclic_groups,omitempty"`
-	Warnings       []string      `json:"warnings,omitempty"`
+	FullBuildOrder []MavenModule  `json:"full_build_order"`
+	InternalEdges  []MavenEdge    `json:"internal_edges"`
+	CyclicGroups   []MavenCycle   `json:"cyclic_groups,omitempty"`
+	UnmatchedDeps  []UnmatchedDep `json:"unmatched_deps,omitempty"`
+	Warnings       []string       `json:"warnings,omitempty"`
+}
+
+// UnmatchedDep is a pom.xml dependency that is not another workspace project.
+// Only SNAPSHOT or same-group coordinates are kept (private modules that would
+// surface as "The POM for ... is missing" when built alone).
+type UnmatchedDep struct {
+	ConsumerRecID string `json:"consumer_rec_id"`
+	ConsumerName  string `json:"consumer_name"`
+	Coordinates   string `json:"coordinates"`
+}
+
+// pomDep is one parsed dependency coordinate used while building the graph.
+type pomDep struct {
+	ga      string
+	version string
 }
 
 // mavenNode is one parsed Maven project used while building the workspace graph.
 type mavenNode struct {
 	prj  project.Project
 	ga   string
-	deps []string
+	deps []pomDep
 }
 
 // AnalyzeMavenWorkspace builds a workspace graph: Maven POM plus npm / Node / Vue package.json.
@@ -71,7 +88,7 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			dir = workDir(prj)
 		}
 		var ga string
-		var deps []string
+		var deps []pomDep
 		switch {
 		case notes.IsMavenReleaseProject(prj.ProjectType):
 			ga, deps = parsePomGraph(filepath.Join(dir, "pom.xml"))
@@ -90,19 +107,33 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 	out := MavenAnalysis{}
 	incoming := map[string]int{}
 	edges := map[string][]string{}
+	workspaceGroups := map[string]bool{}
+	for _, n := range nodes {
+		if g := coordGroup(n.ga); g != "" {
+			workspaceGroups[g] = true
+		}
+	}
 	for _, n := range nodes {
 		incoming[n.prj.RecID] = incoming[n.prj.RecID]
 		for _, dep := range n.deps {
-			prov, ok := byGA[dep]
-			if !ok || prov.RecID == n.prj.RecID {
+			prov, ok := byGA[dep.ga]
+			if ok && prov.RecID != n.prj.RecID {
+				out.InternalEdges = append(out.InternalEdges, MavenEdge{
+					ConsumerRecID: n.prj.RecID, ConsumerName: n.prj.ProjectName,
+					ProviderRecID: prov.RecID, ProviderName: prov.ProjectName,
+				})
+				edges[prov.RecID] = append(edges[prov.RecID], n.prj.RecID)
+				incoming[n.prj.RecID]++
 				continue
 			}
-			out.InternalEdges = append(out.InternalEdges, MavenEdge{
-				ConsumerRecID: n.prj.RecID, ConsumerName: n.prj.ProjectName,
-				ProviderRecID: prov.RecID, ProviderName: prov.ProjectName,
+			if ok || !flagUnmatchedDep(dep, n.ga, workspaceGroups) {
+				continue
+			}
+			out.UnmatchedDeps = append(out.UnmatchedDeps, UnmatchedDep{
+				ConsumerRecID: n.prj.RecID,
+				ConsumerName:  n.prj.ProjectName,
+				Coordinates:   formatPomCoord(dep),
 			})
-			edges[prov.RecID] = append(edges[prov.RecID], n.prj.RecID)
-			incoming[n.prj.RecID]++
 		}
 	}
 	byID := map[string]mavenNode{}
@@ -179,7 +210,7 @@ func sortIDsByName(ids []string, byID map[string]mavenNode) {
 
 // parsePomGraph 读工程根 pom.xml：坐标取项目头（可继承 parent.groupId），
 // 依赖只取正式 <dependencies>，忽略 dependencyManagement 与插件依赖。
-func parsePomGraph(path string) (ga string, deps []string) {
+func parsePomGraph(path string) (ga string, deps []pomDep) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", nil
@@ -187,6 +218,7 @@ func parsePomGraph(path string) (ga string, deps []string) {
 	content := string(raw)
 	parentBlock := rePomParent.FindString(content)
 	parentG := firstCapture(rePomGroup, parentBlock)
+	parentV := firstCapture(rePomVersion, parentBlock)
 
 	head := content
 	if loc := rePomHeadCut.FindStringIndex(content); loc != nil {
@@ -202,6 +234,7 @@ func parsePomGraph(path string) (ga string, deps []string) {
 		return "", nil
 	}
 	ga = g + ":" + a
+	projectV := resolveVersionToken(firstCapture(rePomVersion, head), "", parentV)
 
 	body := rePomParent.ReplaceAllString(content, "")
 	body = rePomDepMgmt.ReplaceAllString(body, "")
@@ -218,9 +251,63 @@ func parsePomGraph(path string) (ga string, deps []string) {
 			continue
 		}
 		seen[coord] = true
-		deps = append(deps, coord)
+		deps = append(deps, pomDep{
+			ga:      coord,
+			version: resolveVersionToken(firstCapture(rePomVersion, block), projectV, parentV),
+		})
 	}
 	return ga, deps
+}
+
+func resolveVersionToken(raw, projectVer, parentVer string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return ""
+	}
+	switch s {
+	case "${project.version}", "${pom.version}":
+		return projectVer
+	case "${project.parent.version}", "${parent.version}", "${pom.parent.version}":
+		return parentVer
+	default:
+		if strings.Contains(s, "${") {
+			return ""
+		}
+		return s
+	}
+}
+
+func coordGroup(ga string) string {
+	g, _, ok := strings.Cut(strings.TrimSpace(ga), ":")
+	if !ok {
+		return ""
+	}
+	return g
+}
+
+func isSnapshotVersion(ver string) bool {
+	return strings.Contains(strings.ToUpper(ver), "SNAPSHOT")
+}
+
+func flagUnmatchedDep(dep pomDep, consumerGA string, workspaceGroups map[string]bool) bool {
+	if dep.ga == "" || dep.ga == consumerGA {
+		return false
+	}
+	if isSnapshotVersion(dep.version) {
+		return true
+	}
+	g := coordGroup(dep.ga)
+	if g == "" {
+		return false
+	}
+	return g == coordGroup(consumerGA) || workspaceGroups[g]
+}
+
+func formatPomCoord(dep pomDep) string {
+	if dep.version == "" {
+		return dep.ga
+	}
+	return dep.ga + ":" + dep.version
 }
 
 func resolveCoordToken(raw, parentGroup, projectGroup string) string {
@@ -266,7 +353,7 @@ func packageJSONPath(dir string, prj project.Project) string {
 }
 
 // parsePackageGraph 读 package.json：坐标是 name，边只连空间内其它包（dependencies / peer / dev）。
-func parsePackageGraph(path string) (name string, deps []string) {
+func parsePackageGraph(path string) (name string, deps []pomDep) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", nil
@@ -292,7 +379,7 @@ func parsePackageGraph(path string) (name string, deps []string) {
 				continue
 			}
 			seen[key] = true
-			deps = append(deps, key)
+			deps = append(deps, pomDep{ga: key})
 		}
 	}
 	add(doc.Dependencies)
