@@ -1,7 +1,9 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +15,32 @@ import (
 	"auto-pack/server/internal/project"
 	"auto-pack/server/internal/store"
 )
+
+func TestNotifyLogsBatchSkip(t *testing.T) {
+	var buf bytes.Buffer
+	e := &Engine{}
+	e.notify(context.Background(), job.Job{PayloadJSON: `{"origin":"auto_build"}`}, true, "", &buf)
+	if !strings.Contains(buf.String(), "邮件通知：跳过（工作空间批次不按工程发信）") {
+		t.Fatalf("%s", buf.String())
+	}
+}
+
+func TestNotifyLogsWorkspaceSMTPMissing(t *testing.T) {
+	var buf bytes.Buffer
+	e := &Engine{}
+	e.notify(context.Background(), job.Job{JobType: job.TypeBuild}, true, "", &buf)
+	got := buf.String()
+	if !strings.Contains(got, "== 邮件通知 ==") || !strings.Contains(got, "邮件通知：跳过（空间未配置 SMTP）") {
+		t.Fatalf("%s", got)
+	}
+}
+
+func TestSendActionMailRequiresSMTPEnv(t *testing.T) {
+	err := (&Engine{}).sendActionMail(context.Background(), job.Job{}, project.Project{}, project.PostAction{Kind: "email", To: "a@b.c"}, true, "", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "smtp env not found") {
+		t.Fatalf("%v", err)
+	}
+}
 
 func TestComposeNotifyMailIncludesKeyFields(t *testing.T) {
 	j := job.Job{

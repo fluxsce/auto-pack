@@ -70,6 +70,7 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 		w = io.Discard
 	}
 	if skipBatchSideEffects(j) {
+		logLine(w, "邮件通知：跳过（工作空间批次不按工程发信）")
 		return
 	}
 	if e.st != nil && j.RecID != "" {
@@ -83,19 +84,37 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 			prj = p
 		}
 	}
+	logLine(w, "== 邮件通知 ==")
+	status := "成功"
+	if !ok {
+		status = "失败"
+	}
 	sent := 0
+	hadEmail := false
 	for _, act := range project.ParseRecipe(prj.RecipeJSON).Actions() {
-		if !project.IsEmailAction(act.Kind) || !project.ActionMatches(act, ok) {
+		if !project.IsEmailAction(act.Kind) {
+			continue
+		}
+		hadEmail = true
+		if !project.ActionEnabled(act) {
+			logLine(w, "邮件通知：跳过（已停用）")
+			continue
+		}
+		if !project.ActionMatches(act, ok) {
+			logLine(w, "邮件通知：跳过（%s，本次作业%s）", postWhenTitle(project.ActionWhen(act)), status)
 			continue
 		}
 		if err := e.sendActionMail(ctx, j, prj, act, ok, errMsg, w); err != nil {
-			_, _ = fmt.Fprintf(w, "mail: %v\n", err)
+			logLine(w, "邮件通知：失败 %v", err)
 			continue
 		}
 		sent++
 	}
 	if sent > 0 {
 		return
+	}
+	if hadEmail {
+		logLine(w, "邮件通知：后置邮件未发出，尝试空间默认 SMTP")
 	}
 	e.sendWorkspaceMail(ctx, j, prj, ok, errMsg, w)
 }
@@ -110,32 +129,40 @@ func (e *Engine) sendActionMail(ctx context.Context, j job.Job, prj project.Proj
 		sc.To = to
 	}
 	if len(sc.Recipients()) == 0 {
-		logLine(w, "已跳过邮件：未配置收件人")
+		logLine(w, "邮件通知：跳过（未配置收件人）")
 		return nil
 	}
 	subject, body := composeNotifyMail(j, prj, e.workspaceTitle(ctx, j.WorkspaceRecID), act, ok, errMsg)
-	if project.ShouldAttachMailLog(act, ok) {
+	attach := project.ShouldAttachMailLog(act, ok)
+	if attach {
 		body = appendMailLog(body, e.logTail(j.RecID, 8000))
 	}
 	if err := hostsmtp.Send(sc, subject, body); err != nil {
 		return err
 	}
-	logLine(w, "邮件已发送 %s", sc.To)
+	logLine(w, "邮件通知：已发送 收件人 %s", strings.Join(sc.Recipients(), ", "))
+	logLine(w, "邮件通知：主题 %s", subject)
+	if attach {
+		logLine(w, "邮件通知：已附带作业日志")
+	}
 	return nil
 }
 
 func (e *Engine) sendWorkspaceMail(ctx context.Context, j job.Job, prj project.Project, ok bool, errMsg string, w io.Writer) {
 	cfg := e.kindCfg(ctx, j.WorkspaceRecID, "smtp")
 	if len(cfg) == 0 {
+		logLine(w, "邮件通知：跳过（空间未配置 SMTP）")
 		return
 	}
 	sc := hostsmtp.MapConfig(cfg)
 	if len(sc.Recipients()) == 0 {
+		logLine(w, "邮件通知：跳过（未配置收件人）")
 		return
 	}
+	logLine(w, "邮件通知：使用空间默认 SMTP")
 	act := project.PostAction{Kind: "email", To: sc.To}
 	if err := e.sendActionMail(ctx, j, prj, act, ok, errMsg, w); err != nil {
-		_, _ = fmt.Fprintf(w, "mail: %v\n", err)
+		logLine(w, "邮件通知：失败 %v", err)
 	}
 }
 

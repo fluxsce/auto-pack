@@ -36,6 +36,12 @@ func (e *Engine) stepPost(ctx context.Context, j job.Job, prj project.Project, p
 				continue
 			}
 			logLine(w, "%d. %s：作业结束后发送（%s）", n, title, when)
+			if to := strings.TrimSpace(act.To); to != "" {
+				logLine(w, "%d. %s：收件人 %s", n, title, to)
+			}
+			if subj := strings.TrimSpace(act.Subject); subj != "" {
+				logLine(w, "%d. %s：主题 %s", n, title, subj)
+			}
 			continue
 		}
 		if !project.ActionMatches(act, true) {
@@ -108,11 +114,17 @@ func (e *Engine) runPostAction(ctx context.Context, j job.Job, prj project.Proje
 		if recipe.Workdir != "" {
 			dir = filepath.Join(work, recipe.Workdir)
 		}
+		logLine(w, "执行命令 %s", cmd)
 		var extra []string
 		if e.settings != nil {
 			extra = e.settings.ProcEnv(ctx)
 		}
-		return bash.Run(ctx, dir, cmd, extra, w)
+		if err := bash.Run(ctx, dir, cmd, extra, w); err != nil {
+			logLine(w, "脚本退出 %v", err)
+			return err
+		}
+		logLine(w, "脚本退出 0")
+		return nil
 	default:
 		return fmt.Errorf("unknown post action")
 	}
