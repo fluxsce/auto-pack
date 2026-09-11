@@ -161,19 +161,6 @@ func normalizeStart(req StartRequest) (StartRequest, error) {
 
 func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Workspace, list []project.Project, body StartRequest, job *record.Job, logPath string) {
 	s.appendLog(logPath, stamp()+" 开始自动构建")
-	s.coord.SetPhase(job, "sync")
-	var sync release.SyncResult
-	if s.releases != nil {
-		var err error
-		sync, err = s.releases.SyncSourcesProgress(ctx, actor, body.WorkspaceRecID, func(ev release.SyncEvent) {
-			if line := formatSyncEvent(ev); line != "" {
-				s.appendLog(logPath, line)
-			}
-		})
-		if err != nil && ctx.Err() == nil {
-			s.appendLog(logPath, stamp()+" 预同步失败："+err.Error())
-		}
-	}
 	analysis := order.AnalyzeMavenWorkspace(list, func(prj project.Project) string {
 		return s.workDir(ws, prj)
 	})
@@ -198,6 +185,24 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 	s.appendLog(logPath, stamp()+fmt.Sprintf(" 构建队列 %d 个工程", len(queue)))
 	for i, p := range queue {
 		s.appendLog(logPath, fmt.Sprintf("  %d. %s", i+1, p.ProjectName))
+	}
+	s.coord.SetPhase(job, "sync")
+	var sync release.SyncResult
+	if s.releases != nil {
+		ids := make([]string, 0, len(queue))
+		for _, p := range queue {
+			ids = append(ids, p.RecID)
+		}
+		s.appendLog(logPath, stamp()+fmt.Sprintf(" 预同步本次队列 %d 个工程", len(ids)))
+		var err error
+		sync, err = s.releases.SyncSourcesLimited(ctx, actor, body.WorkspaceRecID, ids, func(ev release.SyncEvent) {
+			if line := formatSyncEvent(ev); line != "" {
+				s.appendLog(logPath, line)
+			}
+		})
+		if err != nil && ctx.Err() == nil {
+			s.appendLog(logPath, stamp()+" 预同步失败："+err.Error())
+		}
 	}
 	s.coord.SetPhase(job, "build")
 	succeeded, skipped, failed := 0, 0, 0

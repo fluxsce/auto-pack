@@ -25,14 +25,6 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 	}
 	s.coord.SetPhase(job, "post_build")
 	s.appendLog(logPath, stamp()+" 发版完成，开始自动构建与推送")
-	sync, err := s.SyncSourcesProgress(ctx, actor, ws.RecID, func(ev SyncEvent) {
-		if line := formatReleaseSyncEvent(ev); line != "" {
-			s.appendLog(logPath, line)
-		}
-	})
-	if err != nil && ctx.Err() == nil {
-		s.appendLog(logPath, stamp()+" 预同步失败："+err.Error())
-	}
 	analysis := order.AnalyzeMavenWorkspace(list, func(prj project.Project) string {
 		return s.workDir(ws, prj)
 	})
@@ -57,6 +49,19 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 	if len(queue) == 0 {
 		s.appendLog(logPath, stamp()+" 发版后没有可构建的工程")
 		return
+	}
+	ids := make([]string, 0, len(queue))
+	for _, p := range queue {
+		ids = append(ids, p.RecID)
+	}
+	s.appendLog(logPath, stamp()+fmt.Sprintf(" 预同步本次队列 %d 个工程", len(ids)))
+	sync, err := s.SyncSourcesLimited(ctx, actor, ws.RecID, ids, func(ev SyncEvent) {
+		if line := formatReleaseSyncEvent(ev); line != "" {
+			s.appendLog(logPath, line)
+		}
+	})
+	if err != nil && ctx.Err() == nil {
+		s.appendLog(logPath, stamp()+" 预同步失败："+err.Error())
 	}
 	s.appendLog(logPath, stamp()+fmt.Sprintf(" 构建队列 %d 个工程", len(queue)))
 	for i, p := range queue {

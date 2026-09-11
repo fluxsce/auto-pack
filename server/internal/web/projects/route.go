@@ -21,6 +21,7 @@ func Init(d mod.Deps) {
 	d.Mux.Handle("POST "+mod.Path("projects", "cron-preview"), d.Authz(http.HandlerFunc(c.PreviewCron)))
 	d.Mux.Handle("POST "+mod.Path("projects", "git-branches"), d.Authz(http.HandlerFunc(c.UpdateGitBranches)))
 	d.Mux.Handle("POST "+mod.Path("projects", "post-actions"), d.Authz(http.HandlerFunc(c.UpdatePostActions)))
+	d.Mux.Handle("POST "+mod.Path("projects", "commands"), d.Authz(http.HandlerFunc(c.UpdateCommands)))
 	d.Mux.Handle("GET "+mod.Path("projects", "{id}"), d.Authz(http.HandlerFunc(c.Get)))
 	d.Mux.Handle("GET "+mod.Path("projects", "{id}", "files"), d.Authz(http.HandlerFunc(c.Files)))
 	d.Mux.Handle("POST "+mod.Path("projects", "{id}", "files", "clear"), d.Authz(http.HandlerFunc(c.ClearFiles)))

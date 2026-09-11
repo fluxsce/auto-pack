@@ -19,6 +19,7 @@ const (
 	ActionProjectDelete   = "project.delete"
 	ActionProjectBranch   = "project.branch"
 	ActionProjectPost       = "project.post"
+	ActionProjectCommand    = "project.command"
 	ActionProjectClearFiles = "project.clear_files"
 	ActionProjectDeleteFile = "project.delete_file"
 	ActionEnvSave         = "env.save"

@@ -27,9 +27,11 @@ var (
 
 // MavenModule is one workspace Maven project in build order.
 type MavenModule struct {
-	ProjectRecID string `json:"project_rec_id"`
-	ProjectName  string `json:"project_name"`
-	Coordinates  string `json:"coordinates,omitempty"`
+	ProjectRecID  string `json:"project_rec_id"`
+	ProjectName   string `json:"project_name"`
+	Coordinates   string `json:"coordinates,omitempty"`
+	LastJobStatus string `json:"last_job_status,omitempty"`
+	IsEnabled     int    `json:"is_enabled"`
 }
 
 // MavenEdge is a workspace-internal Maven dependency.
@@ -156,9 +158,7 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 		}
 		seen[id] = true
 		n := byID[id]
-		out.FullBuildOrder = append(out.FullBuildOrder, MavenModule{
-			ProjectRecID: n.prj.RecID, ProjectName: n.prj.ProjectName, Coordinates: n.ga,
-		})
+		out.FullBuildOrder = append(out.FullBuildOrder, moduleOf(n.prj, n.ga))
 		for _, next := range edges[id] {
 			incoming[next]--
 			if incoming[next] == 0 {
@@ -183,9 +183,7 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 		for _, n := range leftover {
 			ids = append(ids, n.prj.RecID)
 			names = append(names, n.prj.ProjectName)
-			out.FullBuildOrder = append(out.FullBuildOrder, MavenModule{
-				ProjectRecID: n.prj.RecID, ProjectName: n.prj.ProjectName, Coordinates: n.ga,
-			})
+			out.FullBuildOrder = append(out.FullBuildOrder, moduleOf(n.prj, n.ga))
 		}
 		out.CyclicGroups = append(out.CyclicGroups, MavenCycle{ProjectRecIDs: ids, ProjectNames: names})
 		out.Warnings = append(out.Warnings, "检测到循环依赖，按工程名追加剩余模块")
@@ -194,12 +192,20 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 		return unparsed[i].ProjectName < unparsed[j].ProjectName
 	})
 	for _, prj := range unparsed {
-		out.FullBuildOrder = append(out.FullBuildOrder, MavenModule{
-			ProjectRecID: prj.RecID, ProjectName: prj.ProjectName,
-		})
+		out.FullBuildOrder = append(out.FullBuildOrder, moduleOf(prj, ""))
 		out.Warnings = append(out.Warnings, fmt.Sprintf("工程 %s 未解析到有效 pom.xml / package.json，已追加到队尾", prj.ProjectName))
 	}
 	return out
+}
+
+func moduleOf(prj project.Project, ga string) MavenModule {
+	return MavenModule{
+		ProjectRecID:  prj.RecID,
+		ProjectName:   prj.ProjectName,
+		Coordinates:   ga,
+		LastJobStatus: prj.LastJobStatus,
+		IsEnabled:     prj.IsEnabled,
+	}
 }
 
 func sortIDsByName(ids []string, byID map[string]mavenNode) {

@@ -70,6 +70,25 @@ func (c *Controller) UpdateGitBranches(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// UpdateCommands 按类型批量改工程构建命令（token 替换或整条覆盖）。
+func (c *Controller) UpdateCommands(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		WorkspaceRecID string              `json:"workspace_rec_id"`
+		Patch          project.CommandPatch `json:"patch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	actor := middleware.ActorFrom(r)
+	out, err := c.projects.UpdateCommands(r.Context(), actor, in.WorkspaceRecID, in.Patch)
+	c.audit.Note(r.Context(), actor, in.WorkspaceRecID, audit.ActionProjectCommand, "workspace", in.WorkspaceRecID, "batch command", err)
+	if httpx.WriteSvcErr(w, err) {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // UpdatePostActions 把空间内每个工程的邮件或脚本构建后操作写成同一份。
 func (c *Controller) UpdatePostActions(w http.ResponseWriter, r *http.Request) {
 	var in struct {

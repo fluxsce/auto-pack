@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { RsButton, RsCard, RsContextMenu, RsIcon, RsInput, RsTag, RsTooltip } from '@/ui'
 import { useWorkspaceList } from '../composables/use-workspace-list'
+import BuildCommandDialog from './workspace-menu/BuildCommandDialog.vue'
 import BranchCloneDialog from './workspace-menu/BranchCloneDialog.vue'
 import GitBranchDialog from './workspace-menu/GitBranchDialog.vue'
 import PomVersionDialog from './workspace-menu/PomVersionDialog.vue'
@@ -39,6 +40,7 @@ const {
   onGitBranchSuccess,
   cloneOpen,
   pomOpen,
+  commandOpen,
   emailOpen,
   shellOpen,
   actionTarget,
@@ -122,6 +124,7 @@ const {
     <GitBranchDialog v-model:open="branchOpen" :workspace="actionTarget" @success="onGitBranchSuccess" />
     <BranchCloneDialog v-model:open="cloneOpen" :workspace="actionTarget" @success="onGitBranchSuccess" />
     <PomVersionDialog v-model:open="pomOpen" :workspace="actionTarget" @success="onGitBranchSuccess" />
+    <BuildCommandDialog v-model:open="commandOpen" :workspace="actionTarget" @success="onGitBranchSuccess" />
     <PostEmailDialog v-model:open="emailOpen" :workspace="actionTarget" />
     <PostShellDialog v-model:open="shellOpen" :workspace="actionTarget" />
     <input

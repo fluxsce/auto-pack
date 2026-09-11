@@ -285,6 +285,47 @@ func (s *Service) UpdatePostActions(ctx context.Context, actor iam.Actor, worksp
 	return out, nil
 }
 
+// UpdateCommands rewrites recipe.command on matching projects (project.write).
+func (s *Service) UpdateCommands(ctx context.Context, actor iam.Actor, workspaceID string, patch CommandPatch) (CommandUpdate, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if err := CheckCommandPatch(patch); err != nil {
+		return CommandUpdate{}, err
+	}
+	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionProjectWrite); err != nil {
+		return CommandUpdate{}, err
+	}
+	list, err := s.ListRaw(ctx, workspaceID)
+	if err != nil {
+		return CommandUpdate{}, err
+	}
+	family := strings.ToLower(strings.TrimSpace(patch.Family))
+	if family == "all" {
+		family = ""
+	}
+	out := CommandUpdate{Family: family}
+	q := s.st.Rebind(`UPDATE AP_PROJECT SET recipe_json=? WHERE rec_id=?`)
+	for _, p := range list {
+		if !MatchCommandFamily(p.ProjectType, family) {
+			out.Skipped++
+			continue
+		}
+		recipe, ok := PatchRecipe(ParseRecipe(p.RecipeJSON), patch)
+		if !ok {
+			out.Skipped++
+			continue
+		}
+		raw, err := json.Marshal(recipe)
+		if err != nil {
+			return CommandUpdate{}, err
+		}
+		if _, err := s.st.SQL().ExecContext(ctx, q, string(raw), p.RecID); err != nil {
+			return CommandUpdate{}, err
+		}
+		out.Updated++
+	}
+	return out, nil
+}
+
 // SetRepoBranch writes repo_branch without IAM (runner after branch_clone).
 func (s *Service) SetRepoBranch(ctx context.Context, id, branch string) error {
 	id = strings.TrimSpace(id)

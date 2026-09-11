@@ -381,12 +381,21 @@ func (s *Service) Defaults(ctx context.Context, actor iam.Actor, workspaceID str
 
 // SyncSources fetches Git projects in a workspace sequentially.
 func (s *Service) SyncSources(ctx context.Context, actor iam.Actor, workspaceID string) (SyncResult, error) {
-	return s.SyncSourcesProgress(ctx, actor, workspaceID, nil)
+	return s.syncSources(ctx, actor, workspaceID, nil, nil)
 }
 
 // SyncSourcesProgress 与 SyncSources 相同，并在每个工程开始/结束时回调，供 HTTP 流式日志。
 // 同一空间已有预同步时不报冲突，而是回放已有事件并跟到结束。
 func (s *Service) SyncSourcesProgress(ctx context.Context, actor iam.Actor, workspaceID string, progress SyncListener) (SyncResult, error) {
+	return s.syncSources(ctx, actor, workspaceID, nil, progress)
+}
+
+// SyncSourcesLimited 只预同步 onlyRecIDs；空列表表示全空间。
+func (s *Service) SyncSourcesLimited(ctx context.Context, actor iam.Actor, workspaceID string, onlyRecIDs []string, progress SyncListener) (SyncResult, error) {
+	return s.syncSources(ctx, actor, workspaceID, onlyRecIDs, progress)
+}
+
+func (s *Service) syncSources(ctx context.Context, actor iam.Actor, workspaceID string, onlyRecIDs []string, progress SyncListener) (SyncResult, error) {
 	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionJobSubmit); err != nil {
 		return SyncResult{}, err
 	}
@@ -411,6 +420,7 @@ func (s *Service) SyncSourcesProgress(ctx context.Context, actor iam.Actor, work
 		runErr = err
 		return SyncResult{}, err
 	}
+	list = FilterProjectsByRecID(list, onlyRecIDs)
 	emit := func(ev SyncEvent) {
 		run.emit(ev)
 		if progress != nil {
@@ -505,7 +515,7 @@ func (s *Service) MavenOrder(ctx context.Context, actor iam.Actor, workspaceID s
 	if err != nil {
 		return MavenAnalysis{}, err
 	}
-	list, err := s.projects.ListRaw(ctx, workspaceID)
+	list, err := s.projects.List(ctx, actor, workspaceID)
 	if err != nil {
 		return MavenAnalysis{}, err
 	}

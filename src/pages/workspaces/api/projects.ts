@@ -56,6 +56,32 @@ export function updateWorkspacePostActions(workspaceId: string, action: PostActi
   })
 }
 
+export type CommandPatchWrite = {
+  family?: 'maven' | 'node' | ''
+  goal?: string
+  find?: string
+  replace?: string
+  set_command?: string
+  workdir?: string
+  output_dir?: string
+  artifact_pattern?: string
+  log_retention_days?: number
+}
+
+export type CommandUpdate = {
+  updated: number
+  skipped: number
+  family?: string
+}
+
+export function updateWorkspaceCommands(workspaceId: string, patch: CommandPatchWrite): Promise<CommandUpdate> {
+  return request<CommandUpdate>({
+    method: 'POST',
+    url: apiPath('projects', 'commands'),
+    data: { workspace_rec_id: workspaceId, patch },
+  })
+}
+
 export function updateWorkspaceGitBranches(workspaceId: string, branch: string): Promise<GitBranchUpdate> {
   return request<GitBranchUpdate>({
     method: 'POST',

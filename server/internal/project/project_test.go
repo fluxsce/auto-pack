@@ -352,3 +352,83 @@ func TestUpdatePostActionsUpsertsEmail(t *testing.T) {
 		t.Fatalf("actions=%+v", recipe.PostActions)
 	}
 }
+
+func TestUpdateCommandsRewritesMavenPackage(t *testing.T) {
+	svc, _, ctx, actor := setupPrj(t)
+	maven, err := svc.Save(ctx, actor, project.Project{
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		ProjectName:    "lib-core",
+		ProjectType:    "maven",
+		RepoURL:        "https://git.example.com/org/lib-core.git",
+		RecipeJSON:     `{"scm_mode":"git","command":"mvn -B -DskipTests package"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := svc.Save(ctx, actor, project.Project{
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		ProjectName:    "web-ui",
+		ProjectType:    "vue",
+		RepoURL:        "https://git.example.com/org/web-ui.git",
+		RecipeJSON:     `{"scm_mode":"git","command":"npm run build"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.UpdateCommands(ctx, actor, access.DefaultWorkspaceRecID, project.CommandPatch{
+		Family:  "maven",
+		Find:    "package",
+		Replace: "install",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Updated != 1 {
+		t.Fatalf("updated=%d skipped=%d", out.Updated, out.Skipped)
+	}
+	got, err := svc.GetRaw(ctx, maven.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.ParseRecipe(got.RecipeJSON).Command != "mvn -B -DskipTests install" {
+		t.Fatalf("maven cmd=%s", project.ParseRecipe(got.RecipeJSON).Command)
+	}
+	web, err := svc.GetRaw(ctx, node.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.ParseRecipe(web.RecipeJSON).Command != "npm run build" {
+		t.Fatalf("node should stay, got %s", project.ParseRecipe(web.RecipeJSON).Command)
+	}
+}
+
+func TestUpdateCommandsRewritesCleanDeployGoal(t *testing.T) {
+	svc, _, ctx, actor := setupPrj(t)
+	p, err := svc.Save(ctx, actor, project.Project{
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		ProjectName:    "storage",
+		ProjectType:    "maven",
+		RepoURL:        "https://git.example.com/org/storage.git",
+		RecipeJSON:     `{"scm_mode":"git","command":"mvn clean deploy -DskipTests","output_dir":"target"}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.UpdateCommands(ctx, actor, access.DefaultWorkspaceRecID, project.CommandPatch{
+		Family: "maven",
+		Goal:   "install",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Updated != 1 {
+		t.Fatalf("updated=%d", out.Updated)
+	}
+	got, err := svc.GetRaw(ctx, p.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.ParseRecipe(got.RecipeJSON).Command != "mvn clean install -DskipTests" {
+		t.Fatalf("cmd=%s", project.ParseRecipe(got.RecipeJSON).Command)
+	}
+}

@@ -32,6 +32,7 @@ export function useWorkspaceList() {
   const branchOpen = ref(false)
   const cloneOpen = ref(false)
   const pomOpen = ref(false)
+  const commandOpen = ref(false)
   const emailOpen = ref(false)
   const shellOpen = ref(false)
   const actionTarget = ref<Workspace | null>(null)
@@ -104,6 +105,10 @@ export function useWorkspaceList() {
     editPomVersion: (item) => {
       actionTarget.value = item
       pomOpen.value = true
+    },
+    editBuildCommand: (item) => {
+      actionTarget.value = item
+      commandOpen.value = true
     },
     editPostEmail: (item) => {
       actionTarget.value = item
@@ -222,6 +227,7 @@ export function useWorkspaceList() {
     onGitBranchSuccess,
     cloneOpen,
     pomOpen,
+    commandOpen,
     emailOpen,
     shellOpen,
     actionTarget,

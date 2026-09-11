@@ -1,8 +1,8 @@
 import { useRsToast } from '@/ui'
-import { autoBuildStatus, fetchMavenOrder, listProjects, startAutoBuild, type MavenAnalysis, type Project } from '../api'
+import { autoBuildStatus, fetchMavenOrder, startAutoBuild, type MavenAnalysis, type Project } from '../api'
 import { autoBuildBag, bumpAutoBuild, isAutoBuildLive } from '../auto-build/runtime'
 import { setAutoBuildBusy } from '../composables/use-batch-activity'
-import { isOrderedBuildType, joinPreview, missingUpstreamProjects, unmatchedCoords } from './ordered-build'
+import { isOrderedBuildType, joinPreview, missingUpstreamModules, unmatchedCoords } from './ordered-build'
 
 export type BuildNowChoice = 'single' | 'ordered' | 'abort'
 
@@ -85,11 +85,10 @@ export async function chooseBuildNow(
     toast.warning(t('workspaces.buildNowAnalyzeFail'))
     return 'single'
   }
-  const peers = await listProjects(workspaceId).catch(() => [] as Project[])
-  const { missing, disabled } = missingUpstreamProjects(project.rec_id, analysis, peers)
+  const { missing, disabled } = missingUpstreamModules(project.rec_id, analysis)
   const unmatched = unmatchedCoords(project.rec_id, analysis)
   if (disabled.length) {
-    toast.warning(t('workspaces.buildNowDisabledSkip', { list: joinPreview(disabled.map((p) => p.project_name)) }))
+    toast.warning(t('workspaces.buildNowDisabledSkip', { list: joinPreview(disabled.map((m) => m.project_name)) }))
   }
   if (unmatched.length) {
     toast.warning(t('workspaces.buildNowUnmatchedHint', { list: joinPreview(unmatched) }))
@@ -97,14 +96,14 @@ export async function chooseBuildNow(
   if (!missing.length) return 'single'
   await startSelectedAutoBuild(
     workspaceId,
-    [...missing.map((p) => p.rec_id), project.rec_id],
+    [...missing.map((m) => m.project_rec_id), project.rec_id],
     analysis,
     true,
   )
   toast.info(
     t('workspaces.buildNowFilled', {
       count: missing.length,
-      list: joinPreview(missing.map((p) => p.project_name)),
+      list: joinPreview(missing.map((m) => m.project_name)),
     }),
   )
   return 'ordered'

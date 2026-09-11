@@ -115,27 +115,23 @@ export function joinPreview(items: string[], max = 8): string {
 
 const liveJob = new Set(['queued', 'running', 'succeeded'])
 
-/** 工作空间上游里尚未成功（也未在跑）的工程，立即构建时需要补齐。 */
-export function missingUpstreamProjects(
+/** 工作空间上游里尚未成功（也未在跑）的模块，立即构建时需要补齐。 */
+export function missingUpstreamModules(
   projectId: string,
   analysis: MavenAnalysis | null | undefined,
-  projects: Project[],
-): { missing: Project[]; disabled: Project[] } {
-  const byId = new Map(projects.map((p) => [p.rec_id, p]))
-  const missing: Project[] = []
-  const disabled: Project[] = []
+): { missing: MavenModule[]; disabled: MavenModule[] } {
+  const missing: MavenModule[] = []
+  const disabled: MavenModule[] = []
   const seen = new Set<string>()
   for (const m of upstreamModules(projectId, analysis)) {
     if (seen.has(m.project_rec_id)) continue
     seen.add(m.project_rec_id)
-    const p = byId.get(m.project_rec_id)
-    if (!p) continue
-    if (liveJob.has((p.last_job_status || '').trim())) continue
-    if (p.is_enabled === 0) {
-      disabled.push(p)
+    if (liveJob.has((m.last_job_status || '').trim())) continue
+    if (m.is_enabled === 0) {
+      disabled.push(m)
       continue
     }
-    missing.push(p)
+    missing.push(m)
   }
   return { missing, disabled }
 }

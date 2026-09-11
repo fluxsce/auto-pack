@@ -22,8 +22,8 @@ func TestAnalyzeMavenWorkspaceOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	list := []project.Project{
-		{RecID: "1", ProjectName: "core", ProjectType: "maven"},
-		{RecID: "2", ProjectName: "app", ProjectType: "maven"},
+		{RecID: "1", ProjectName: "core", ProjectType: "maven", IsEnabled: 1, LastJobStatus: "succeeded"},
+		{RecID: "2", ProjectName: "app", ProjectType: "maven", IsEnabled: 1},
 	}
 	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
 		if p.RecID == "1" {
@@ -36,6 +36,9 @@ func TestAnalyzeMavenWorkspaceOrder(t *testing.T) {
 	}
 	if len(out.InternalEdges) != 1 {
 		t.Fatalf("edges %+v", out.InternalEdges)
+	}
+	if out.FullBuildOrder[0].LastJobStatus != "succeeded" || out.FullBuildOrder[0].IsEnabled != 1 {
+		t.Fatalf("job fields %+v", out.FullBuildOrder[0])
 	}
 }
 

@@ -82,6 +82,8 @@ export type MavenModule = {
   project_rec_id: string
   project_name: string
   coordinates?: string
+  last_job_status?: string
+  is_enabled?: number
 }
 
 export type MavenEdge = {

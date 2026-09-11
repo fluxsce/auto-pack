@@ -8,6 +8,7 @@ export const WorkspaceMenuKey = {
   GitBranch: 'git-branch',
   BranchClone: 'branch-clone',
   PomVersion: 'pom-version',
+  BuildCommand: 'build-command',
   PostEmail: 'post-email',
   PostShell: 'post-shell',
 } as const
@@ -24,11 +25,12 @@ export type WorkspaceMenuHandlers = {
   editGitBranch: (item: Workspace) => void
   cloneGitBranch: (item: Workspace) => void
   editPomVersion: (item: Workspace) => void
+  editBuildCommand: (item: Workspace) => void
   editPostEmail: (item: Workspace) => void
   editPostShell: (item: Workspace) => void
 }
 
-/** 工作空间列表右键操作：导出导入、改分支、克隆分支、改 POM、构建后邮件/脚本。 */
+/** 工作空间列表右键操作：导出导入、改分支、克隆分支、改 POM、改构建命令、构建后邮件/脚本。 */
 export class WorkspaceContextMenu {
   constructor(private readonly handlers: WorkspaceMenuHandlers) {}
 
@@ -47,6 +49,7 @@ export class WorkspaceContextMenu {
         { key: WorkspaceMenuKey.GitBranch, label: t('workspaces.batchGitBranch'), icon: 'git-branch' },
         { key: WorkspaceMenuKey.BranchClone, label: t('workspaces.batchBranchClone'), icon: 'copy' },
         { key: WorkspaceMenuKey.PomVersion, label: t('workspaces.batchPomVersion'), icon: 'package' },
+        { key: WorkspaceMenuKey.BuildCommand, label: t('workspaces.batchCommand'), icon: 'wrench' },
         { key: 'sep-post', label: '', separator: true },
         { key: WorkspaceMenuKey.PostEmail, label: t('workspaces.batchPostEmail'), icon: 'mail' },
         { key: WorkspaceMenuKey.PostShell, label: t('workspaces.batchPostShell'), icon: 'terminal' },
@@ -78,6 +81,10 @@ export class WorkspaceContextMenu {
     }
     if (key === WorkspaceMenuKey.PomVersion) {
       this.handlers.editPomVersion(item)
+      return
+    }
+    if (key === WorkspaceMenuKey.BuildCommand) {
+      this.handlers.editBuildCommand(item)
       return
     }
     if (key === WorkspaceMenuKey.PostEmail) {
