@@ -37,6 +37,10 @@ func (e *Engine) stepBuild(ctx context.Context, j job.Job, prj project.Project, 
 	if e.settings != nil {
 		extra = append(extra, e.settings.ProcEnv(ctx)...)
 	}
+	if skipBuildAsSuccess(prj.ProjectType, cmd) {
+		logLine(w, "custom 工程未配置构建命令，跳过构建步骤并记为成功")
+		return nil
+	}
 	switch strings.ToLower(strings.TrimSpace(prj.ProjectType)) {
 	case "npm", "node", "vue", "frontend":
 		return npm.Run(ctx, dir, cmd, extra, w)
@@ -49,6 +53,19 @@ func (e *Engine) stepBuild(ctx context.Context, j job.Job, prj project.Project, 
 			return fmt.Errorf("build command is empty")
 		}
 		return bash.Run(ctx, dir, cmd, extra, w)
+	}
+}
+
+// skipBuildAsSuccess reports that a custom project with no command should skip compile and still succeed.
+func skipBuildAsSuccess(projectType, command string) bool {
+	if strings.TrimSpace(command) != "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(projectType)) {
+	case "custom", "customer":
+		return true
+	default:
+		return false
 	}
 }
 

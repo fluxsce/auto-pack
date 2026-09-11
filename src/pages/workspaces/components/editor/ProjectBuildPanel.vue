@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsFormItem, RsInput, RsInputNumber, RsTextarea } from '@/ui'
-import { defaultBuild, type ProjectRecipe } from '../../lib/project-defaults'
+import { defaultBuild, isCustomProjectType, type ProjectRecipe } from '../../lib/project-defaults'
 
 const recipe = defineModel<ProjectRecipe>('recipe', { required: true })
 
@@ -32,10 +32,11 @@ function onRetention(value: number | string | null): void {
     <RsTextarea
       v-model="recipe.command"
       :label="t('workspaces.command')"
-      required
+      :required="!isCustomProjectType(projectType)"
       :rows="4"
       :placeholder="defaultBuild(projectType).command"
     />
+    <p v-if="isCustomProjectType(projectType)" class="hint">{{ t('workspaces.commandSkipHint') }}</p>
     <RsInput
       v-model="recipe.workdir"
       :label="t('workspaces.workdir')"

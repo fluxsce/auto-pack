@@ -23,6 +23,8 @@ var (
 	rePomDepMgmt  = regexp.MustCompile(`(?s)<dependencyManagement>.*?</dependencyManagement>`)
 	rePomPlugin   = regexp.MustCompile(`(?s)<plugin>.*?</plugin>`)
 	rePomHeadCut  = regexp.MustCompile(`(?is)<(dependencyManagement|dependencies|build|profiles|modules)\b`)
+	rePomModules  = regexp.MustCompile(`(?s)<modules>.*?</modules>`)
+	rePomModule   = regexp.MustCompile(`(?s)<module>\s*([^<]+?)\s*</module>`)
 )
 
 // MavenModule is one workspace Maven project in build order.
@@ -74,9 +76,10 @@ type pomDep struct {
 
 // mavenNode is one parsed Maven project used while building the workspace graph.
 type mavenNode struct {
-	prj  project.Project
-	ga   string
-	deps []pomDep
+	prj      project.Project
+	ga       string
+	extraGAs []string
+	deps     []pomDep
 }
 
 // AnalyzeMavenWorkspace builds a workspace graph: Maven POM plus npm / Node / Vue package.json.
@@ -90,10 +93,11 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			dir = workDir(prj)
 		}
 		var ga string
+		var extra []string
 		var deps []pomDep
 		switch {
 		case notes.IsMavenReleaseProject(prj.ProjectType):
-			ga, deps = parsePomGraph(filepath.Join(dir, "pom.xml"))
+			ga, extra, deps = parsePomReactor(pomXMLPath(dir, prj))
 		case isNodeOrderProject(prj.ProjectType):
 			ga, deps = parsePackageGraph(packageJSONPath(dir, prj))
 		default:
@@ -103,8 +107,20 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			unparsed = append(unparsed, prj)
 			continue
 		}
-		nodes = append(nodes, mavenNode{prj: prj, ga: ga, deps: deps})
+		nodes = append(nodes, mavenNode{prj: prj, ga: ga, extraGAs: extra, deps: deps})
 		byGA[ga] = prj
+	}
+	// Nested Spring Boot / reactor modules share the workspace project.
+	// A dedicated project whose root POM matches the GA still wins.
+	for _, n := range nodes {
+		for _, extra := range n.extraGAs {
+			if extra == "" || extra == n.ga {
+				continue
+			}
+			if _, ok := byGA[extra]; !ok {
+				byGA[extra] = n.prj
+			}
+		}
 	}
 	out := MavenAnalysis{}
 	incoming := map[string]int{}
@@ -214,14 +230,138 @@ func sortIDsByName(ids []string, byID map[string]mavenNode) {
 	})
 }
 
-// parsePomGraph 读工程根 pom.xml：坐标取项目头（可继承 parent.groupId），
-// 依赖只取正式 <dependencies>，忽略 dependencyManagement 与插件依赖。
-func parsePomGraph(path string) (ga string, deps []pomDep) {
+const pomReactorDepth = 6
+
+// parsePomReactor 读工程根 pom.xml，并沿 <modules> 展开 Spring Boot / 多模块反应器。
+// 坐标取项目头（可继承 parent.groupId）；依赖合并各模块正式 <dependencies>。
+func parsePomReactor(path string) (ga string, extra []string, deps []pomDep) {
+	seen := map[string]bool{}
+	ga, extra, deps = collectPomReactor(path, seen, 0)
+	return ga, extra, uniquePomDeps(deps)
+}
+
+func collectPomReactor(path string, seen map[string]bool, depth int) (ga string, extra []string, deps []pomDep) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = filepath.Clean(path)
+	}
+	if seen[abs] || depth > pomReactorDepth {
+		return "", nil, nil
+	}
+	seen[abs] = true
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return "", nil
+		return "", nil, nil
 	}
 	content := string(raw)
+	ga, deps = parsePomCoords(content)
+	if ga != "" {
+		extra = append(extra, ga)
+	}
+	dir := filepath.Dir(path)
+	for _, rel := range pomModuleRels(content) {
+		child := filepath.Join(dir, filepath.FromSlash(rel), "pom.xml")
+		if !pomChildInRoot(dir, child) {
+			continue
+		}
+		cga, cextra, cdeps := collectPomReactor(child, seen, depth+1)
+		if cga != "" && cga != ga {
+			extra = append(extra, cga)
+		}
+		extra = append(extra, cextra...)
+		deps = append(deps, cdeps...)
+	}
+	return ga, uniqueStrings(extra), deps
+}
+
+func pomXMLPath(dir string, prj project.Project) string {
+	recipe := project.ParseRecipe(prj.RecipeJSON)
+	extra := strings.TrimSpace(recipe.Workdir)
+	if extra != "" {
+		p := filepath.Join(dir, filepath.FromSlash(extra), "pom.xml")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return filepath.Join(dir, "pom.xml")
+}
+
+func pomModuleRels(content string) []string {
+	block := rePomModules.FindString(content)
+	if block == "" {
+		return nil
+	}
+	var out []string
+	for _, m := range rePomModule.FindAllStringSubmatch(block, -1) {
+		if len(m) < 2 {
+			continue
+		}
+		rel := sanitizePomModuleRel(m[1])
+		if rel != "" {
+			out = append(out, rel)
+		}
+	}
+	return out
+}
+
+func sanitizePomModuleRel(raw string) string {
+	s := strings.Trim(strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/")), "/")
+	if s == "" || strings.HasPrefix(s, "/") || strings.Contains(s, ":") {
+		return ""
+	}
+	for _, part := range strings.Split(s, "/") {
+		if part == "" || part == ".." {
+			return ""
+		}
+	}
+	return s
+}
+
+func pomChildInRoot(root, child string) bool {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absChild, err := filepath.Abs(child)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absChild)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
+func uniquePomDeps(deps []pomDep) []pomDep {
+	seen := map[string]bool{}
+	out := make([]pomDep, 0, len(deps))
+	for _, dep := range deps {
+		if dep.ga == "" || seen[dep.ga] {
+			continue
+		}
+		seen[dep.ga] = true
+		out = append(out, dep)
+	}
+	return out
+}
+
+func uniqueStrings(in []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// parsePomCoords 读单个 pom.xml：坐标取项目头，依赖只取正式 <dependencies>。
+func parsePomCoords(content string) (ga string, deps []pomDep) {
 	parentBlock := rePomParent.FindString(content)
 	parentG := firstCapture(rePomGroup, parentBlock)
 	parentV := firstCapture(rePomVersion, parentBlock)

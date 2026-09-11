@@ -85,6 +85,35 @@ func TestSkipBatchSideEffects(t *testing.T) {
 	}
 }
 
+func TestSkipBuildAsSuccess(t *testing.T) {
+	if !skipBuildAsSuccess("custom", "") || !skipBuildAsSuccess("customer", "  ") {
+		t.Fatal("empty custom should skip")
+	}
+	if skipBuildAsSuccess("custom", "echo ok") {
+		t.Fatal("filled custom command still runs")
+	}
+	if skipBuildAsSuccess("maven", "") || skipBuildAsSuccess("go", "") {
+		t.Fatal("other types still require a command")
+	}
+	e := NewEngine(nil, nil, nil, t.TempDir(), "", 0)
+	var buf strings.Builder
+	if err := e.stepBuild(context.Background(), job.Job{}, project.Project{
+		ProjectType: "custom",
+		RecipeJSON:  `{"command":""}`,
+	}, job.Payload{}, t.TempDir(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "跳过") {
+		t.Fatalf("log=%s", buf.String())
+	}
+	if err := e.stepBuild(context.Background(), job.Job{}, project.Project{
+		ProjectType: "go",
+		RecipeJSON:  `{"command":""}`,
+	}, job.Payload{}, t.TempDir(), &buf); err == nil {
+		t.Fatal("empty go command should fail")
+	}
+}
+
 func TestEnvCfgFallsBackToKind(t *testing.T) {
 	e := NewEngine(nil, nil, nil, t.TempDir(), "", 1)
 	if cfg := e.envCfg(context.Background(), "missing", "ws", "jdk"); cfg != nil {

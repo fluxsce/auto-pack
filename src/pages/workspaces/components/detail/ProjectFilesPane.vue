@@ -8,6 +8,7 @@ import {
   RsDialog,
   RsEmpty,
   RsIcon,
+  RsInput,
   RsTable,
   rsConfirm,
   useRsToast,
@@ -26,7 +27,7 @@ import {
   type ProjectTree,
 } from '../../api'
 import { formatStamp } from '../../composables/use-project-list'
-import { fileBaseName, fileExt, formatBytes, keepDirsFirst, previewLang } from '../../lib/project-files'
+import { fileBaseName, fileExt, formatBytes, keepDirsFirst, matchProjectFile, previewLang } from '../../lib/project-files'
 import type { ProjectRecipe } from '../../lib/project-defaults'
 import RemoteDialog from '../remote/Dialog.vue'
 
@@ -53,8 +54,14 @@ const clearing = ref(false)
 const busyKey = ref('')
 const selectedKeys = ref<string[]>([])
 const pushOpen = ref(false)
+const query = ref('')
 
 const rows = computed(() => tree.value?.entries ?? [])
+const filtered = computed(() => {
+  const q = query.value
+  if (!q.trim()) return rows.value
+  return rows.value.filter((row) => matchProjectFile(row, q, kindLabel(row)))
+})
 const selectedRows = computed(() => {
   const keys = new Set(selectedKeys.value)
   return rows.value.filter((row) => keys.has(row.path))
@@ -75,15 +82,19 @@ const columns = computed<RsTableColumn<ProjectFileEntry>[]>(() => [
   {
     key: 'name',
     title: t('workspaces.detail.fileName'),
-    minWidth: 220,
+    minWidth: 180,
     sortable: true,
+    filterable: true,
     sorter: keepDirsFirst,
+    fixed: 'left',
   },
   {
     key: 'kind',
     title: t('workspaces.detail.kind'),
     width: 120,
     sortable: true,
+    filterable: true,
+    filter: (_value, row, q) => kindLabel(row).toLowerCase().includes(q.trim().toLowerCase()),
     sorter: (left, right) => keepDirsFirst(left, right) || kindLabel(left).localeCompare(kindLabel(right)),
   },
   {
@@ -104,10 +115,11 @@ const columns = computed<RsTableColumn<ProjectFileEntry>[]>(() => [
   {
     key: 'actions',
     title: t('common.actions'),
-    width: 160,
-    minWidth: 160,
+    width: 168,
+    minWidth: 168,
     align: 'right',
     ellipsis: false,
+    fixed: 'right',
   },
 ])
 
@@ -266,6 +278,7 @@ async function downloadPreview(): Promise<void> {
 
 watch(() => props.projectId, () => {
   dir.value = ''
+  query.value = ''
   void load('')
 }, { immediate: true })
 </script>
@@ -296,16 +309,30 @@ watch(() => props.projectId, () => {
       <p class="pane-desc mono" :title="props.checkoutPath">{{ props.checkoutPath || t('common.dash') }}</p>
     </header>
     <nav class="crumbs" :aria-label="t('workspaces.detail.nav.files')">
-      <button
-        v-for="(item, index) in crumbs"
-        :key="item.path || 'root'"
-        type="button"
-        class="crumbs__item"
-        @click="load(item.path)"
+      <div class="crumbs__path">
+        <button
+          v-for="(item, index) in crumbs"
+          :key="item.path || 'root'"
+          type="button"
+          class="crumbs__item"
+          @click="load(item.path)"
+        >
+          <span v-if="index">/</span>
+          {{ item.label }}
+        </button>
+      </div>
+      <RsInput
+        v-model="query"
+        class="crumbs__filter"
+        size="sm"
+        clearable
+        :placeholder="t('workspaces.detail.searchFilesPlaceholder')"
+        :aria-label="t('workspaces.detail.searchFiles')"
       >
-        <span v-if="index">/</span>
-        {{ item.label }}
-      </button>
+        <template #prefix>
+          <RsIcon name="search" />
+        </template>
+      </RsInput>
     </nav>
     <div class="explorer">
       <div v-if="rows.length || loading" class="grow">
@@ -314,7 +341,7 @@ watch(() => props.projectId, () => {
           selectable
           cell-focus="none"
           :columns="columns"
-          :data="rows"
+          :data="filtered"
           :loading="loading"
           row-key="path"
           :selected-row-keys="selectedKeys"
@@ -323,6 +350,9 @@ watch(() => props.projectId, () => {
           @row-dblclick="open"
           @context-menu-select="onMenu"
         >
+          <template #empty>
+            {{ query.trim() ? t('workspaces.detail.emptyFileSearch') : t('workspaces.detail.emptyDir') }}
+          </template>
           <template #name="{ row }">
             <button type="button" class="name-link" @click="open(row)">
               <RsIcon :name="row.is_dir ? 'folder' : 'file'" :size="16" />
@@ -429,11 +459,27 @@ watch(() => props.projectId, () => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.15rem 0.2rem;
+  gap: 0.45rem 0.65rem;
   padding: 0.45rem 0.7rem;
   border: 1px solid var(--shell-border);
   border-radius: 0.65rem;
   background: var(--shell-inset-bg);
+}
+
+.crumbs__path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.2rem;
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.crumbs__filter {
+  flex: 0 1 14rem;
+  width: 14rem;
+  max-width: 100%;
+  margin-left: auto;
 }
 
 .crumbs__item {
@@ -479,6 +525,14 @@ watch(() => props.projectId, () => {
   flex-wrap: nowrap;
   gap: 0.1rem;
   white-space: nowrap;
+}
+
+.explorer :deep(.rs-table__th[data-col-key='actions']),
+.explorer :deep(.rs-table__td[data-col-key='actions']) {
+  width: 10.5rem;
+  min-width: 10.5rem;
+  max-width: 10.5rem;
+  box-shadow: -8px 0 10px -8px color-mix(in srgb, var(--shell-title) 22%, transparent);
 }
 
 .explorer :deep(.rs-table__td[data-col-key='actions']),

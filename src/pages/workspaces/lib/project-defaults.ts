@@ -40,6 +40,12 @@ export function defaultBuild(type: string): Pick<ProjectRecipe, 'command' | 'out
   return { ...(buildDefaults[type] ?? buildDefaults.custom) }
 }
 
+/** Custom 工程默认不打包；空命令时构建步骤跳过并记为成功。 */
+export function isCustomProjectType(type: string): boolean {
+  const code = type.trim().toLowerCase()
+  return code === 'custom' || code === 'customer'
+}
+
 export function defaultCommand(type: string): string {
   return defaultBuild(type).command ?? ''
 }

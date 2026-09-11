@@ -25,6 +25,13 @@ export function keepDirsFirst(left: ProjectFileEntry, right: ProjectFileEntry): 
   return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })
 }
 
+/** matchProjectFile 按文件名或类型文案做包含匹配，大小写不敏感。 */
+export function matchProjectFile(row: ProjectFileEntry, query: string, kind: string): boolean {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  return row.name.toLowerCase().includes(q) || kind.toLowerCase().includes(q)
+}
+
 const EXT_LANG: Record<string, string> = {
   xml: 'xml',
   xsd: 'xml',

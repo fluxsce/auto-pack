@@ -190,6 +190,102 @@ func TestAnalyzeMavenWorkspaceCycleSortedByName(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMavenWorkspaceNestedSpringBootModule(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "repeater")
+	nested := filepath.Join(parent, "fluxux-collaboration-storage-repeater")
+	app := filepath.Join(dir, "app")
+	_ = os.MkdirAll(nested, 0o755)
+	_ = os.MkdirAll(app, 0o755)
+	if err := os.WriteFile(filepath.Join(parent, "pom.xml"), []byte(`<project>
+		<groupId>com.fluxux.wmsv6</groupId>
+		<artifactId>repeater-parent</artifactId>
+		<packaging>pom</packaging>
+		<modules>
+			<module>fluxux-collaboration-storage-repeater</module>
+			<module>moonbox-core</module>
+		</modules>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "pom.xml"), []byte(`<project>
+		<parent><groupId>com.fluxux.wmsv6</groupId><artifactId>repeater-parent</artifactId><version>10.0.0-P05-SNAPSHOT</version></parent>
+		<artifactId>fluxux-collaboration-storage-repeater</artifactId>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.MkdirAll(filepath.Join(parent, "moonbox-core"), 0o755)
+	if err := os.WriteFile(filepath.Join(parent, "moonbox-core", "pom.xml"), []byte(`<project>
+		<parent><groupId>com.fluxux.wmsv6</groupId><artifactId>repeater-parent</artifactId><version>10.0.0-P05-SNAPSHOT</version></parent>
+		<artifactId>moonbox-core</artifactId>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "pom.xml"), []byte(`<project>
+		<groupId>com.fluxux.wmsv6</groupId><artifactId>storage-agent</artifactId>
+		<dependencies>
+			<dependency>
+				<groupId>com.fluxux.wmsv6</groupId>
+				<artifactId>fluxux-collaboration-storage-repeater</artifactId>
+				<version>10.0.0-P05-SNAPSHOT</version>
+			</dependency>
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "1", ProjectName: "fluxux-collaboration-storage-repeater", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "2", ProjectName: "storage-agent", ProjectType: "maven", IsEnabled: 1},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		if p.RecID == "1" {
+			return parent
+		}
+		return app
+	})
+	if len(out.UnmatchedDeps) != 0 {
+		t.Fatalf("nested module should match workspace project, unmatched %+v", out.UnmatchedDeps)
+	}
+	if len(out.InternalEdges) != 1 || out.InternalEdges[0].ProviderRecID != "1" || out.InternalEdges[0].ConsumerRecID != "2" {
+		t.Fatalf("want agent→repeater, got %+v", out.InternalEdges)
+	}
+}
+
+func TestAnalyzeMavenWorkspaceSelfNestedNotUnmatched(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "repeater")
+	nested := filepath.Join(root, "fluxux-collaboration-storage-repeater")
+	_ = os.MkdirAll(nested, 0o755)
+	if err := os.WriteFile(filepath.Join(root, "pom.xml"), []byte(`<project>
+		<groupId>com.fluxux.wmsv6</groupId>
+		<artifactId>repeater-parent</artifactId>
+		<modules><module>fluxux-collaboration-storage-repeater</module></modules>
+		<dependencies>
+			<dependency>
+				<groupId>com.fluxux.wmsv6</groupId>
+				<artifactId>fluxux-collaboration-storage-repeater</artifactId>
+				<version>10.0.0-P05-SNAPSHOT</version>
+			</dependency>
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "pom.xml"), []byte(`<project>
+		<parent><groupId>com.fluxux.wmsv6</groupId><artifactId>repeater-parent</artifactId><version>1</version></parent>
+		<artifactId>fluxux-collaboration-storage-repeater</artifactId>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{{RecID: "1", ProjectName: "repeater", ProjectType: "maven"}}
+	out := AnalyzeMavenWorkspace(list, func(project.Project) string { return root })
+	if len(out.UnmatchedDeps) != 0 {
+		t.Fatalf("own nested module is not missing: %+v", out.UnmatchedDeps)
+	}
+	if len(out.InternalEdges) != 0 {
+		t.Fatalf("self module should not be an edge: %+v", out.InternalEdges)
+	}
+}
+
 func TestAnalyzeMavenWorkspaceUnmatchedSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	app := filepath.Join(dir, "app")

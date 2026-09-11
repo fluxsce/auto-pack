@@ -25,6 +25,7 @@ import {
   emptyRecipe,
   envKindsForType,
   checkoutDisplay,
+  isCustomProjectType,
   parseRecipe,
   projectTypes,
   serializeRecipe,
@@ -119,7 +120,10 @@ function sectionMark(id: ProjectSection): string {
     })
     return toolchainKinds.value.length && !bound ? t('workspaces.envFallback') : ''
   }
-  if (id === 'build') return recipe.value.command.trim() ? '' : t('workspaces.sectionUnset')
+  if (id === 'build') {
+    if (recipe.value.command.trim()) return ''
+    return isCustomProjectType(form.value.project_type) ? t('workspaces.sectionBuildSkip') : t('workspaces.sectionUnset')
+  }
   if (id === 'trigger') {
     const hasCron = cronState.value === 'ok'
     const hasDep = (recipe.value.depends_on ?? []).length > 0
@@ -343,7 +347,7 @@ function validateForm(): boolean {
     if (!form.value.repo_url.trim()) return failSection('scm', t('workspaces.gitUrlRequired'))
     if (!isGitURL(form.value.repo_url)) return failSection('scm', t('workspaces.gitUrlRule'))
   }
-  if (!recipe.value.command.trim()) {
+  if (!recipe.value.command.trim() && !isCustomProjectType(form.value.project_type)) {
     return failSection('build', t('workspaces.commandRequired'))
   }
   if (cronState.value === 'bad') {
