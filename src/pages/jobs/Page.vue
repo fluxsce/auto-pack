@@ -581,6 +581,7 @@ async function cancel(id: string): Promise<void> {
         <RsLog
           v-model:lines="logText"
           class="jobs-log"
+          wrap
           height="min(32rem, 56vh)"
           :empty-text="t('common.empty')"
           :aria-label="t('jobs.logTitle')"
