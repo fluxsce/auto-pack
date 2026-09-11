@@ -18,7 +18,7 @@ import {
 } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
-import { applyJobLog, getJobLog, listJobsPage, type JobRow, type JobStats } from '@/pages/workspaces/api'
+import { applyJobLog, getJobLog, listJobsPage, listProjects, type JobRow, type JobStats } from '@/pages/workspaces/api'
 import { useWorkspaceStore } from '@/stores/workspace'
 import PageFrame from '@/components/PageFrame.vue'
 
@@ -34,7 +34,7 @@ type JobStep = {
   error_text?: string
 }
 
-type Project = { rec_id: string; project_name: string }
+type Project = { rec_id: string; project_name: string; workspace_rec_id?: string }
 
 type JobPayload = {
   tag?: string
@@ -70,6 +70,7 @@ const logSize = ref(0)
 const logJobId = ref('')
 const busyId = ref('')
 const form = ref({
+  workspace_rec_id: '',
   job_type: 'build',
   project_rec_id: '',
   tag: '',
@@ -99,7 +100,15 @@ const visibleJobs = computed(() => jobs.value)
 
 const liveJobs = computed(() => liveRows.value.filter((row) => LIVE.has(row.job_status)))
 
+const workspaceOptions = computed(() =>
+  ws.list.map((item) => ({ value: item.rec_id, label: item.workspace_name })),
+)
+const submitProjects = computed(() =>
+  projects.value.filter((item) => !form.value.workspace_rec_id || item.workspace_rec_id === form.value.workspace_rec_id),
+)
+
 const columns = computed<RsTableColumn<Job>[]>(() => [
+  { key: 'workspace', title: t('jobs.workspace'), minWidth: 140 },
   { key: 'job_type', title: t('jobs.type'), width: 110 },
   { key: 'project', title: t('jobs.project'), minWidth: 140 },
   { key: 'job_status', title: t('jobs.status'), width: 120 },
@@ -108,6 +117,13 @@ const columns = computed<RsTableColumn<Job>[]>(() => [
   { key: 'error_text', title: t('jobs.error'), minWidth: 160 },
   { key: 'actions', title: t('common.actions'), width: 168, align: 'right' },
 ])
+
+function onSubmitWorkspace(value: RsSelectModelValue): void {
+  form.value.workspace_rec_id = asString(value)
+  if (!submitProjects.value.some((item) => item.rec_id === form.value.project_rec_id)) {
+    form.value.project_rec_id = ''
+  }
+}
 
 function asString(value: RsSelectModelValue): string {
   const raw = Array.isArray(value) ? value[0] : value
@@ -179,6 +195,11 @@ function durationText(row: Job): string {
 function projectName(id?: string): string {
   if (!id) return t('common.dash')
   return projects.value.find((item) => item.rec_id === id)?.project_name || id
+}
+
+function workspaceName(id?: string): string {
+  if (!id) return t('common.dash')
+  return ws.list.find((item) => item.rec_id === id)?.workspace_name || id
 }
 
 function payloadOf(row: Job): JobPayload {
@@ -270,16 +291,13 @@ function syncPoll(): void {
 }
 
 async function loadProjects(): Promise<void> {
-  if (!ws.currentId) {
+  const ids = ws.list.map((item) => item.rec_id).filter(Boolean)
+  if (!ids.length) {
     projects.value = []
     return
   }
-  projects.value =
-    (await request<Project[]>({
-      method: 'GET',
-      url: apiPath('projects'),
-      params: { workspace_rec_id: ws.currentId },
-    })) ?? []
+  const rows = await Promise.all(ids.map((id) => listProjects(id)))
+  projects.value = rows.flat()
 }
 
 async function refreshOpenLog(): Promise<void> {
@@ -295,7 +313,7 @@ async function refreshOpenLog(): Promise<void> {
 }
 
 async function load(silent = false): Promise<void> {
-  if (!ws.currentId || !pageAlive) return
+  if (!pageAlive) return
   const seq = ++loadSeq
   if (!silent) loading.value = true
   try {
@@ -327,7 +345,6 @@ async function load(silent = false): Promise<void> {
 
 function fetchPage(targetPage: number, size: number) {
   return listJobsPage({
-    workspaceId: ws.currentId,
     projectId: projectFilter.value || undefined,
     page: targetPage,
     pageSize: size,
@@ -343,11 +360,18 @@ function applyList(out: { items: Job[]; live: Job[]; stats: JobStats; total: num
   if (out.page_size) pageSize.value = out.page_size
 }
 
+function defaultWorkspaceId(): string {
+  return form.value.workspace_rec_id || ws.currentId || ws.list[0]?.rec_id || ''
+}
+
 function consumeSubmitQuery(): void {
   const projectId = projectFilter.value
   if (projectId) {
     form.value.project_rec_id = projectId
+    const row = projects.value.find((item) => item.rec_id === projectId)
+    if (row?.workspace_rec_id) form.value.workspace_rec_id = row.workspace_rec_id
   }
+  if (!form.value.workspace_rec_id) form.value.workspace_rec_id = defaultWorkspaceId()
   if (String(route.query.submit ?? '') !== '1') return
   open.value = true
   void router.replace({ name: 'jobs', query: projectId ? { project: projectId } : {} })
@@ -365,9 +389,15 @@ onUnmounted(() => {
   stopPoll()
 })
 
-watch(() => ws.currentId, () => {
-  page.value = 1
-  void load()
+watch(
+  () => ws.list.map((item) => item.rec_id).join(','),
+  () => {
+    if (!form.value.workspace_rec_id) form.value.workspace_rec_id = defaultWorkspaceId()
+    void loadProjects()
+  },
+)
+watch(open, (shown) => {
+  if (shown && !form.value.workspace_rec_id) form.value.workspace_rec_id = defaultWorkspaceId()
 })
 watch(projectFilter, () => {
   page.value = 1
@@ -399,7 +429,7 @@ async function submit(): Promise<void> {
       method: 'POST',
       url: apiPath('jobs'),
       data: {
-        workspace_rec_id: ws.currentId,
+        workspace_rec_id: form.value.workspace_rec_id || defaultWorkspaceId(),
         project_rec_id: form.value.project_rec_id,
         job_type: form.value.job_type,
         payload: {
@@ -465,6 +495,7 @@ async function cancel(id: string): Promise<void> {
               <RsTag :variant="statusVariant(row.job_status)" round>{{ statusLabel(row.job_status) }}</RsTag>
             </div>
             <h3 class="live-card__name">{{ projectName(row.project_rec_id) }}</h3>
+            <p class="live-card__ws">{{ workspaceName(row.workspace_rec_id) }}</p>
             <p v-if="payloadHint(row)" class="live-card__hint">{{ payloadHint(row) }}</p>
             <p class="live-card__clock">
               <span class="live-card__dot" aria-hidden="true" />
@@ -503,6 +534,9 @@ async function cancel(id: string): Promise<void> {
           :bordered="false"
           :cell-tooltip="true"
         >
+          <template #workspace="{ row }">
+            <span class="jobs-ws">{{ workspaceName(row.workspace_rec_id) }}</span>
+          </template>
           <template #job_type="{ row }">
             <RsTag variant="primary" round>{{ typeLabel(row.job_type) }}</RsTag>
           </template>
@@ -551,13 +585,19 @@ async function cancel(id: string): Promise<void> {
       <template #body>
         <div class="form-grid">
           <RsSelect
+            :model-value="form.workspace_rec_id"
+            :options="workspaceOptions"
+            :placeholder="t('jobs.workspace')"
+            @update:model-value="onSubmitWorkspace"
+          />
+          <RsSelect
             :model-value="form.job_type"
             :options="types"
             @update:model-value="(v: RsSelectModelValue) => (form.job_type = asString(v))"
           />
           <RsSelect
             :model-value="form.project_rec_id"
-            :options="projects.map((p) => ({ value: p.rec_id, label: p.project_name }))"
+            :options="submitProjects.map((p) => ({ value: p.rec_id, label: p.project_name }))"
             :placeholder="t('jobs.projectOptional')"
             @update:model-value="(v: RsSelectModelValue) => (form.project_rec_id = asString(v))"
           />
@@ -684,6 +724,7 @@ async function cancel(id: string): Promise<void> {
   color: var(--shell-title);
 }
 
+.live-card__ws,
 .live-card__hint,
 .live-card__step,
 .live-card__meta {
@@ -753,6 +794,7 @@ async function cancel(id: string): Promise<void> {
   color: #b91c1c;
 }
 
+.jobs-ws,
 .jobs-proj {
   font-weight: 650;
 }

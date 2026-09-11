@@ -89,6 +89,18 @@ func TestListPagesWorkspaceJobs(t *testing.T) {
 	}
 }
 
+func TestListAllWorkspaces(t *testing.T) {
+	svc, _, ctx := setupJob(t)
+	actor := iam.Actor{UserID: access.DefaultAdminRecID, LoginName: "admin"}
+	page, err := svc.List(ctx, actor, job.ListQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items == nil || page.Live == nil {
+		t.Fatalf("empty page: %+v", page)
+	}
+}
+
 func TestViewerCannotSubmit(t *testing.T) {
 	svc, _, ctx := setupJob(t)
 	_, err := svc.Submit(ctx, iam.Actor{UserID: "missing"}, job.SubmitRequest{

@@ -2,7 +2,6 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { RsSelect, type RsSelectModelValue } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request, setRequestTimeout } from '@/api/http'
 import { getProps } from '@/pages/settings/api'
@@ -24,10 +23,6 @@ const modules = computed(() => [
   { id: 'audit', label: t('nav.audit') },
 ])
 
-const workspaceOptions = computed(() =>
-  ws.list.map((item) => ({ value: item.rec_id, label: item.workspace_name })),
-)
-
 onMounted(() => {
   void ws.load()
   void getProps()
@@ -46,13 +41,6 @@ function isNavActive(id: string): boolean {
   if (id === 'workspaces') return route.path === '/workspaces' || route.path.startsWith('/workspaces/')
   if (id === 'settings') return route.name === 'settings' || route.name === 'envs'
   return route.name === id
-}
-
-function onWorkspace(value: RsSelectModelValue): void {
-  const raw = Array.isArray(value) ? value[0] : value
-  if (raw == null || raw === '') return
-  const id = typeof raw === 'object' ? raw.value : raw
-  ws.select(String(id))
 }
 
 </script>
@@ -82,14 +70,6 @@ function onWorkspace(value: RsSelectModelValue): void {
       </nav>
 
       <div class="wb__actions">
-        <RsSelect
-          v-if="ws.list.length"
-          class="wb__ws"
-          :model-value="ws.currentId"
-          :options="workspaceOptions"
-          :aria-label="t('nav.workspace')"
-          @update:model-value="onWorkspace"
-        />
         <AccountPopover />
       </div>
     </header>
@@ -207,10 +187,6 @@ function onWorkspace(value: RsSelectModelValue): void {
   gap: 0.65rem;
   flex-shrink: 0;
   margin-left: auto;
-}
-
-.wb__ws {
-  min-width: 11.5rem;
 }
 
 .wb__stage {

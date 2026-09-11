@@ -25,7 +25,7 @@ func New(jobs *job.Service, projects *project.Service, audit *audit.Service) *Co
 	return &Controller{jobs: jobs, projects: projects, audit: audit}
 }
 
-// List 分页列出空间内作业。
+// List 分页列出作业；未传 workspace_rec_id 时列出调用者可见的全部空间。
 func (c *Controller) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	page, _ := strconv.Atoi(q.Get("page"))

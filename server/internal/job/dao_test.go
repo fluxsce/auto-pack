@@ -88,6 +88,14 @@ func TestListJobsPage(t *testing.T) {
 	if filtered.Total != 1 || filtered.Items[0].RecID != "j1" {
 		t.Fatalf("filter: %+v", filtered)
 	}
+
+	all, err := listJobsPage(ctx, st, ListQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Total != 4 {
+		t.Fatalf("all workspaces: %+v", all)
+	}
 }
 
 func TestExpiredFinishedAndDelete(t *testing.T) {

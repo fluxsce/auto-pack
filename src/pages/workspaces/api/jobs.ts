@@ -57,7 +57,7 @@ export type JobListPage = {
 }
 
 export type JobListQuery = {
-  workspaceId: string
+  workspaceId?: string
   projectId?: string
   jobType?: string
   page?: number
@@ -69,7 +69,7 @@ export function listJobsPage(q: JobListQuery): Promise<JobListPage> {
     method: 'GET',
     url: apiPath('jobs'),
     params: {
-      workspace_rec_id: q.workspaceId,
+      workspace_rec_id: q.workspaceId || undefined,
       project_rec_id: q.projectId || undefined,
       job_type: q.jobType || undefined,
       page: q.page ?? 1,

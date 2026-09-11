@@ -138,11 +138,12 @@ export default {
   jobs: {
     title: '作业',
     listTitle: '作业列表',
-    desc: '提交构建与发布任务，跟踪运行中作业的耗时、步骤与日志。',
+    desc: '查看全部工作空间的作业：提交构建与发布，跟踪耗时、步骤与日志。',
     submit: '提交作业',
     type: '类型',
     status: '状态',
     time: '时间',
+    workspace: '工作空间',
     project: '工程',
     duration: '耗时',
     started: '开始',

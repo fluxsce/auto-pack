@@ -79,6 +79,7 @@ func (s *Service) SubmitSystem(ctx context.Context, req SubmitRequest) (Job, err
 }
 
 // List returns a page of jobs the actor can read, plus live rows and filter-wide counts.
+// WorkspaceID may be empty to include every workspace.
 func (s *Service) List(ctx context.Context, actor iam.Actor, q ListQuery) (Page, error) {
 	if err := s.guard.CanRead(ctx, actor, q.WorkspaceID); err != nil {
 		return Page{}, err

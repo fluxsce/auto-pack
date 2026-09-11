@@ -33,8 +33,12 @@ func scanJob(s interface{ Scan(dest ...any) error }, j *Job) error {
 }
 
 func listWhere(q ListQuery) (string, []any) {
-	where := []string{"workspace_rec_id = ?"}
-	args := []any{strings.TrimSpace(q.WorkspaceID)}
+	var where []string
+	var args []any
+	if id := strings.TrimSpace(q.WorkspaceID); id != "" {
+		where = append(where, "workspace_rec_id = ?")
+		args = append(args, id)
+	}
 	if id := strings.TrimSpace(q.ProjectID); id != "" {
 		where = append(where, "project_rec_id = ?")
 		args = append(args, id)
@@ -42,6 +46,9 @@ func listWhere(q ListQuery) (string, []any) {
 	if typ := strings.TrimSpace(q.JobType); typ != "" {
 		where = append(where, "job_type = ?")
 		args = append(args, typ)
+	}
+	if len(where) == 0 {
+		return "1=1", nil
 	}
 	return strings.Join(where, " AND "), args
 }

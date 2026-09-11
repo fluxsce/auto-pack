@@ -54,7 +54,7 @@ const (
 	TimeLayout = "2006-01-02 15:04:05"
 )
 
-// ListQuery filters and pages workspace jobs.
+// ListQuery filters and pages jobs. Empty WorkspaceID lists every workspace the actor can read.
 type ListQuery struct {
 	WorkspaceID string
 	ProjectID   string

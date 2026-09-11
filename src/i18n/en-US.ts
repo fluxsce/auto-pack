@@ -138,11 +138,12 @@ export default {
   jobs: {
     title: 'Jobs',
     listTitle: 'Job list',
-    desc: 'Submit build and release jobs, then follow elapsed time, steps, and logs.',
+    desc: 'See jobs from every workspace. Submit builds and releases, then follow elapsed time, steps, and logs.',
     submit: 'Submit job',
     type: 'Type',
     status: 'Status',
     time: 'Time',
+    workspace: 'Workspace',
     project: 'Project',
     duration: 'Duration',
     started: 'Started',
