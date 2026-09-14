@@ -89,6 +89,7 @@ func TestCloneCopiesProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	insertProject(t, st, ctx, src.RecID, "demo")
+	insertProject(t, st, ctx, src.RecID, "demo2")
 	out, err := svc.Clone(ctx, actor, workspace.CloneRequest{
 		SourceRecID:   src.RecID,
 		WorkspaceCode: "src-copy",
@@ -97,7 +98,7 @@ func TestCloneCopiesProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.ProjectsCloned != 1 || out.ProjectCount != 1 {
+	if out.ProjectsCloned != 2 || out.ProjectCount != 2 {
 		t.Fatalf("cloned=%d count=%d", out.ProjectsCloned, out.ProjectCount)
 	}
 	if out.RecID == src.RecID || out.WorkspaceCode != "src-copy" {

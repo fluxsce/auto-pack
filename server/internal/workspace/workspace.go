@@ -376,22 +376,32 @@ func (s *Service) Clone(ctx context.Context, actor iam.Actor, req CloneRequest) 
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		insP := tx.Rebind(`INSERT INTO AP_PROJECT (rec_id, workspace_rec_id, project_name, project_type, repo_url, repo_branch,
-			work_rel_path, recipe_json, cron_expr, is_enabled, remark)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		var projects []projectRow
 		for rows.Next() {
 			var p projectRow
 			if err := rows.Scan(&p.name, &p.kind, &p.repo, &p.branch, &p.work, &p.recipe, &p.cron, &p.enabled, &p.remark); err != nil {
+				_ = rows.Close()
 				return err
 			}
+			projects = append(projects, p)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		insP := tx.Rebind(`INSERT INTO AP_PROJECT (rec_id, workspace_rec_id, project_name, project_type, repo_url, repo_branch,
+			work_rel_path, recipe_json, cron_expr, is_enabled, remark)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		for _, p := range projects {
 			if _, err := tx.SQL().ExecContext(ctx, insP, access.NewID(), id, p.name, p.kind,
 				nullStr(p.repo), nullStr(p.branch), nullStr(p.work), p.recipe, nullStr(p.cron), p.enabled, nullStr(p.remark)); err != nil {
 				return err
 			}
 			copied++
 		}
-		return rows.Err()
+		return nil
 	})
 	if err != nil {
 		return CloneResult{}, mapUniqueCode(err)
