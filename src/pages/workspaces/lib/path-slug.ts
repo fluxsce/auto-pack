@@ -70,13 +70,17 @@ export function isRelPath(value: string): boolean {
   return rel.split('/').filter(Boolean).every(isPathSlug)
 }
 
-/** 本地源码路径：相对 slug 或本机绝对路径（v1 导入常带 /home/...）。 */
+function isSourceVarSegment(segment: string): boolean {
+  return /^\$\{AP_[A-Z0-9_]+\}$/.test(segment) || /^\$AP_[A-Z0-9_]+$/.test(segment) || /^%AP_[A-Z0-9_]+%$/.test(segment)
+}
+
+/** 本地源码路径：相对 slug 或本机绝对路径（v1 导入常带 /home/...）；段内可含 AP_* 占位符。 */
 export function isLocalSourcePath(value: string): boolean {
   const path = value.trim().replace(/\\/g, '/')
   if (!path) return true
   if (path.includes('..')) return false
   if (path.startsWith('/') || /^[A-Za-z]:\//.test(path)) return true
-  return isRelPath(path)
+  return path.split('/').filter(Boolean).every((seg) => isPathSlug(seg) || isSourceVarSegment(seg))
 }
 
 /** Git 检出地址：http(s) / ssh / git / file。 */

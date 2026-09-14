@@ -88,6 +88,16 @@ const checkoutPath = computed(() =>
     current.value?.root_dir || '',
     form.value.project_name.trim() || t('workspaces.projectName'),
     recipe.value,
+    '',
+    {
+      workspaceId: current.value?.rec_id,
+      workspaceCode: current.value?.workspace_code,
+      workspaceName: current.value?.workspace_name,
+      projectId: form.value.rec_id,
+      projectType: form.value.project_type,
+      repoBranch: form.value.repo_branch,
+      repoUrl: form.value.repo_url,
+    },
   ),
 )
 const toolchainKinds = computed(() => envKindsForType(form.value.project_type))

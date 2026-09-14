@@ -87,6 +87,8 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 		s.appendLog(logPath, stamp()+fmt.Sprintf(" 正在构建（%d/%d）：%s", i+1, len(queue), prj.ProjectName))
 		out := batchrun.RunBuild(ctx, s.jobs, actor, ws.RecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
 			s.appendLog(logPath, stamp()+fmt.Sprintf(" %s · %s", prj.ProjectName, step))
+		}, func(chunk string) {
+			s.appendJobLog(logPath, chunk)
 		})
 		if out.OK {
 			s.appendLog(logPath, stamp()+" 构建成功："+prj.ProjectName)
@@ -114,7 +116,9 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 			TaskRef:    opts.TaskRef,
 			Detail:     opts.Detail,
 			Notes:      strings.TrimSpace(strings.TrimSpace(opts.TaskRef) + " | " + strings.TrimSpace(opts.Detail)),
-		}, nil)
+		}, nil, func(chunk string) {
+			s.appendJobLog(logPath, chunk)
+		})
 		if push.OK {
 			s.appendLog(logPath, stamp()+" 推送成功："+prj.ProjectName)
 		} else {
@@ -127,6 +131,20 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 func (s *Service) appendLog(path, line string) {
 	if err := record.AppendLog(path, line); err != nil {
 		log.Printf("release log %s: %v", path, err)
+	}
+}
+
+func (s *Service) appendJobLog(path, chunk string) {
+	chunk = strings.TrimRight(chunk, "\r\n")
+	if chunk == "" {
+		return
+	}
+	for _, line := range strings.Split(chunk, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		s.appendLog(path, "  "+line)
 	}
 }
 

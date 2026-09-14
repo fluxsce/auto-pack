@@ -547,12 +547,13 @@ func (s *Service) envCfg(ctx context.Context, workspaceID, recID, kind string) m
 
 func (s *Service) workDir(ws workspace.Workspace, prj project.Project) string {
 	recipe := project.ParseRecipe(prj.RecipeJSON)
-	if abs := project.AbsLocalSource(recipe); abs != "" {
+	srcCtx := project.SourceContextFrom(prj, ws.RecID, ws.WorkspaceCode, ws.WorkspaceName, ws.RootDir)
+	if abs := project.AbsLocalSourceCtx(recipe, srcCtx); abs != "" {
 		return abs
 	}
 	rel := strings.TrimSpace(prj.WorkRelPath)
 	if rel == "" {
-		rel = project.WorkRel(prj.ProjectName, recipe)
+		rel = project.WorkRelCtx(prj.ProjectName, recipe, srcCtx)
 	}
 	return workspace.ProjectDir(s.wsRoot, ws.WorkspaceCode, ws.RecID, rel)
 }

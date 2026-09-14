@@ -31,9 +31,12 @@ type Outcome struct {
 // StepFn receives the current running step name while waiting.
 type StepFn func(step string)
 
+// LogFn receives newly appended job log bytes while waiting.
+type LogFn func(chunk string)
+
 // RunBuild submits a build job and waits until it finishes.
 // skipSync 为 true 时作业不再 fetch/checkout（调用方刚做过空间预同步）。
-func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceID, projectID string, skipSync bool, onStep StepFn) Outcome {
+func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceID, projectID string, skipSync bool, onStep StepFn, onLog LogFn) Outcome {
 	if jobs == nil {
 		return Outcome{Message: "job service unavailable"}
 	}
@@ -46,11 +49,11 @@ func RunBuild(ctx context.Context, jobs *job.Service, actor iam.Actor, workspace
 	if err != nil {
 		return Outcome{Message: err.Error()}
 	}
-	return wait(ctx, jobs, created.RecID, onStep)
+	return wait(ctx, jobs, actor, created.RecID, onStep, onLog)
 }
 
 // RunPush submits an ftp_push job and waits until it finishes.
-func RunPush(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceID, projectID string, spec PushSpec, onStep StepFn) Outcome {
+func RunPush(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceID, projectID string, spec PushSpec, onStep StepFn, onLog LogFn) Outcome {
 	if jobs == nil {
 		return Outcome{Message: "job service unavailable"}
 	}
@@ -76,14 +79,15 @@ func RunPush(ctx context.Context, jobs *job.Service, actor iam.Actor, workspaceI
 	if err != nil {
 		return Outcome{Message: err.Error()}
 	}
-	return wait(ctx, jobs, created.RecID, onStep)
+	return wait(ctx, jobs, actor, created.RecID, onStep, onLog)
 }
 
-func wait(ctx context.Context, jobs *job.Service, id string, onStep StepFn) Outcome {
+func wait(ctx context.Context, jobs *job.Service, actor iam.Actor, id string, onStep StepFn, onLog LogFn) Outcome {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	last := ""
+	logOffset := int64(0)
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
@@ -91,6 +95,7 @@ func wait(ctx context.Context, jobs *job.Service, id string, onStep StepFn) Outc
 		if err != nil {
 			return Outcome{JobID: id, Message: err.Error()}
 		}
+		logOffset = pullJobLog(ctx, jobs, actor, id, logOffset, onLog)
 		if name := job.RunningStepName(steps); name != "" && name != last {
 			last = name
 			if onStep != nil {
@@ -98,6 +103,7 @@ func wait(ctx context.Context, jobs *job.Service, id string, onStep StepFn) Outc
 			}
 		}
 		if job.Terminal(j.JobStatus) {
+			logOffset = pullJobLog(ctx, jobs, actor, id, logOffset, onLog)
 			ok := j.JobStatus == job.StatusSucceeded
 			msg := strings.TrimSpace(j.ErrorText)
 			if msg == "" {
@@ -111,6 +117,20 @@ func wait(ctx context.Context, jobs *job.Service, id string, onStep StepFn) Outc
 		case <-tick.C:
 		}
 	}
+}
+
+func pullJobLog(ctx context.Context, jobs *job.Service, actor iam.Actor, id string, offset int64, onLog LogFn) int64 {
+	if onLog == nil || jobs == nil {
+		return offset
+	}
+	text, size, _, err := jobs.Log(ctx, actor, id, offset)
+	if err != nil {
+		return offset
+	}
+	if text != "" {
+		onLog(text)
+	}
+	return size
 }
 
 func peek(ctx context.Context, jobs *job.Service, id string) (job.Job, []job.Step, error) {

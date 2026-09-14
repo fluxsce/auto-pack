@@ -15,6 +15,34 @@ import (
 	"auto-pack/server/internal/workspace"
 )
 
+func (e *Engine) sourceContext(ctx context.Context, j job.Job, prj project.Project, p job.Payload, work, dir string) project.SourceContext {
+	wsCode := e.workspaceCode(ctx, j.WorkspaceRecID)
+	wsName := e.workspaceTitle(ctx, j.WorkspaceRecID)
+	wsPath := ""
+	if wsCode != "" && j.WorkspaceRecID != "" {
+		wsPath = workspace.Dir(e.wsRoot, wsCode, j.WorkspaceRecID)
+	}
+	srcCtx := project.SourceContextFrom(prj, j.WorkspaceRecID, wsCode, wsName, wsPath)
+	srcCtx.JobID = j.RecID
+	srcCtx.JobType = j.JobType
+	srcCtx.Tag = p.Tag
+	if branch := strings.TrimSpace(p.Branch); branch != "" {
+		srcCtx.RepoBranch = branch
+	}
+	if repo := strings.TrimSpace(p.CloneURL); repo != "" {
+		srcCtx.RepoURL = repo
+	}
+	if work = filepath.Clean(work); work != "" {
+		srcCtx.ProjectPath = work
+	}
+	if dir = filepath.Clean(dir); dir != "" {
+		srcCtx.ProjectWorkdir = dir
+	} else if srcCtx.ProjectPath != "" {
+		srcCtx.ProjectWorkdir = srcCtx.ProjectPath
+	}
+	return srcCtx
+}
+
 func (e *Engine) workDir(ctx context.Context, j job.Job, prj project.Project, p job.Payload) string {
 	if p.CloneDir != "" {
 		if filepath.IsAbs(p.CloneDir) {
@@ -23,12 +51,13 @@ func (e *Engine) workDir(ctx context.Context, j job.Job, prj project.Project, p 
 		return workspace.ProjectDir(e.wsRoot, e.workspaceCode(ctx, j.WorkspaceRecID), j.WorkspaceRecID, p.CloneDir)
 	}
 	recipe := project.ParseRecipe(prj.RecipeJSON)
-	if abs := project.AbsLocalSource(recipe); abs != "" {
+	srcCtx := e.sourceContext(ctx, j, prj, p, "", "")
+	if abs := project.AbsLocalSourceCtx(recipe, srcCtx); abs != "" {
 		return abs
 	}
 	rel := strings.TrimSpace(prj.WorkRelPath)
 	if rel == "" {
-		rel = project.WorkRel(prj.ProjectName, recipe)
+		rel = project.WorkRelCtx(prj.ProjectName, recipe, srcCtx)
 	}
 	if rel == "" {
 		rel = j.RecID

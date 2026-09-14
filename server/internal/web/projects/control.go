@@ -162,7 +162,7 @@ func (c *Controller) Files(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	tree, err := c.workspaces.ListCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"), checkoutAbs(p))
+	tree, err := c.workspaces.ListCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), r.URL.Query().Get("path"), c.checkoutAbs(r.Context(), p))
 	if writePathErr(w, err) {
 		return
 	}
@@ -176,7 +176,7 @@ func (c *Controller) ClearFiles(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	err = c.workspaces.ClearCheckout(r.Context(), actor, p.WorkspaceRecID, p.WorkRelPath, checkoutAbs(p))
+	err = c.workspaces.ClearCheckout(r.Context(), actor, p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), c.checkoutAbs(r.Context(), p))
 	c.audit.Note(r.Context(), actor, p.WorkspaceRecID, audit.ActionProjectClearFiles, "project", p.RecID, "clear checkout "+p.ProjectName, err)
 	if writePathErr(w, err) {
 		return
@@ -192,7 +192,7 @@ func (c *Controller) Deps(w http.ResponseWriter, r *http.Request) {
 	}
 	q := c.depsQuery(r.Context(), p)
 	q.Refresh = r.URL.Query().Get("refresh") == "1"
-	deps, err := c.workspaces.ListDeps(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, checkoutAbs(p), q)
+	deps, err := c.workspaces.ListDeps(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), c.checkoutAbs(r.Context(), p), q)
 	if writePathErr(w, err) {
 		return
 	}
@@ -247,7 +247,7 @@ func (c *Controller) File(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	blob, err := c.workspaces.ReadCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"), checkoutAbs(p))
+	blob, err := c.workspaces.ReadCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), r.URL.Query().Get("path"), c.checkoutAbs(r.Context(), p))
 	if writePathErr(w, err) {
 		return
 	}
@@ -260,7 +260,7 @@ func (c *Controller) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	target, err := c.workspaces.StatCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, p.WorkRelPath, r.URL.Query().Get("path"), checkoutAbs(p))
+	target, err := c.workspaces.StatCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), r.URL.Query().Get("path"), c.checkoutAbs(r.Context(), p))
 	if writePathErr(w, err) {
 		return
 	}
@@ -296,7 +296,7 @@ func (c *Controller) DeleteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rel := r.URL.Query().Get("path")
-	err = c.workspaces.RemoveCheckout(r.Context(), actor, p.WorkspaceRecID, p.WorkRelPath, rel, checkoutAbs(p))
+	err = c.workspaces.RemoveCheckout(r.Context(), actor, p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), rel, c.checkoutAbs(r.Context(), p))
 	c.audit.Note(r.Context(), actor, p.WorkspaceRecID, audit.ActionProjectDeleteFile, "project", p.RecID, "delete "+rel, err)
 	if writePathErr(w, err) {
 		return
@@ -401,8 +401,33 @@ func (c *Controller) Delete(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func checkoutAbs(p project.Project) string {
-	return project.AbsLocalSource(project.ParseRecipe(p.RecipeJSON))
+func (c *Controller) sourceCtx(ctx context.Context, p project.Project) project.SourceContext {
+	ws, err := c.workspaces.GetRaw(ctx, p.WorkspaceRecID)
+	if err != nil {
+		return project.SourceContextFrom(p, p.WorkspaceRecID, "", "", "")
+	}
+	return project.SourceContextFrom(p, ws.RecID, ws.WorkspaceCode, ws.WorkspaceName, ws.RootDir)
+}
+
+func (c *Controller) checkoutAbs(ctx context.Context, p project.Project) string {
+	recipe := project.ParseRecipe(p.RecipeJSON)
+	if abs := project.AbsLocalSourceCtx(recipe, c.sourceCtx(ctx, p)); abs != "" {
+		return abs
+	}
+	return project.AbsLocalSource(recipe)
+}
+
+func (c *Controller) checkoutWorkRel(ctx context.Context, p project.Project) string {
+	recipe := project.ParseRecipe(p.RecipeJSON)
+	srcCtx := c.sourceCtx(ctx, p)
+	if project.AbsLocalSourceCtx(recipe, srcCtx) != "" {
+		return strings.TrimSpace(p.WorkRelPath)
+	}
+	rel := strings.TrimSpace(p.WorkRelPath)
+	if rel == "" {
+		return project.WorkRelCtx(p.ProjectName, recipe, srcCtx)
+	}
+	return project.ExpandSourceVars(rel, srcCtx, recipe)
 }
 
 func firstNonEmpty(values ...string) string {

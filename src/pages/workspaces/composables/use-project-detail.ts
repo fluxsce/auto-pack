@@ -18,7 +18,7 @@ import {
 } from '../api'
 import { isAutoBuildLive } from '../auto-build/runtime'
 import { chooseBuildNow } from '../lib/build-now'
-import { checkoutDisplay, parseRecipe } from '../lib/project-defaults'
+import { checkoutDisplay, parseRecipe, type ProjectSourceContext } from '../lib/project-defaults'
 import { asProjectDetailTab, type ProjectDetailTab } from '../lib/project-detail'
 
 const LIVE = new Set(['queued', 'running'])
@@ -46,8 +46,23 @@ export function useProjectDetail() {
   const tab = computed(() => asProjectDetailTab(route.query.tab))
   const current = computed(() => ws.list.find((item) => item.rec_id === (project.value?.workspace_rec_id || ws.currentId)))
   const recipe = computed(() => parseRecipe(project.value?.recipe_json || '', project.value?.project_type || 'maven'))
+  const sourceContext = computed<ProjectSourceContext>(() => ({
+    workspaceId: current.value?.rec_id,
+    workspaceCode: current.value?.workspace_code,
+    workspaceName: current.value?.workspace_name,
+    projectId: project.value?.rec_id,
+    projectType: project.value?.project_type,
+    repoBranch: project.value?.repo_branch,
+    repoUrl: project.value?.repo_url,
+  }))
   const checkoutPath = computed(() =>
-    checkoutDisplay(current.value?.root_dir || '', project.value?.project_name || '', recipe.value, project.value?.work_rel_path),
+    checkoutDisplay(
+      current.value?.root_dir || '',
+      project.value?.project_name || '',
+      recipe.value,
+      project.value?.work_rel_path,
+      sourceContext.value,
+    ),
   )
   const latest = computed(() => jobs.value[0] ?? null)
   const selected = computed(() => jobs.value.find((item) => item.rec_id === selectedJobId.value) ?? latest.value)

@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RsButton, RsCard, RsIcon, RsInput, RsSelect, RsTable, RsTag } from '@/ui'
 import AutoBuildDialog from '../auto-build/Dialog.vue'
 import AutoPushDialog from '../auto-push/Dialog.vue'
 import AutoReleaseDialog from '../auto-release/Dialog.vue'
+import ProjectEnvVarsDialog from './ProjectEnvVarsDialog.vue'
 import type { Project } from '../api'
 import {
   formatStamp,
@@ -16,6 +18,7 @@ import {
 } from '../composables/use-project-list'
 
 const { t } = useI18n()
+const envVarsOpen = ref(false)
 const {
   current,
   projects,
@@ -71,9 +74,23 @@ function repoCell(row: Project) {
       variant="outlined"
       elevated
       radius="lg"
-      :title="current ? t('workspaces.projectsTitleNamed', { name: current.workspace_name }) : t('workspaces.projectsTitle')"
       :padding="false"
     >
+      <template #header>
+        <div class="ws-pane__head">
+          <h3 class="rs-card__title">
+            {{ current ? t('workspaces.projectsTitleNamed', { name: current.workspace_name }) : t('workspaces.projectsTitle') }}
+          </h3>
+          <button
+            type="button"
+            class="ws-pane__help"
+            :aria-label="t('workspaces.envVars.open')"
+            @click="envVarsOpen = true"
+          >
+            <RsIcon name="circle-help" :size="16" />
+          </button>
+        </div>
+      </template>
       <template #actions>
         <RsButton
           size="sm"
@@ -184,6 +201,7 @@ function repoCell(row: Project) {
     <AutoBuildDialog v-model:open="autoBuildOpen" :workspace="current" @success="load" />
     <AutoReleaseDialog v-model:open="autoReleaseOpen" :workspace="current" @success="load" />
     <AutoPushDialog v-model:open="autoPushOpen" :workspace="current" @success="load" />
+    <ProjectEnvVarsDialog v-model:open="envVarsOpen" />
   </div>
 </template>
 
@@ -195,6 +213,32 @@ function repoCell(row: Project) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.ws-pane__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.ws-pane__help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0.15rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--shell-muted);
+  cursor: pointer;
+}
+
+.ws-pane__help:hover {
+  color: #0284c7;
+  background: color-mix(in srgb, #0284c7 10%, transparent);
 }
 
 .ws-pane__card {

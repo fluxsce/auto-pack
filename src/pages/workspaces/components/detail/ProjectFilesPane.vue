@@ -83,6 +83,7 @@ const columns = computed<RsTableColumn<ProjectFileEntry>[]>(() => [
     key: 'name',
     title: t('workspaces.detail.fileName'),
     minWidth: 180,
+    ellipsis: true,
     sortable: true,
     filterable: true,
     sorter: keepDirsFirst,
@@ -344,6 +345,7 @@ watch(() => props.projectId, () => {
           :data="filtered"
           :loading="loading"
           row-key="path"
+          :view-key="dir"
           :selected-row-keys="selectedKeys"
           :context-menu-items="menuItems"
           @update:selected-row-keys="selectedKeys = $event"
@@ -440,6 +442,10 @@ watch(() => props.projectId, () => {
 
 <style scoped src="./pane.css"></style>
 <style scoped>
+.pane {
+  min-width: 0;
+}
+
 .pane-bar {
   display: flex;
   align-items: center;
@@ -500,22 +506,48 @@ watch(() => props.projectId, () => {
 }
 
 .explorer {
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.explorer .grow {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.explorer :deep(.rs-table-shell--fill) {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
 }
 
 .name-link {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
+  max-width: 100%;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+
+.name-link span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-ops {

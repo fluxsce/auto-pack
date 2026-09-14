@@ -83,9 +83,81 @@ export function isAbsLocalPath(value: string): boolean {
   return /^[A-Za-z]:\//.test(path)
 }
 
+export type ProjectSourceContext = {
+  workspaceId?: string
+  workspaceCode?: string
+  workspaceName?: string
+  workspacePath?: string
+  projectId?: string
+  projectName?: string
+  projectType?: string
+  repoBranch?: string
+  repoUrl?: string
+}
+
+function isSourceIdentByte(ch: string): boolean {
+  return /^[A-Za-z0-9_]$/.test(ch)
+}
+
+function replaceDollarSourceVar(text: string, key: string, val: string): string {
+  const prefix = `$${key}`
+  if (!text.includes(prefix)) return text
+  let out = ''
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '$' && text.startsWith(prefix, i)) {
+      const next = i + prefix.length
+      if (next >= text.length || !isSourceIdentByte(text[next]!)) {
+        out += val
+        i = next - 1
+        continue
+      }
+    }
+    out += text[i]
+  }
+  return out
+}
+
+/** 展开 local_source_path / 脚本中的 AP_* 占位符（与后端 SourceContext 对齐）。 */
+export function expandProjectVars(raw: string, ctx: ProjectSourceContext, recipe: ProjectRecipe): string {
+  if (!raw) return raw
+  const vars: Record<string, string> = {
+    AP_WORKSPACE_ID: ctx.workspaceId || '',
+    AP_WORKSPACE_CODE: ctx.workspaceCode || '',
+    AP_WORKSPACE_NAME: ctx.workspaceName || '',
+    AP_WORKSPACE_PATH: ctx.workspacePath || '',
+    AP_PROJECT_ID: ctx.projectId || '',
+    AP_PROJECT_NAME: ctx.projectName || '',
+    AP_PROJECT_TYPE: ctx.projectType || '',
+    AP_REPO_BRANCH: ctx.repoBranch || '',
+    AP_REPO_URL: ctx.repoUrl || '',
+    AP_SCM_MODE: recipe.scm_mode === 'local' ? 'local' : 'git',
+  }
+  const keys = Object.keys(vars).sort((a, b) => b.length - a.length || a.localeCompare(b))
+  let out = raw
+  for (const key of keys) {
+    const val = vars[key] ?? ''
+    out = out.replaceAll(`\${${key}}`, val).replaceAll(`%${key}%`, val)
+  }
+  for (const key of keys) {
+    out = replaceDollarSourceVar(out, key, vars[key] ?? '')
+  }
+  return out
+}
+
+function mergeSourceContext(root: string, name: string, ctx?: ProjectSourceContext): ProjectSourceContext {
+  return {
+    workspacePath: root.replace(/[/\\]+$/, ''),
+    projectName: name,
+    ...ctx,
+  }
+}
+
 /** 与后端 WorkRel 对齐：本地相对子路径才叠到工程名下；绝对路径不拼进空间根。 */
-export function workRel(name: string, recipe: ProjectRecipe): string {
-  const raw = (recipe.local_source_path || '').trim().replaceAll('\\', '/')
+export function workRel(name: string, recipe: ProjectRecipe, ctx?: ProjectSourceContext): string {
+  let raw = (recipe.local_source_path || '').trim().replaceAll('\\', '/')
+  if (recipe.scm_mode === 'local' && raw) {
+    raw = expandProjectVars(raw, mergeSourceContext('', name, ctx), recipe)
+  }
   if (recipe.scm_mode === 'local' && raw && !isAbsLocalPath(raw)) {
     const extra = raw.split('/').filter(Boolean).join('/')
     return name ? `${name}/${extra}` : extra
@@ -94,12 +166,21 @@ export function workRel(name: string, recipe: ProjectRecipe): string {
 }
 
 /** 界面/作业看到的源码目录：本地绝对路径原样用，否则空间根 + workRel。 */
-export function checkoutDisplay(root: string, name: string, recipe: ProjectRecipe, storedRel = ''): string {
-  const raw = (recipe.local_source_path || '').trim()
+export function checkoutDisplay(
+  root: string,
+  name: string,
+  recipe: ProjectRecipe,
+  storedRel = '',
+  ctx?: ProjectSourceContext,
+): string {
+  let raw = (recipe.local_source_path || '').trim()
+  if (recipe.scm_mode === 'local' && raw) {
+    raw = expandProjectVars(raw, mergeSourceContext(root, name, ctx), recipe)
+  }
   if (recipe.scm_mode === 'local' && isAbsLocalPath(raw)) {
     return raw.replaceAll('\\', '/')
   }
-  const rel = storedRel.trim() || workRel(name, recipe)
+  const rel = storedRel.trim() || workRel(name, recipe, ctx)
   const base = root.replace(/[/\\]+$/, '')
   return base && rel ? `${base}/${rel}` : rel
 }
