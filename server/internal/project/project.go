@@ -44,6 +44,7 @@ type GitBranchUpdate struct {
 type PostActionUpdate struct {
 	Updated int    `json:"updated"`
 	Kind    string `json:"kind"`
+	Family  string `json:"family,omitempty"`
 }
 
 const projectCols = `rec_id, workspace_rec_id, project_name, project_type, COALESCE(repo_url,''),
@@ -251,11 +252,18 @@ func (s *Service) UpdateGitBranches(ctx context.Context, actor iam.Actor, worksp
 	return out, nil
 }
 
-// UpdatePostActions upserts one email or shell post-build action on every project (project.write).
-func (s *Service) UpdatePostActions(ctx context.Context, actor iam.Actor, workspaceID string, act PostAction) (PostActionUpdate, error) {
+// UpdatePostActions upserts one email or shell post-build action on matching projects (project.write).
+func (s *Service) UpdatePostActions(ctx context.Context, actor iam.Actor, workspaceID, family string, act PostAction) (PostActionUpdate, error) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	if err := CheckPostAction(act); err != nil {
 		return PostActionUpdate{}, err
+	}
+	family = strings.ToLower(strings.TrimSpace(family))
+	if family == "all" {
+		family = ""
+	}
+	if family != "" && family != "maven" && family != "node" {
+		return PostActionUpdate{}, ErrCommandFamily
 	}
 	if err := s.guard.Allow(ctx, actor, workspaceID, iam.ActionProjectWrite); err != nil {
 		return PostActionUpdate{}, err
@@ -264,9 +272,12 @@ func (s *Service) UpdatePostActions(ctx context.Context, actor iam.Actor, worksp
 	if err != nil {
 		return PostActionUpdate{}, err
 	}
-	out := PostActionUpdate{Kind: strings.ToLower(strings.TrimSpace(act.Kind))}
+	out := PostActionUpdate{Kind: strings.ToLower(strings.TrimSpace(act.Kind)), Family: family}
 	q := s.st.Rebind(`UPDATE AP_PROJECT SET recipe_json=? WHERE rec_id=?`)
 	for _, p := range list {
+		if !MatchCommandFamily(p.ProjectType, family) {
+			continue
+		}
 		recipe := UpsertPostAction(ParseRecipe(p.RecipeJSON), act)
 		for i := range recipe.PostActions {
 			if strings.TrimSpace(recipe.PostActions[i].ID) == "" {

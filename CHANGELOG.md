@@ -10,6 +10,11 @@
 
 ## [2.1.7] - 2026-09-14
 
+### 变更
+
+- 构建命令与构建后脚本注入作业上下文环境变量：`AP_WORKSPACE_CODE`、`AP_WORKSPACE_NAME`、`AP_PROJECT_NAME`、`AP_PROJECT_PATH`、`AP_PROJECT_WORKDIR`、`AP_REPO_BRANCH`、`AP_JOB_ID` 等；后置脚本同时叠加 JDK/Maven/Node 与全局变量。
+- 工作空间右键「构建后脚本」按 Maven / Node 分类批量写入，并提供 dist / target 部署快捷模板；不再覆盖另一类型工程的脚本。
+
 ### 修复
 
 - 克隆空间：MySQL 下源空间有工程时会报 `driver: bad connection`。事务里先读完源工程再插入，不再在结果集未关闭时执行 INSERT（SQLite 单测此前未暴露）。

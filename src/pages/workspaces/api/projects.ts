@@ -33,6 +33,7 @@ export type GitBranchUpdate = {
 }
 
 export type PostActionWrite = {
+  family?: 'maven' | 'node' | ''
   kind: 'email' | 'shell'
   enabled?: boolean
   env_rec_id?: string
@@ -46,13 +47,15 @@ export type PostActionWrite = {
 export type PostActionUpdate = {
   updated: number
   kind: string
+  family?: string
 }
 
 export function updateWorkspacePostActions(workspaceId: string, action: PostActionWrite): Promise<PostActionUpdate> {
+  const { family, ...body } = action
   return request<PostActionUpdate>({
     method: 'POST',
     url: apiPath('projects', 'post-actions'),
-    data: { workspace_rec_id: workspaceId, action },
+    data: { workspace_rec_id: workspaceId, family: family || undefined, action: body },
   })
 }
 

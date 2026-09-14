@@ -327,7 +327,7 @@ func TestUpdatePostActionsUpsertsEmail(t *testing.T) {
 		t.Fatal(err)
 	}
 	on := true
-	out, err := svc.UpdatePostActions(ctx, actor, access.DefaultWorkspaceRecID, project.PostAction{
+	out, err := svc.UpdatePostActions(ctx, actor, access.DefaultWorkspaceRecID, "", project.PostAction{
 		Kind:     "email",
 		Enabled:  &on,
 		EnvRecID: "smtp1",
@@ -350,6 +350,59 @@ func TestUpdatePostActionsUpsertsEmail(t *testing.T) {
 	}
 	if recipe.PostActions[0].Kind != "ftp" || recipe.PostActions[1].Kind != "email" || recipe.PostActions[1].EnvRecID != "smtp1" {
 		t.Fatalf("actions=%+v", recipe.PostActions)
+	}
+}
+
+func TestUpdatePostActionsFiltersByFamily(t *testing.T) {
+	svc, _, ctx, actor := setupPrj(t)
+	mvn, err := svc.Save(ctx, actor, project.Project{
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		ProjectName:    "jar-app",
+		ProjectType:    "maven",
+		RepoURL:        "https://git.example.com/org/jar-app.git",
+		RecipeJSON:     `{"scm_mode":"git","command":"mvn -B package","post_actions":[{"kind":"shell","command":"old-maven"}]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vue, err := svc.Save(ctx, actor, project.Project{
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		ProjectName:    "web-app",
+		ProjectType:    "vue",
+		RepoURL:        "https://git.example.com/org/web-app.git",
+		RecipeJSON:     `{"scm_mode":"git","command":"npm run build","post_actions":[{"kind":"shell","command":"old-vue"}]}`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := true
+	out, err := svc.UpdatePostActions(ctx, actor, access.DefaultWorkspaceRecID, "node", project.PostAction{
+		Kind:    "shell",
+		Enabled: &on,
+		Command: "cp dist",
+		When:    project.WhenSuccess,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Updated != 1 || out.Family != "node" {
+		t.Fatalf("out=%+v", out)
+	}
+	gotMvn, err := svc.GetRaw(ctx, mvn.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotVue, err := svc.GetRaw(ctx, vue.RecID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mvnRecipe := project.ParseRecipe(gotMvn.RecipeJSON)
+	vueRecipe := project.ParseRecipe(gotVue.RecipeJSON)
+	if len(mvnRecipe.PostActions) != 1 || mvnRecipe.PostActions[0].Command != "old-maven" {
+		t.Fatalf("maven=%+v", mvnRecipe.PostActions)
+	}
+	if len(vueRecipe.PostActions) != 1 || vueRecipe.PostActions[0].Command != "cp dist" {
+		t.Fatalf("vue=%+v", vueRecipe.PostActions)
 	}
 }
 

@@ -114,10 +114,7 @@ func (e *Engine) runPostAction(ctx context.Context, j job.Job, prj project.Proje
 			dir = filepath.Join(work, recipe.Workdir)
 		}
 		logLine(w, "执行命令 %s", cmd)
-		var extra []string
-		if e.settings != nil {
-			extra = e.settings.ProcEnv(ctx)
-		}
+		extra := e.procEnv(ctx, j, prj, p, recipe, work, dir)
 		if err := bash.Run(ctx, dir, cmd, extra, w); err != nil {
 			logLine(w, "脚本退出 %v", err)
 			return err

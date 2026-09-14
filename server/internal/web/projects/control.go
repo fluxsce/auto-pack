@@ -93,6 +93,7 @@ func (c *Controller) UpdateCommands(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) UpdatePostActions(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		WorkspaceRecID string             `json:"workspace_rec_id"`
+		Family         string             `json:"family,omitempty"`
 		Action         project.PostAction `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -100,7 +101,7 @@ func (c *Controller) UpdatePostActions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := middleware.ActorFrom(r)
-	out, err := c.projects.UpdatePostActions(r.Context(), actor, in.WorkspaceRecID, in.Action)
+	out, err := c.projects.UpdatePostActions(r.Context(), actor, in.WorkspaceRecID, in.Family, in.Action)
 	c.audit.Note(r.Context(), actor, in.WorkspaceRecID, audit.ActionProjectPost, "workspace", in.WorkspaceRecID, "post "+strings.TrimSpace(in.Action.Kind), err)
 	if httpx.WriteSvcErr(w, err) {
 		return

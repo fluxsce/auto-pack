@@ -29,14 +29,7 @@ func (e *Engine) stepBuild(ctx context.Context, j job.Job, prj project.Project, 
 	if recipe.Workdir != "" {
 		dir = filepath.Join(work, recipe.Workdir)
 	}
-	extra := env.ProcEnv(
-		e.envCfg(ctx, recipe.JDKEnvRecID, j.WorkspaceRecID, "jdk"),
-		e.envCfg(ctx, recipe.MavenEnvRecID, j.WorkspaceRecID, "maven"),
-		e.envCfg(ctx, recipe.NodeEnvRecID, j.WorkspaceRecID, "node"),
-	)
-	if e.settings != nil {
-		extra = append(extra, e.settings.ProcEnv(ctx)...)
-	}
+	extra := e.procEnv(ctx, j, prj, p, recipe, work, dir)
 	if skipBuildAsSuccess(prj.ProjectType, cmd) {
 		logLine(w, "custom 工程未配置构建命令，跳过构建步骤并记为成功")
 		return nil
