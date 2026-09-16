@@ -56,6 +56,9 @@ const selectedKeys = ref<string[]>([])
 const pushOpen = ref(false)
 const query = ref('')
 
+/** 列宽合计 + 选择列 40px；与 scroll-x 配合使 fixed 左/右列 sticky（见 niuma-ui playground TablePage）。 */
+const TABLE_SCROLL_X = 786
+
 const rows = computed(() => tree.value?.entries ?? [])
 const filtered = computed(() => {
   const q = query.value
@@ -125,6 +128,13 @@ const columns = computed<RsTableColumn<ProjectFileEntry>[]>(() => [
 ])
 
 const previewTitle = computed(() => preview.value?.name || t('workspaces.detail.preview'))
+
+/** 文件名仅在发生省略时设置 title，供悬浮查看完整名称。 */
+function bindNameTitle(event: MouseEvent): void {
+  const el = event.currentTarget as HTMLElement
+  const text = el.textContent?.trim() ?? ''
+  el.title = el.scrollWidth > el.clientWidth ? text : ''
+}
 
 function kindLabel(row: ProjectFileEntry): string {
   if (row.is_dir) return t('workspaces.detail.folder')
@@ -341,6 +351,8 @@ watch(() => props.projectId, () => {
           fill
           selectable
           cell-focus="none"
+          :cell-tooltip="true"
+          :scroll-x="TABLE_SCROLL_X"
           :columns="columns"
           :data="filtered"
           :loading="loading"
@@ -357,8 +369,8 @@ watch(() => props.projectId, () => {
           </template>
           <template #name="{ row }">
             <button type="button" class="name-link" @click="open(row)">
-              <RsIcon :name="row.is_dir ? 'folder' : 'file'" :size="16" />
-              <span>{{ row.name }}</span>
+              <RsIcon class="name-link__icon" :name="row.is_dir ? 'folder' : 'file'" :size="16" />
+              <span class="name-link__text" @mouseenter="bindNameTitle">{{ row.name }}</span>
             </button>
           </template>
           <template #kind="{ row }">{{ kindLabel(row) }}</template>
@@ -530,21 +542,37 @@ watch(() => props.projectId, () => {
   width: 100%;
 }
 
+.explorer :deep(.rs-table__td[data-col-key='name'] .rs-table__cell-body) {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .name-link {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 0.45rem;
-  max-width: 100%;
+  width: 100%;
   min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.name-link span {
+.name-link__icon {
+  flex-shrink: 0;
+}
+
+.name-link__text {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
