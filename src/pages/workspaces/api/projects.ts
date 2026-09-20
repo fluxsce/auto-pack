@@ -176,12 +176,17 @@ export function deleteProjectFile(id: string, path: string): Promise<void> {
   return request({ method: 'DELETE', url: apiPath('projects', id, 'file'), params: { path } })
 }
 
-export function downloadProjectFile(id: string, path: string, filename: string): Promise<void> {
+export function downloadProjectFile(id: string, path: string | string[], filename: string): Promise<void> {
+  const params = new URLSearchParams()
+  for (const item of (Array.isArray(path) ? path : [path])) {
+    const rel = item.trim()
+    if (rel) params.append('path', rel)
+  }
   return downloadBlob(
     {
       method: 'GET',
       url: apiPath('projects', id, 'file', 'download'),
-      params: { path },
+      params,
       timeout: 180000,
     },
     filename,

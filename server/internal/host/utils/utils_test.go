@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,25 @@ func TestListAndRead(t *testing.T) {
 	}
 	if _, _, err := ReadText(root, "src/bin.dat", 0); err != ErrNotText {
 		t.Fatalf("want ErrNotText, got %v", err)
+	}
+}
+
+func TestListDirUnlimited(t *testing.T) {
+	root := t.TempDir()
+	const n = 450
+	for i := 0; i < n; i++ {
+		name := filepath.Join(root, "f"+strconv.Itoa(i)+".txt")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, all, err := ListDir(root, "", 0)
+	if err != nil || len(all) != n {
+		t.Fatalf("unlimited: n=%d err=%v", len(all), err)
+	}
+	_, clipped, err := ListDir(root, "", 10)
+	if err != nil || len(clipped) != 10 {
+		t.Fatalf("limit 10: n=%d err=%v", len(clipped), err)
 	}
 }
 

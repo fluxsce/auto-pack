@@ -432,6 +432,8 @@ export default {
       fileExt: '{ext} file',
       selectedCount: '{n} selected',
       openEntry: 'Open',
+      downloadSelected: 'Download {n} selected',
+      downloadNeedSelect: 'Select files or folders to download first',
       pushRemote: 'Push remote',
       pushTitle: 'Push selected files',
       pushHint: 'Upload the {n} selected items to a remote environment. Folders include their files recursively.',

@@ -11,8 +11,7 @@ import (
 )
 
 const (
-	maxTreeEntries = 400
-	maxFileBytes   = 256 << 10
+	maxFileBytes = 256 << 10
 )
 
 var (
@@ -56,7 +55,7 @@ func (s *Service) ListCheckout(ctx context.Context, actor iam.Actor, workspaceID
 	if err != nil {
 		return Tree{}, err
 	}
-	exists, items, err := utils.ListDir(base, rel, maxTreeEntries)
+	exists, items, err := utils.ListDir(base, rel, 0)
 	if err != nil {
 		return Tree{}, err
 	}

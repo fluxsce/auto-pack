@@ -432,6 +432,8 @@ export default {
       fileExt: '{ext} 文件',
       selectedCount: '已选 {n} 项',
       openEntry: '打开',
+      downloadSelected: '下载已选 {n} 项',
+      downloadNeedSelect: '请先选择要下载的文件或文件夹',
       pushRemote: '远程推送',
       pushTitle: '推送所选文件',
       pushHint: '将勾选的 {n} 项上传到远程环境。文件夹会递归收录其中的文件。',

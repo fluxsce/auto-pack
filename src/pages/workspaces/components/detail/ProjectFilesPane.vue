@@ -51,6 +51,7 @@ const preview = ref<{
 } | null>(null)
 const loading = ref(false)
 const clearing = ref(false)
+const downloading = ref(false)
 const busyKey = ref('')
 const selectedKeys = ref<string[]>([])
 const pushOpen = ref(false)
@@ -142,12 +143,16 @@ function kindLabel(row: ProjectFileEntry): string {
   return ext ? t('workspaces.detail.fileExt', { ext: ext.toUpperCase() }) : t('workspaces.detail.file')
 }
 
-function menuItems(row: ProjectFileEntry | null): RsContextMenuItem[] {
-  const target = row ?? selectedRows.value[0]
+function menuItems(row: ProjectFileEntry | null, selected: ProjectFileEntry[] = []): RsContextMenuItem[] {
+  const targets = menuTargets(row, selected)
+  const target = targets[0] ?? row
   if (!target) return []
+  const downloadLabel = targets.length > 1
+    ? t('workspaces.detail.downloadSelected', { n: targets.length })
+    : t('common.download')
   return [
     { key: 'open', label: target.is_dir ? t('workspaces.detail.openEntry') : t('workspaces.detail.preview'), icon: target.is_dir ? 'folder' : 'file' },
-    { key: 'download', label: t('common.download'), icon: 'download' },
+    { key: 'download', label: downloadLabel, icon: 'download' },
     { key: 'push', label: t('workspaces.detail.pushRemote'), icon: 'upload' },
     { key: 'delete', label: t('common.delete'), icon: 'trash-2', danger: true },
   ]
@@ -186,6 +191,12 @@ async function open(entry: ProjectFileEntry): Promise<void> {
   }
 }
 
+function downloadZipName(): string {
+  const folder = fileBaseName(dir.value)
+  const base = folder || props.projectName?.trim() || 'files'
+  return `${base}-files.zip`
+}
+
 async function download(entry: ProjectFileEntry): Promise<void> {
   const name = entry.is_dir ? `${entry.name}.zip` : entry.name
   busyKey.value = entry.path
@@ -195,6 +206,29 @@ async function download(entry: ProjectFileEntry): Promise<void> {
     toast.error(errText(e))
   } finally {
     busyKey.value = ''
+  }
+}
+
+async function downloadMany(entries: ProjectFileEntry[]): Promise<void> {
+  if (!entries.length) {
+    toast.warning(t('workspaces.detail.downloadNeedSelect'))
+    return
+  }
+  if (entries.length === 1) {
+    await download(entries[0])
+    return
+  }
+  downloading.value = true
+  try {
+    await downloadProjectFile(
+      props.projectId,
+      entries.map((item) => item.path),
+      downloadZipName(),
+    )
+  } catch (e) {
+    toast.error(errText(e))
+  } finally {
+    downloading.value = false
   }
 }
 
@@ -261,8 +295,8 @@ function onMenu(key: string, row: ProjectFileEntry | null, selected: ProjectFile
     void open(target)
     return
   }
-  if (key === 'download' && target) {
-    void download(target)
+  if (key === 'download') {
+    void downloadMany(menuTargets(row, selected))
     return
   }
   if (key === 'delete' && target) {
@@ -301,6 +335,15 @@ watch(() => props.projectId, () => {
         <h3>{{ t('workspaces.detail.nav.files') }}</h3>
         <span v-if="selectedRows.length" class="pane-meta">{{ t('workspaces.detail.selectedCount', { n: selectedRows.length }) }}</span>
         <div class="pane-bar__ops">
+          <RsButton
+            size="sm"
+            variant="default"
+            :disabled="!selectedRows.length || downloading"
+            :loading="downloading"
+            @click="downloadMany(selectedRows)"
+          >
+            {{ selectedRows.length > 1 ? t('workspaces.detail.downloadSelected', { n: selectedRows.length }) : t('common.download') }}
+          </RsButton>
           <RsButton size="sm" variant="default" tone="warning" :disabled="!selectedRows.length" @click="openPush()">
             {{ t('workspaces.detail.pushRemote') }}
           </RsButton>
@@ -383,6 +426,7 @@ watch(() => props.projectId, () => {
                 variant="text"
                 tone="primary"
                 :loading="busyKey === row.path"
+                :disabled="downloading"
                 @click.stop="download(row)"
               >
                 {{ t('common.download') }}

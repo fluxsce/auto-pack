@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-const defaultListLimit = 400
-
 // Entry 是一层目录里的文件或子目录。
 type Entry struct {
 	Name    string
@@ -20,6 +18,7 @@ type Entry struct {
 }
 
 // ListDir 列举 root 下 rel 这一层。目录不存在时 exists=false 且不报错。
+// limit <= 0 表示不截断，返回该层全部条目。
 func ListDir(root, rel string, limit int) (exists bool, entries []Entry, err error) {
 	dest, rel, err := Resolve(root, rel)
 	if err != nil {
@@ -45,10 +44,7 @@ func ListDir(root, rel string, limit int) (exists bool, entries []Entry, err err
 		}
 		return strings.ToLower(items[i].Name()) < strings.ToLower(items[j].Name())
 	})
-	if limit <= 0 {
-		limit = defaultListLimit
-	}
-	if len(items) > limit {
+	if limit > 0 && len(items) > limit {
 		items = items[:limit]
 	}
 	entries = make([]Entry, 0, len(items))

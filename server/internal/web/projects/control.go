@@ -254,24 +254,76 @@ func (c *Controller) File(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, blob)
 }
 
-// DownloadFile 下载工程检出目录内的文件；目录打成 zip（跳过嵌套 .git）。
+const maxDownloadPaths = 400
+
+// DownloadFile 下载工程检出目录内的文件或目录；多个 path 打成一个 zip（跳过嵌套 .git）。
 func (c *Controller) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	p, err := c.projects.Get(r.Context(), middleware.ActorFrom(r), r.PathValue("id"))
 	if httpx.WriteSvcErr(w, err) {
 		return
 	}
-	target, err := c.workspaces.StatCheckout(r.Context(), middleware.ActorFrom(r), p.WorkspaceRecID, c.checkoutWorkRel(r.Context(), p), r.URL.Query().Get("path"), c.checkoutAbs(r.Context(), p))
-	if writePathErr(w, err) {
+	rels := collectDownloadPaths(r.URL.Query())
+	if len(rels) == 0 {
+		httpx.WriteError(w, http.StatusBadRequest, "path required")
 		return
 	}
-	if !target.Dir {
-		writeAttachment(w, target.Name, false)
-		if typ := mime.TypeByExtension(filepath.Ext(target.Name)); typ != "" {
-			w.Header().Set("Content-Type", typ)
+	actor := middleware.ActorFrom(r)
+	workRel := c.checkoutWorkRel(r.Context(), p)
+	absLocal := c.checkoutAbs(r.Context(), p)
+	if len(rels) == 1 {
+		target, err := c.workspaces.StatCheckout(r.Context(), actor, p.WorkspaceRecID, workRel, rels[0], absLocal)
+		if writePathErr(w, err) {
+			return
 		}
-		http.ServeFile(w, r, target.Abs)
+		if !target.Dir {
+			writeAttachment(w, target.Name, false)
+			if typ := mime.TypeByExtension(filepath.Ext(target.Name)); typ != "" {
+				w.Header().Set("Content-Type", typ)
+			}
+			http.ServeFile(w, r, target.Abs)
+			return
+		}
+		serveCheckoutZip(w, r, []string{target.Abs}, target.Name)
 		return
 	}
+	srcs := make([]string, 0, len(rels))
+	for _, rel := range rels {
+		target, err := c.workspaces.StatCheckout(r.Context(), actor, p.WorkspaceRecID, workRel, rel, absLocal)
+		if writePathErr(w, err) {
+			return
+		}
+		srcs = append(srcs, target.Abs)
+	}
+	name := strings.TrimSpace(p.ProjectName)
+	if name == "" {
+		name = "files"
+	}
+	serveCheckoutZip(w, r, srcs, name+"-files")
+}
+
+func collectDownloadPaths(q url.Values) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, key := range []string{"path", "path[]"} {
+		for _, raw := range q[key] {
+			p := strings.TrimSpace(raw)
+			if p == "" {
+				continue
+			}
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			out = append(out, p)
+			if len(out) >= maxDownloadPaths {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func serveCheckoutZip(w http.ResponseWriter, r *http.Request, srcs []string, name string) {
 	tmp, err := os.CreateTemp("", "ap-checkout-*.zip")
 	if writePathErr(w, err) {
 		return
@@ -279,11 +331,11 @@ func (c *Controller) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	zipPath := tmp.Name()
 	_ = tmp.Close()
 	defer os.Remove(zipPath)
-	if err := utils.ZipDirAs(target.Abs, zipPath, target.Name, workspace.SkipNestedGit); err != nil {
+	if err := utils.ZipSources(srcs, zipPath, workspace.SkipNestedGit); err != nil {
 		writePathErr(w, err)
 		return
 	}
-	writeAttachment(w, target.Name, true)
+	writeAttachment(w, name, true)
 	w.Header().Set("Content-Type", "application/zip")
 	http.ServeFile(w, r, zipPath)
 }
