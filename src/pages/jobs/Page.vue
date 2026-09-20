@@ -516,7 +516,7 @@ async function cancel(id: string): Promise<void> {
         </div>
       </section>
 
-      <RsCard class="jobs__list" variant="outlined" elevated radius="lg" :title="t('jobs.listTitle')" :padding="false">
+      <RsCard class="jobs__list" fill variant="outlined" elevated radius="lg" :title="t('jobs.listTitle')" :padding="false">
         <div class="jobs-stats">
           <span class="jobs-chip is-run">{{ t('jobs.statsRunning') }} <b>{{ stats.running }}</b></span>
           <span class="jobs-chip">{{ t('jobs.statsQueued') }} <b>{{ stats.queued }}</b></span>
@@ -525,6 +525,7 @@ async function cancel(id: string): Promise<void> {
         </div>
         <RsTable
           v-if="visibleJobs.length || loading"
+          fill
           cell-focus="none"
           :columns="columns"
           :data="visibleJobs"
@@ -653,7 +654,7 @@ async function cancel(id: string): Promise<void> {
   min-width: 0;
   flex-direction: column;
   gap: 1rem;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .jobs-live {
@@ -678,9 +679,29 @@ async function cancel(id: string): Promise<void> {
 }
 
 .jobs__list {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
   width: 100%;
+}
+
+.jobs__list :deep(.rs-card__body) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.jobs__list :deep(.rs-table-shell--fill) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.jobs__list .page__quiet {
+  flex: 1;
+}
+
+.jobs__list .page__pager {
+  flex-shrink: 0;
 }
 
 .live-grid {
@@ -753,6 +774,7 @@ async function cancel(id: string): Promise<void> {
 .jobs-stats {
   display: flex;
   flex-wrap: wrap;
+  flex-shrink: 0;
   gap: 0.45rem;
   padding: 0.75rem 1rem 0.45rem;
 }
