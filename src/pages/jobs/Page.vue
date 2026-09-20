@@ -107,9 +107,6 @@ const submitProjects = computed(() =>
   projects.value.filter((item) => !form.value.workspace_rec_id || item.workspace_rec_id === form.value.workspace_rec_id),
 )
 
-/** 列宽合计；与 scroll-x 配合避免窄屏时操作列被裁切。 */
-const TABLE_SCROLL_X = 1136
-
 const columns = computed<RsTableColumn<Job>[]>(() => [
   { key: 'workspace', title: t('jobs.workspace'), minWidth: 140 },
   { key: 'job_type', title: t('jobs.type'), width: 110 },
@@ -519,7 +516,7 @@ async function cancel(id: string): Promise<void> {
         </div>
       </section>
 
-      <RsCard class="jobs__list" fill variant="outlined" elevated radius="lg" :title="t('jobs.listTitle')" :padding="false">
+      <RsCard class="jobs__list" variant="outlined" elevated radius="lg" :title="t('jobs.listTitle')" :padding="false">
         <div class="jobs-stats">
           <span class="jobs-chip is-run">{{ t('jobs.statsRunning') }} <b>{{ stats.running }}</b></span>
           <span class="jobs-chip">{{ t('jobs.statsQueued') }} <b>{{ stats.queued }}</b></span>
@@ -528,9 +525,7 @@ async function cancel(id: string): Promise<void> {
         </div>
         <RsTable
           v-if="visibleJobs.length || loading"
-          fill
           cell-focus="none"
-          :scroll-x="TABLE_SCROLL_X"
           :columns="columns"
           :data="visibleJobs"
           :loading="loading"
@@ -662,13 +657,10 @@ async function cancel(id: string): Promise<void> {
 }
 
 .jobs-live {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: min(40vh, 22rem);
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  overflow: auto;
 }
 
 .jobs-live__head h2 {
@@ -686,21 +678,9 @@ async function cancel(id: string): Promise<void> {
 }
 
 .jobs__list {
-  flex: 1 1 auto;
-  min-height: 16rem;
+  flex: 0 0 auto;
   min-width: 0;
-}
-
-.jobs__list :deep(.rs-card__body) {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.jobs__list :deep(.rs-table-shell--fill) {
-  flex: 1 1 auto;
-  min-height: 0;
+  width: 100%;
 }
 
 .live-grid {
