@@ -644,17 +644,16 @@ async function cancel(id: string): Promise<void> {
   flex: 1;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .jobs {
   display: flex;
-  flex: 1;
-  min-height: 0;
+  flex: 1 0 auto;
+  min-height: 100%;
   min-width: 0;
   flex-direction: column;
   gap: 1rem;
-  overflow: hidden;
 }
 
 .jobs-live {
@@ -680,7 +679,7 @@ async function cancel(id: string): Promise<void> {
 
 .jobs__list {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 18rem;
   min-width: 0;
   width: 100%;
 }
