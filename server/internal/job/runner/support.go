@@ -86,11 +86,16 @@ func (e *Engine) gitOptFor(ctx context.Context, workspaceID, gitEnvID string) gi
 }
 
 func (e *Engine) envCfg(ctx context.Context, recID, workspaceID, kind string) map[string]any {
+	recID = strings.TrimSpace(recID)
 	if recID != "" && e.envs != nil {
 		_, cfg, err := e.envs.DecryptRow(ctx, recID)
 		if err == nil {
 			return cfg
 		}
+	}
+	// 未绑定 JDK 时不要 FindKind 第一条：否则会把本机 JAVA_HOME=17 改成库里按名排序的 1.8。
+	if kind == "jdk" {
+		return nil
 	}
 	return e.kindCfg(ctx, workspaceID, kind)
 }

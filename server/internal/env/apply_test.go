@@ -32,6 +32,24 @@ func TestProcEnvSetsJavaAndRegistry(t *testing.T) {
 	}
 }
 
+func TestProcEnvUnboundJDKIgnoresMavenJavaHome(t *testing.T) {
+	env := ProcEnv(nil, map[string]any{"java_home": "/home/sdk/jdk1.8.0_202", "maven_home": "/opt/maven"}, nil)
+	joined := strings.Join(env, "\n")
+	if strings.Contains(joined, "JAVA_HOME=") {
+		t.Fatal(joined)
+	}
+	if !strings.Contains(joined, "MAVEN_HOME=/opt/maven") {
+		t.Fatal(joined)
+	}
+}
+
+func TestProcEnvBoundJDKEmptyHomeUsesMaven(t *testing.T) {
+	env := ProcEnv(map[string]any{}, map[string]any{"java_home": "/opt/jdk8"}, nil)
+	if !strings.Contains(strings.Join(env, "\n"), "JAVA_HOME=/opt/jdk8") {
+		t.Fatal(env)
+	}
+}
+
 func TestMavenCommandInjectsSettings(t *testing.T) {
 	got := MavenCommand("mvn -B package", "/tmp/settings.xml")
 	if !strings.Contains(got, "-s ") || !strings.Contains(got, "settings.xml") {

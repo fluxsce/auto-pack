@@ -25,7 +25,10 @@ func ProcEnv(jdk, mavenCfg, node map[string]any) []string {
 	var out []string
 	var pathDirs []string
 
-	javaHome := firstNonEmpty(mapString(jdk, "java_home"), mapString(mavenCfg, "java_home"))
+	javaHome := mapString(jdk, "java_home")
+	if javaHome == "" && jdk != nil {
+		javaHome = mapString(mavenCfg, "java_home")
+	}
 	if javaHome != "" {
 		out = append(out, "JAVA_HOME="+javaHome)
 		pathDirs = append(pathDirs, filepath.Join(javaHome, "bin"))

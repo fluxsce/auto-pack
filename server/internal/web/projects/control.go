@@ -226,6 +226,9 @@ func (c *Controller) envCfg(ctx context.Context, recID, workspaceID, kind string
 			return cfg
 		}
 	}
+	if kind == "jdk" {
+		return nil
+	}
 	return c.envs.KindConfig(ctx, workspaceID, kind)
 }
 

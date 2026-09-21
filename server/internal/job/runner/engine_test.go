@@ -121,6 +121,13 @@ func TestEnvCfgFallsBackToKind(t *testing.T) {
 	}
 }
 
+func TestEnvCfgEmptyJDKDoesNotFallback(t *testing.T) {
+	e := NewEngine(nil, nil, nil, t.TempDir(), "", 1)
+	if cfg := e.envCfg(context.Background(), "", "ws", "jdk"); cfg != nil {
+		t.Fatal(cfg)
+	}
+}
+
 func TestEnvValuePrefersLast(t *testing.T) {
 	if got := envValue([]string{"JAVA_HOME=/old", "JAVA_HOME=/jdk8"}, "JAVA_HOME"); got != "/jdk8" {
 		t.Fatal(got)
