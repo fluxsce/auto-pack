@@ -23,6 +23,11 @@ const (
 	TypeSyncSources = "sync_sources"
 )
 
+// IsPushJob reports FTP/SFTP/SSH 推送作业（job_type=ftp_push），走独立推送队列。
+func IsPushJob(jobType string) bool {
+	return jobType == TypeFTPPush
+}
+
 const (
 	// OriginAutoBuild 工作空间自动构建提交的工程作业。
 	OriginAutoBuild = "auto_build"

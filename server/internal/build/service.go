@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"auto-pack/server/internal/access"
@@ -205,37 +206,63 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 		}
 	}
 	s.coord.SetPhase(job, "build")
-	succeeded, skipped, failed := 0, 0, 0
-	outcomes := map[string]string{}
-	for i, prj := range queue {
-		if err := ctx.Err(); err != nil {
-			failed++
-			res := record.Result{ProjectName: prj.ProjectName, Status: "failed", Message: err.Error()}
-			s.coord.AppendResult(job, res, succeeded, skipped, failed)
-			s.appendLog(logPath, stamp()+" 已取消")
-			break
-		}
-		s.coord.SetProgress(job, prj.ProjectName, i, len(queue))
-		s.appendLog(logPath, stamp()+fmt.Sprintf(" 正在构建（%d/%d）：%s", i+1, len(queue), prj.ProjectName))
-		out := batchrun.RunBuild(ctx, s.jobs, actor, body.WorkspaceRecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
-			s.appendLog(logPath, stamp()+fmt.Sprintf(" %s · %s", prj.ProjectName, step))
-		}, func(chunk string) {
-			s.appendJobLog(logPath, chunk)
-		})
-		res := record.Result{ProjectName: prj.ProjectName, Message: out.Message}
-		if out.OK {
-			succeeded++
-			res.Status = "ok"
-			outcomes[prj.RecID] = "ok"
-			s.appendLog(logPath, stamp()+fmt.Sprintf(" 构建成功：%s", prj.ProjectName))
-		} else {
-			failed++
-			res.Status = "failed"
-			outcomes[prj.RecID] = "failed"
-			s.appendLog(logPath, stamp()+fmt.Sprintf(" 构建失败：%s — %s", prj.ProjectName, out.Message))
-		}
-		s.coord.AppendResult(job, res, succeeded, skipped, failed)
+	s.appendLog(logPath, stamp()+" 按 pom / package.json 依赖分层并行，上游成功后才启动下游")
+	var logMu stdsync.Mutex
+	writeLog := func(line string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		s.appendLog(logPath, line)
 	}
+	writeJobLog := func(chunk string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		s.appendJobLog(logPath, chunk)
+	}
+	succeeded, skipped, failed := 0, 0, 0
+	outcomes := batchrun.RunGraph(ctx, queue, analysis, func(runCtx context.Context, prj project.Project) batchrun.Outcome {
+		return batchrun.RunBuild(runCtx, s.jobs, actor, body.WorkspaceRecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
+			writeLog(stamp() + fmt.Sprintf(" %s · %s", prj.ProjectName, step))
+		}, writeJobLog)
+	}, batchrun.GraphHooks{
+		OnParallel: func(started []project.Project) {
+			names := make([]string, 0, len(started))
+			for _, p := range started {
+				names = append(names, p.ProjectName)
+			}
+			writeLog(stamp() + " 并行启动：" + strings.Join(names, "、"))
+		},
+		OnStart: func(prj project.Project) {
+			s.coord.SetProgress(job, prj.ProjectName, succeeded+skipped+failed, len(queue))
+			writeLog(stamp() + fmt.Sprintf(" 正在构建：%s", prj.ProjectName))
+		},
+		OnSkip: func(prj project.Project, reason string) {
+			skipped++
+			s.coord.AppendResult(job, record.Result{ProjectName: prj.ProjectName, Status: "skipped", Message: reason}, succeeded, skipped, failed)
+			writeLog(stamp() + fmt.Sprintf(" 跳过构建：%s — %s", prj.ProjectName, reason))
+		},
+		OnFinish: func(prj project.Project, out batchrun.Outcome, took time.Duration) {
+			res := record.Result{ProjectName: prj.ProjectName, Message: out.Message}
+			if out.OK {
+				succeeded++
+				res.Status = "ok"
+				writeLog(stamp() + fmt.Sprintf(" 构建成功：%s（%s）", prj.ProjectName, formatElapsedDur(took)))
+			} else {
+				failed++
+				res.Status = "failed"
+				writeLog(stamp() + fmt.Sprintf(" 构建失败：%s — %s（%s）", prj.ProjectName, out.Message, formatElapsedDur(took)))
+			}
+			s.coord.AppendResult(job, res, succeeded, skipped, failed)
+		},
+		OnCancel: func(prj project.Project, err error) {
+			failed++
+			msg := "canceled"
+			if err != nil {
+				msg = err.Error()
+			}
+			s.coord.AppendResult(job, record.Result{ProjectName: prj.ProjectName, Status: "failed", Message: msg}, succeeded, skipped, failed)
+			writeLog(stamp() + " 已取消：" + prj.ProjectName)
+		},
+	})
 	cycles := order.CyclicRecIDs(analysis)
 	if failed > 0 && len(cycles) > 0 {
 		s.coord.SetPhase(job, "retry")
@@ -350,6 +377,20 @@ func (s *Service) appendJobLog(path, chunk string) {
 
 func stamp() string {
 	return "[" + time.Now().Format("2006-01-02 15:04:05") + "]"
+}
+
+func formatBatchElapsed(since time.Time) string {
+	return formatElapsedDur(time.Since(since))
+}
+
+func formatElapsedDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d >= time.Second {
+		return d.Truncate(time.Second).String()
+	}
+	return d.Truncate(time.Millisecond).String()
 }
 
 func formatSyncEvent(ev release.SyncEvent) string {

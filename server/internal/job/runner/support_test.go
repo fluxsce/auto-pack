@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadLogOffset(t *testing.T) {
@@ -35,6 +36,13 @@ func TestReadLogOffset(t *testing.T) {
 	text, size, used, err = e.ReadLog(jobID, 99)
 	if err != nil || text != string(body) || used != 0 {
 		t.Fatalf("reset text=%q size=%d used=%d err=%v", text, size, used, err)
+	}
+}
+
+func TestFormatElapsed(t *testing.T) {
+	got := formatElapsed(time.Now().Add(-1500 * time.Millisecond))
+	if !strings.Contains(got, "s") {
+		t.Fatal(got)
 	}
 }
 

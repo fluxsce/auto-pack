@@ -820,9 +820,9 @@ export default {
     props: {
       title: 'System properties',
       hint: 'Concurrency, logs, timeout',
-      desc: 'These apply to the whole console. Job concurrency takes effect for queued jobs; retention is the fallback that prunes logs and job rows when a project leaves days empty.',
+      desc: 'These apply to the whole console. Build concurrency only limits the pack queue; FTP/SFTP push uses a matching pool and does not take pack slots. Retention is the fallback that prunes logs and job rows when a project leaves days empty.',
       concurrency: 'Job concurrency',
-      concurrencyHint: 'Jobs that may run at the same time, 1–16, default 6. The same project still runs serially.',
+      concurrencyHint: 'Pack jobs that may run at the same time, 1–16, default 6. FTP/SFTP push uses its own queue. The same project still runs serially.',
       concurrencyUnit: 'jobs',
       retention: 'Job retention',
       retentionHint: 'Used when a project has no retention of its own. A background sweep deletes expired log files and job rows. 0 means do not prune by this setting.',

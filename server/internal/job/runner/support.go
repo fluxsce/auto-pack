@@ -175,3 +175,15 @@ func logLine(w io.Writer, format string, args ...any) {
 	}
 	fmt.Fprintf(w, "[%s] %s\n", clockNow(), fmt.Sprintf(format, args...))
 }
+
+func formatElapsed(since time.Time) string {
+	d := time.Since(since)
+	if d < 0 {
+		d = 0
+	}
+	d = d.Truncate(time.Millisecond)
+	if d >= time.Second {
+		return d.Truncate(10 * time.Millisecond).String()
+	}
+	return d.String()
+}

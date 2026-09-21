@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	stdsync "sync"
 	"time"
 
 	"auto-pack/server/internal/batchrun"
@@ -78,51 +79,82 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 	if ftpOn && !ftpReady {
 		s.appendLog(logPath, stamp()+" 已勾选发版后 FTP 推送，但环境/路径/推送人或工程未填完整，已跳过构建后推送")
 	}
-	for i, prj := range queue {
-		if err := ctx.Err(); err != nil {
-			s.appendLog(logPath, stamp()+" 发版后流程已取消")
-			return
-		}
-		s.coord.SetProgress(job, prj.ProjectName, i)
-		s.appendLog(logPath, stamp()+fmt.Sprintf(" 正在构建（%d/%d）：%s", i+1, len(queue), prj.ProjectName))
-		out := batchrun.RunBuild(ctx, s.jobs, actor, ws.RecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
-			s.appendLog(logPath, stamp()+fmt.Sprintf(" %s · %s", prj.ProjectName, step))
-		}, func(chunk string) {
-			s.appendJobLog(logPath, chunk)
-		})
-		if out.OK {
-			s.appendLog(logPath, stamp()+" 构建成功："+prj.ProjectName)
-		} else {
-			s.appendLog(logPath, stamp()+" 构建失败："+prj.ProjectName+" — "+out.Message)
-			continue
-		}
-		if !ftpReady {
-			continue
-		}
-		if _, ok := releasedSet[prj.RecID]; !ok {
-			continue
-		}
-		if _, ok := pushSet[prj.RecID]; !ok {
-			s.appendLog(logPath, stamp()+" 跳过推送："+prj.ProjectName+"（未选入推送清单）")
-			continue
-		}
+	s.appendLog(logPath, stamp()+" 按 pom / package.json 依赖分层并行，上游成功后才启动下游")
+	var logMu stdsync.Mutex
+	writeLog := func(line string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		s.appendLog(logPath, line)
+	}
+	writeJobLog := func(chunk string) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		s.appendJobLog(logPath, chunk)
+	}
+	doneN := 0
+	outcomes := batchrun.RunGraph(ctx, queue, analysis, func(runCtx context.Context, prj project.Project) batchrun.Outcome {
+		return batchrun.RunBuild(runCtx, s.jobs, actor, ws.RecID, prj.RecID, sync.SyncedReady(prj.ProjectName), func(step string) {
+			writeLog(stamp() + fmt.Sprintf(" %s · %s", prj.ProjectName, step))
+		}, writeJobLog)
+	}, batchrun.GraphHooks{
+		OnParallel: func(started []project.Project) {
+			names := make([]string, 0, len(started))
+			for _, p := range started {
+				names = append(names, p.ProjectName)
+			}
+			writeLog(stamp() + " 并行启动：" + strings.Join(names, "、"))
+		},
+		OnStart: func(prj project.Project) {
+			s.coord.SetProgress(job, prj.ProjectName, doneN)
+			writeLog(stamp() + fmt.Sprintf(" 正在构建：%s", prj.ProjectName))
+		},
+		OnSkip: func(prj project.Project, reason string) {
+			doneN++
+			writeLog(stamp() + fmt.Sprintf(" 跳过构建：%s — %s", prj.ProjectName, reason))
+		},
+		OnFinish: func(prj project.Project, out batchrun.Outcome, took time.Duration) {
+			doneN++
+			if out.OK {
+				writeLog(stamp() + fmt.Sprintf(" 构建成功：%s（%s）", prj.ProjectName, formatElapsedDur(took)))
+				return
+			}
+			writeLog(stamp() + fmt.Sprintf(" 构建失败：%s — %s（%s）", prj.ProjectName, out.Message, formatElapsedDur(took)))
+		},
+		OnCancel: func(prj project.Project, err error) {
+			doneN++
+			writeLog(stamp() + " 发版后流程已取消：" + prj.ProjectName)
+		},
+	})
+	if ftpReady {
 		s.coord.SetPhase(job, "post_push")
-		s.appendLog(logPath, stamp()+" 正在推送："+prj.ProjectName)
-		push := batchrun.RunPush(ctx, s.jobs, actor, ws.RecID, prj.RecID, batchrun.PushSpec{
-			EnvRecID:   opts.FtpEnvRecID,
-			PushPath:   opts.PushPath,
-			BackupPath: opts.BackupPath,
-			Pusher:     opts.Pusher,
-			TaskRef:    opts.TaskRef,
-			Detail:     opts.Detail,
-			Notes:      strings.TrimSpace(strings.TrimSpace(opts.TaskRef) + " | " + strings.TrimSpace(opts.Detail)),
-		}, nil, func(chunk string) {
-			s.appendJobLog(logPath, chunk)
-		})
-		if push.OK {
-			s.appendLog(logPath, stamp()+" 推送成功："+prj.ProjectName)
-		} else {
-			s.appendLog(logPath, stamp()+" 推送失败："+prj.ProjectName+" — "+push.Message)
+		for _, prj := range queue {
+			if outcomes[prj.RecID] != order.OutcomeOK {
+				continue
+			}
+			if _, ok := releasedSet[prj.RecID]; !ok {
+				continue
+			}
+			if _, ok := pushSet[prj.RecID]; !ok {
+				s.appendLog(logPath, stamp()+" 跳过推送："+prj.ProjectName+"（未选入推送清单）")
+				continue
+			}
+			s.appendLog(logPath, stamp()+" 正在推送："+prj.ProjectName)
+			push := batchrun.RunPush(ctx, s.jobs, actor, ws.RecID, prj.RecID, batchrun.PushSpec{
+				EnvRecID:   opts.FtpEnvRecID,
+				PushPath:   opts.PushPath,
+				BackupPath: opts.BackupPath,
+				Pusher:     opts.Pusher,
+				TaskRef:    opts.TaskRef,
+				Detail:     opts.Detail,
+				Notes:      strings.TrimSpace(strings.TrimSpace(opts.TaskRef) + " | " + strings.TrimSpace(opts.Detail)),
+			}, nil, func(chunk string) {
+				s.appendJobLog(logPath, chunk)
+			})
+			if push.OK {
+				s.appendLog(logPath, stamp()+" 推送成功："+prj.ProjectName)
+			} else {
+				s.appendLog(logPath, stamp()+" 推送失败："+prj.ProjectName+" — "+push.Message)
+			}
 		}
 	}
 	s.appendLog(logPath, stamp()+" 自动构建与推送流程结束")
@@ -150,6 +182,16 @@ func (s *Service) appendJobLog(path, chunk string) {
 
 func stamp() string {
 	return "[" + time.Now().Format("2006-01-02 15:04:05") + "]"
+}
+
+func formatElapsedDur(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d >= time.Second {
+		return d.Truncate(time.Second).String()
+	}
+	return d.Truncate(time.Millisecond).String()
 }
 
 func formatReleaseSyncEvent(ev SyncEvent) string {

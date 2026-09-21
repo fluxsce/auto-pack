@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"auto-pack/server/internal/env"
 	"auto-pack/server/internal/host/git"
@@ -27,6 +28,7 @@ import (
 )
 
 // Engine 按系统并发数执行队列中的作业；同一工程仍串行。
+// 打包队列与 FTP/SFTP 推送队列分开，推送不占打包并发。
 type Engine struct {
 	st       *store.Store
 	projects *project.Service
@@ -35,13 +37,15 @@ type Engine struct {
 	wsRoot   string
 	depth    int
 
-	queue    chan string
-	mu       sync.Mutex
-	pruneMu  sync.Mutex
-	locks    map[string]*sync.Mutex
-	stop     context.CancelFunc
-	submit   SubmitFunc
-	settings *settings.Service
+	queue     chan string
+	pushQueue chan string
+	mu        sync.Mutex
+	pruneMu   sync.Mutex
+	locks     map[string]*sync.Mutex
+	runCtx    context.Context
+	stop      context.CancelFunc
+	submit    SubmitFunc
+	settings  *settings.Service
 }
 
 // SubmitFunc enqueues a follow-up job (dependents). Injected after job.Service exists.
@@ -63,14 +67,16 @@ func NewEngine(st *store.Store, projects *project.Service, envs *env.Service, da
 		wsRoot = filepath.Join(dataDir, "workspaces")
 	}
 	return &Engine{
-		st:       st,
-		projects: projects,
-		envs:     envs,
-		dataDir:  dataDir,
-		wsRoot:   wsRoot,
-		depth:    cloneDepth,
-		queue:    make(chan string, 64),
-		locks:    map[string]*sync.Mutex{},
+		st:        st,
+		projects:  projects,
+		envs:      envs,
+		dataDir:   dataDir,
+		wsRoot:    wsRoot,
+		depth:     cloneDepth,
+		queue:     make(chan string, 64),
+		pushQueue: make(chan string, 64),
+		locks:     map[string]*sync.Mutex{},
+		runCtx:    context.Background(),
 	}
 }
 
@@ -84,8 +90,10 @@ func (e *Engine) Start(ctx context.Context) error {
 		return err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
+	e.runCtx = runCtx
 	e.stop = cancel
-	go e.loop(runCtx)
+	go e.loop(runCtx, e.queue, e.jobLimit)
+	go e.loop(runCtx, e.pushQueue, e.jobLimit)
 	go e.pruneLoop(runCtx)
 	for _, id := range ids {
 		e.Enqueue(id)
@@ -100,20 +108,44 @@ func (e *Engine) Stop() {
 	}
 }
 
-// Enqueue puts a job id on the in-process queue.
+// Enqueue puts a job id on the pack or push queue.
 func (e *Engine) Enqueue(id string) {
+	dest := e.queue
+	if e.st != nil && strings.TrimSpace(id) != "" {
+		if j, err := job.JobByID(context.Background(), e.st, id); err == nil {
+			dest = e.destQueue(j.JobType)
+		}
+	}
 	select {
-	case e.queue <- id:
+	case dest <- id:
 	default:
-		go func() { e.queue <- id }()
+		// 不在 worker 里阻塞入队，避免队列满时与 loop 等 done 互相卡住；
+		// 进程退出时丢掉未送出的 id，避免溢出 goroutine 永久阻塞。
+		ctx := e.runCtx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		go func() {
+			select {
+			case dest <- id:
+			case <-ctx.Done():
+			}
+		}()
 	}
 }
 
-func (e *Engine) loop(ctx context.Context) {
+func (e *Engine) destQueue(jobType string) chan string {
+	if job.IsPushJob(jobType) && e.pushQueue != nil {
+		return e.pushQueue
+	}
+	return e.queue
+}
+
+func (e *Engine) loop(ctx context.Context, q <-chan string, limit func() int) {
 	done := make(chan struct{}, settings.MaxJobConcurrency)
 	running := 0
 	for {
-		if running >= e.jobLimit() {
+		if running >= limit() {
 			select {
 			case <-ctx.Done():
 				return
@@ -127,7 +159,7 @@ func (e *Engine) loop(ctx context.Context) {
 			return
 		case <-done:
 			running--
-		case id := <-e.queue:
+		case id := <-q:
 			running++
 			go func(jobID string) {
 				defer func() { done <- struct{}{} }()
@@ -202,16 +234,18 @@ func (e *Engine) runJob(ctx context.Context, id string) {
 		}
 		_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepRunning, "", true, false)
 		logLine(logw, "== %s ==", st.StepName)
+		stepStart := time.Now()
 		if err := e.execStep(ctx, j, st, logw, failErr == nil); err != nil {
 			_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepFailed, err.Error(), false, true)
 			if failErr == nil {
 				_ = job.SetJobStatus(ctx, e.st, id, job.StatusFailed, err.Error(), false, true)
 				failErr = err
 			}
-			logLine(logw, "失败 %s: %v", st.StepName, err)
+			logLine(logw, "失败 %s: %v（%s）", st.StepName, err, formatElapsed(stepStart))
 			continue
 		}
 		_ = job.SetStepStatus(ctx, e.st, st.RecID, job.StepSucceeded, "", false, true)
+		logLine(logw, "%s 耗时 %s", st.StepName, formatElapsed(stepStart))
 	}
 	if failErr != nil {
 		e.notify(ctx, j, false, failErr.Error(), logw)

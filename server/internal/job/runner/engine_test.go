@@ -114,6 +114,19 @@ func TestSkipBuildAsSuccess(t *testing.T) {
 	}
 }
 
+func TestDestQueueSeparatesPush(t *testing.T) {
+	e := NewEngine(nil, nil, nil, t.TempDir(), "", 1)
+	if e.destQueue(job.TypeFTPPush) != e.pushQueue {
+		t.Fatal("ftp_push should use push queue")
+	}
+	if e.destQueue(job.TypeBuild) != e.queue {
+		t.Fatal("build should use pack queue")
+	}
+	if e.destQueue(job.TypeRelease) != e.queue {
+		t.Fatal("release should use pack queue")
+	}
+}
+
 func TestEnvCfgFallsBackToKind(t *testing.T) {
 	e := NewEngine(nil, nil, nil, t.TempDir(), "", 1)
 	if cfg := e.envCfg(context.Background(), "missing", "ws", "jdk"); cfg != nil {
