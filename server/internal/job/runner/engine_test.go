@@ -120,3 +120,12 @@ func TestEnvCfgFallsBackToKind(t *testing.T) {
 		t.Fatal(cfg)
 	}
 }
+
+func TestEnvValuePrefersLast(t *testing.T) {
+	if got := envValue([]string{"JAVA_HOME=/old", "JAVA_HOME=/jdk8"}, "JAVA_HOME"); got != "/jdk8" {
+		t.Fatal(got)
+	}
+	if envValue(nil, "JAVA_HOME") != "" {
+		t.Fatal("empty")
+	}
+}

@@ -23,12 +23,8 @@ func Run(ctx context.Context, dir, command string, env []string, w io.Writer) er
 	if command == "" {
 		return nil
 	}
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.CommandContext(ctx, "cmd", "/c", command)
-	} else {
-		cmd = exec.CommandContext(ctx, "bash", "-lc", command)
-	}
+	name, args := shellArgs(command)
+	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -46,4 +42,12 @@ func discardIfNil(w io.Writer) io.Writer {
 		return io.Discard
 	}
 	return w
+}
+
+// shellArgs 选择非登录壳。Linux 上 bash -l 会再读 /etc/profile，把已注入的 JAVA_HOME 盖成机器默认 JDK。
+func shellArgs(command string) (name string, args []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd", []string{"/c", command}
+	}
+	return "bash", []string{"--noprofile", "--norc", "-c", command}
 }

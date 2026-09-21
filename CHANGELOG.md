@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [2.2.3] - 2026-09-21
+
+### 修复
+
+- Linux 构建改为非登录 bash（`--noprofile --norc -c`），避免 `/etc/profile` 把工程绑定的 `JAVA_HOME` 盖成机器默认 JDK（选了 1.8 仍走 17，`maven-compiler-plugin:3.1` 报 `module jdk.compiler does not opens`）。作业日志会打出实际注入的 `JAVA_HOME`。
+
 ## [2.2.2] - 2026-09-20
 
 ### 变更

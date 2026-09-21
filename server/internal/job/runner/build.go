@@ -30,6 +30,7 @@ func (e *Engine) stepBuild(ctx context.Context, j job.Job, prj project.Project, 
 		dir = filepath.Join(work, recipe.Workdir)
 	}
 	extra := e.procEnv(ctx, j, prj, p, recipe, work, dir)
+	logToolchain(w, extra)
 	if skipBuildAsSuccess(prj.ProjectType, cmd) {
 		logLine(w, "custom 工程未配置构建命令，跳过构建步骤并记为成功")
 		return nil
@@ -47,6 +48,25 @@ func (e *Engine) stepBuild(ctx context.Context, j job.Job, prj project.Project, 
 		}
 		return bash.Run(ctx, dir, cmd, extra, w)
 	}
+}
+
+func logToolchain(w io.Writer, extra []string) {
+	home := envValue(extra, "JAVA_HOME")
+	if home == "" {
+		logLine(w, "未从工程 JDK/Maven 环境注入 JAVA_HOME，将使用进程环境")
+		return
+	}
+	logLine(w, "JAVA_HOME=%s", home)
+}
+
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return env[i][len(prefix):]
+		}
+	}
+	return ""
 }
 
 // skipBuildAsSuccess reports that a custom project with no command should skip compile and still succeed.
