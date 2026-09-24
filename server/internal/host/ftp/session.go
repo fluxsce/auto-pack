@@ -86,16 +86,20 @@ func (s *Session) UploadBytes(remote string, data []byte, w io.Writer) error {
 	return s.upload(remote, bytes.NewReader(data), w)
 }
 
-// Backup 把已有远端文件拷到 dest（RETR + STOR），覆盖前保留一份。
+// Backup 把已有远端文件重命名到 dest。只发 RNFR/RNTO，不传输文件内容。
 func (s *Session) Backup(src, dest string, w io.Writer) error {
-	data, err := s.Download(src)
-	if err != nil {
+	src = posix(src)
+	dest = posix(dest)
+	if err := s.mkdirAll(path.Dir(dest)); err != nil {
 		return err
 	}
 	if w != nil {
-		_, _ = fmt.Fprintf(w, "备份 %s → %s\n", posix(src), posix(dest))
+		_, _ = fmt.Fprintf(w, "备份 %s → %s\n", src, dest)
 	}
-	return s.UploadBytes(dest, data, nil)
+	if err := s.conn.Rename(src, dest); err != nil {
+		return fmt.Errorf("ftp rename %s: %w", src, err)
+	}
+	return nil
 }
 
 func (s *Session) upload(remote string, r io.Reader, w io.Writer) error {

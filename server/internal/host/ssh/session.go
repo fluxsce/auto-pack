@@ -86,16 +86,23 @@ func (s *Session) UploadBytes(remote string, data []byte, w io.Writer) error {
 	return s.upload(remote, bytes.NewReader(data), w)
 }
 
-// Backup 把已有远端文件拷到 dest。
+// Backup 把已有远端文件重命名到 dest，不传输文件内容。
 func (s *Session) Backup(src, dest string, w io.Writer) error {
-	data, err := s.Download(src)
-	if err != nil {
-		return err
+	src = posix(src)
+	dest = posix(dest)
+	dir := path.Dir(dest)
+	if dir != "" && dir != "." && dir != "/" {
+		if err := s.sftp.MkdirAll(dir); err != nil {
+			return fmt.Errorf("sftp mkdir %s: %w", dir, err)
+		}
 	}
 	if w != nil {
-		_, _ = fmt.Fprintf(w, "备份 %s → %s\n", posix(src), posix(dest))
+		_, _ = fmt.Fprintf(w, "备份 %s → %s\n", src, dest)
 	}
-	return s.UploadBytes(dest, data, nil)
+	if err := s.sftp.Rename(src, dest); err != nil {
+		return fmt.Errorf("sftp rename %s: %w", src, err)
+	}
+	return nil
 }
 
 func (s *Session) upload(remote string, r io.Reader, w io.Writer) error {
