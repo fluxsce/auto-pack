@@ -18,6 +18,10 @@ func Run(ctx context.Context, dir, command string, env []string, w io.Writer) er
 	if command == "" {
 		command = defaultBuild(dir)
 	}
+	command, err := ensurePnpm(ctx, command, env, w)
+	if err != nil {
+		return err
+	}
 	return bash.Run(ctx, dir, command, env, w)
 }
 
