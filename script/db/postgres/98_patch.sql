@@ -48,3 +48,22 @@ CREATE TABLE IF NOT EXISTS "AP_WORKSPACE_BUILD" (
 CREATE INDEX IF NOT EXISTS "IDX_AP_WSBLD_WS" ON "AP_WORKSPACE_BUILD" ("workspace_rec_id", "build_num");
 
 UPDATE "AP_ENV" SET "workspace_rec_id" = '' WHERE "workspace_rec_id" <> '';
+
+-- 外部平台打包通知。按 task_id 去重，不参与作业步骤。
+CREATE TABLE IF NOT EXISTS "AP_INTAKE_TASK" (
+  "task_id" VARCHAR(64) NOT NULL,
+  "task_no" VARCHAR(64),
+  "pack_task_id" VARCHAR(128),
+  "subsystem_type" VARCHAR(32),
+  "project_rec_id" VARCHAR(36),
+  "job_rec_id" VARCHAR(36),
+  "task_status" VARCHAR(32) NOT NULL,
+  "result_status" VARCHAR(16),
+  "result_message" VARCHAR(500),
+  "oss_project_root" VARCHAR(1024),
+  "notice_json" TEXT,
+  "finished_at" TIMESTAMP,
+  "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT PK_AP_INTAKE PRIMARY KEY ("task_id")
+);

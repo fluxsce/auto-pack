@@ -63,7 +63,7 @@ function applyDocumentLocale(next: AppLocale): void {
   document.documentElement.lang = next
 }
 
-/** 立刻写到 html，登录页 / 工作台 / niuma-ui 共用同一套 data-rs-theme。 */
+/** 立刻写到 html，登录页 / 工作台 / ensis-ui 共用同一套 data-rs-theme。 */
 export function applyThemeToDom(mode: ThemeMode = themeMode.value): RsThemeMode {
   const resolved = resolveTheme(mode)
   if (typeof document === 'undefined') {

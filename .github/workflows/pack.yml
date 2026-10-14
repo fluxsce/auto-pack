@@ -1,7 +1,7 @@
 # auto-pack 发行打包。只在版本发布时跑，不跟每次提交。
 # 触发：推送 v* 标签，或手动 Run workflow。
 # 私人仓库只留最近一次构建 Artifact（保留 1 天，成功后删掉旧包）。
-# niuma-ui 从 npm 拉取，不 checkout 兄弟仓。
+# ensis-ui 从 npm 拉取，不 checkout 兄弟仓。
 name: Pack
 
 on:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       niuma_ui_version:
-        description: npm 上的 niuma-ui 版本（如 latest 或 1.3.1）
+        description: npm 上的 ensis-ui 版本（如 latest 或 1.3.1）
         type: string
         default: 'latest'
 
@@ -88,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           UI="${{ steps.meta.outputs.niuma_ui_version }}"
-          pnpm pkg set "dependencies.@niuma/ui=npm:niuma-ui@${UI}"
+          pnpm pkg set "dependencies.@niuma/ui=npm:ensis-ui@${UI}"
           pnpm install --no-frozen-lockfile
 
       - name: Verify tag matches package.json

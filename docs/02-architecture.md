@@ -3,7 +3,7 @@
 控制台 SemVer 与产品 Tag（`V9.0.0-P01`）分轨。试用版见 `legacy/` 与 tag `v1.0.0`。
 
 ```text
-L5  src/                    niuma-ui 作业台
+L5  src/                    ensis-ui 作业台
 L4  server/internal/web     HTTP：按功能模块挂路由
     iam                     ①身份 ③成员 ⑤动作
 L3  job / workspace / project / env / settings / user / audit / token / release

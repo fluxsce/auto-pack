@@ -87,6 +87,17 @@ var Catalog = []KindSpec{
 		},
 	},
 	{
+		Kind: "oss", Category: CategoryRemote,
+		Fields: []FieldSpec{
+			{Key: "endpoint", Type: FieldText, Required: true},
+			{Key: "bucket", Type: FieldText, Required: true},
+			{Key: "access_key_id", Type: FieldText, Required: true},
+			{Key: "access_key_secret", Type: FieldPassword, Secret: true, Required: true},
+			{Key: "security_token", Type: FieldPassword, Secret: true},
+			{Key: "expire_hours", Type: FieldNumber, Default: 24},
+		},
+	},
+	{
 		Kind: "ftp", Category: CategoryRemote,
 		Fields: []FieldSpec{
 			{Key: "host", Type: FieldText, Required: true},
@@ -140,6 +151,19 @@ var Catalog = []KindSpec{
 		Fields: []FieldSpec{
 			{Key: "java_home", Type: FieldText},
 			{Key: "java_path", Type: FieldText},
+		},
+	},
+	{
+		Kind: "mq", Category: CategoryRemote,
+		Fields: []FieldSpec{
+			{Key: "project_id", Type: FieldText, Required: true},
+			{Key: "name_server", Type: FieldText, Required: true},
+			{Key: "notice_topic", Type: FieldText, Required: true},
+			{Key: "receipt_topic", Type: FieldText, Required: true},
+			{Key: "group", Type: FieldText, Default: "auto-pack-intake"},
+			{Key: "access_key", Type: FieldPassword, Secret: true},
+			{Key: "secret_key", Type: FieldPassword, Secret: true},
+			{Key: "receipt_retries", Type: FieldNumber, Default: 3},
 		},
 	},
 	{

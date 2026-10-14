@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
-import { niumaUiHost } from '@niuma/ui/vite-plugins/niuma-ui-host'
+import { ensisUiHost } from '@niuma/ui/vite-plugins/ensis-ui-host'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 
@@ -52,14 +52,14 @@ function redirectToWebBase(): Plugin {
 
 export default defineConfig({
   base: WEB_BASE,
-  plugins: [redirectToWebBase(), vue(), tailwindcss(), ...niumaUiHost()],
+  plugins: [redirectToWebBase(), vue(), tailwindcss(), ...ensisUiHost()],
   resolve: {
     alias: [{ find: '@', replacement: resolve(root, 'src') }, ...dayjsEsmAliases()],
   },
-  // 发布包 niuma-ui 没有 src 时，niumaUiHost 不会排除整桶。
+  // 发布包 ensis-ui 没有 src 时，ensisUiHost 不会排除整桶。
   // esbuild optimizeDeps 会扫到 dist/monaco/setup.js 的 `?worker`（Vite 查询串），直接失败。
   optimizeDeps: {
-    exclude: ['@niuma/ui', 'niuma-ui', 'monaco-editor'],
+    exclude: ['@niuma/ui', 'ensis-ui', 'monaco-editor'],
   },
   server: {
     port: 5173,

@@ -22,7 +22,7 @@ pnpm build
 ## 全局构建
 
 在仓库根执行。产物只进 `build/dist/`（已 gitignore），不覆盖本机 `server/configs/app.yaml`。
-干净 clone 没有 `node_modules` 时，脚本会先 `pnpm install`。`@niuma/ui` 从 npm 装 `niuma-ui`，不需要旁路仓库。
+干净 clone 没有 `node_modules` 时，脚本会先 `pnpm install`。`@niuma/ui` 从 npm 装 `ensis-ui`，不需要旁路仓库。
 
 ```powershell
 # Windows 本机包（默认 windows/amd64）

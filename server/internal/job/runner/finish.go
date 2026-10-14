@@ -81,7 +81,24 @@ func (e *Engine) notify(ctx context.Context, j job.Job, ok bool, errMsg string, 
 			prj = p
 		}
 	}
+	if ok && job.DecodePayload(j.PayloadJSON).HoldMail {
+		logLine(w, "邮件通知：待安装包上传后发送")
+		return
+	}
 	e.notifyWithProject(ctx, j, prj, ok, errMsg, w)
+}
+
+// NotifyJob 再发一次作业邮件。调用方先把下载链接写进作业参数。
+func (e *Engine) NotifyJob(ctx context.Context, id string, ok bool, errMsg string) error {
+	if e.st == nil || strings.TrimSpace(id) == "" {
+		return fmt.Errorf("job mail is not available")
+	}
+	j, err := job.JobByID(ctx, e.st, id)
+	if err != nil {
+		return err
+	}
+	e.notify(ctx, j, ok, errMsg, io.Discard)
+	return nil
 }
 
 func (e *Engine) notifyWithProject(ctx context.Context, j job.Job, prj project.Project, ok bool, errMsg string, w io.Writer) {
@@ -135,9 +152,7 @@ func (e *Engine) sendActionMail(ctx context.Context, j job.Job, prj project.Proj
 		return fmt.Errorf("smtp env not found")
 	}
 	sc := hostsmtp.MapConfig(cfg)
-	if to := strings.TrimSpace(act.To); to != "" {
-		sc.To = to
-	}
+	sc.To = notifyMailTo(job.DecodePayload(j.PayloadJSON), act.To, sc.To)
 	if len(sc.Recipients()) == 0 {
 		logLine(w, "邮件通知：跳过（未配置收件人）")
 		return nil
@@ -165,7 +180,7 @@ func (e *Engine) sendWorkspaceMail(ctx context.Context, j job.Job, prj project.P
 		return
 	}
 	sc := hostsmtp.MapConfig(cfg)
-	if len(sc.Recipients()) == 0 {
+	if len(sc.Recipients()) == 0 && strings.TrimSpace(job.DecodePayload(j.PayloadJSON).MailTo) == "" {
 		logLine(w, "邮件通知：跳过（未配置收件人）")
 		return
 	}
@@ -174,6 +189,17 @@ func (e *Engine) sendWorkspaceMail(ctx context.Context, j job.Job, prj project.P
 	if err := e.sendActionMail(ctx, j, prj, act, ok, errMsg, w); err != nil {
 		logLine(w, "邮件通知：失败 %v", err)
 	}
+}
+
+// notifyMailTo 优先用本次作业上的收件人，否则用后置动作，再否则用 SMTP 配置。
+func notifyMailTo(p job.Payload, actTo, smtpTo string) string {
+	if to := strings.TrimSpace(p.MailTo); to != "" {
+		return to
+	}
+	if to := strings.TrimSpace(actTo); to != "" {
+		return to
+	}
+	return strings.TrimSpace(smtpTo)
 }
 
 func (e *Engine) workspaceTitle(ctx context.Context, id string) string {
@@ -197,6 +223,9 @@ func composeNotifyMail(j job.Job, prj project.Project, workspaceName string, act
 		statusLabel = "失败"
 	}
 	payload := job.DecodePayload(j.PayloadJSON)
+	if strings.TrimSpace(payload.TaskRef) != "" {
+		return composePackMail(prj, payload, ok, errMsg)
+	}
 	name := strings.TrimSpace(prj.ProjectName)
 	if name == "" {
 		name = "-"
@@ -229,6 +258,48 @@ func composeNotifyMail(j job.Job, prj project.Project, workspaceName string, act
 		writeMailField(&body, "错误信息", errMsg)
 	}
 	return subject, body.String()
+}
+
+func composePackMail(prj project.Project, payload job.Payload, ok bool, errMsg string) (string, string) {
+	name := strings.TrimSpace(prj.ProjectName)
+	if name == "" {
+		name = "-"
+	}
+	branch := strings.TrimSpace(payload.Branch)
+	label := "打包失败"
+	if ok {
+		label = "打包已完成"
+	}
+	parts := []string{"[auto-pack]", name}
+	if branch != "" {
+		parts = append(parts, branch)
+	}
+	parts = append(parts, label)
+	result := strings.TrimSpace(payload.MailNote)
+	if result == "" {
+		if ok {
+			result = "已成功"
+		} else {
+			result = firstNonEmpty(errMsg, "失败")
+		}
+	}
+	var body strings.Builder
+	writeMailField(&body, "任务号", dash(payload.TaskNo))
+	writeMailField(&body, "任务标识", dash(payload.TaskRef))
+	writeMailField(&body, "客户代码", dash(payload.CustomerCode))
+	writeMailField(&body, "版本", dash(payload.Version))
+	writeMailField(&body, "分支", dash(firstNonEmpty(branch, prj.RepoBranch)))
+	writeMailField(&body, "工程", name)
+	writeMailField(&body, "结果", result)
+	writeMailField(&body, "项目路径", dash(payload.RemotePath))
+	if url := strings.TrimSpace(payload.DownloadURL); url != "" {
+		writeMailField(&body, "下载链接", url)
+		writeMailField(&body, "有效期至", dash(payload.DownloadUntil))
+	}
+	if !ok && errMsg != "" && errMsg != result {
+		writeMailField(&body, "错误信息", errMsg)
+	}
+	return strings.Join(parts, " "), body.String()
 }
 
 func writeMailField(b *strings.Builder, label, value string) {

@@ -141,6 +141,19 @@ type Payload struct {
 	SkipSync bool `json:"skip_sync,omitempty"`
 	// Origin 标记作业来源，供工程构建历史区分手动构建与自动构建/发版后构建。
 	Origin string `json:"origin,omitempty"`
+	// MailTo 覆盖本次作业结束邮件的收件人。空则仍用工程或空间里配置的收件人。
+	MailTo string `json:"mail_to,omitempty"`
+	// HoldMail 为真时，作业成功先不发信，等安装包上传后再发。
+	HoldMail bool `json:"hold_mail,omitempty"`
+	// MailNote 是打包结果说明，外部打包邮件优先使用。
+	MailNote string `json:"mail_note,omitempty"`
+	// DownloadURL 是安装包的临时访问链接。
+	DownloadURL string `json:"download_url,omitempty"`
+	// DownloadUntil 是临时链接的失效时间，东八区。
+	DownloadUntil string `json:"download_until,omitempty"`
+	TaskNo        string `json:"task_no,omitempty"`
+	CustomerCode  string `json:"customer_code,omitempty"`
+	Version       string `json:"version,omitempty"`
 }
 
 // MergeSource 是跨工程合并进同一压缩包的路径，须与当前作业同属一个工作空间。

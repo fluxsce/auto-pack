@@ -117,6 +117,32 @@ export const FALLBACK_KINDS: EnvKindSpec[] = [
     ],
   },
   {
+    kind: 'oss',
+    category: 'remote',
+    fields: [
+      { key: 'endpoint', type: 'text', required: true },
+      { key: 'bucket', type: 'text', required: true },
+      { key: 'access_key_id', type: 'text', required: true },
+      { key: 'access_key_secret', type: 'password', secret: true, required: true },
+      { key: 'security_token', type: 'password', secret: true },
+      { key: 'expire_hours', type: 'number', default: 24 },
+    ],
+  },
+  {
+    kind: 'mq',
+    category: 'remote',
+    fields: [
+      { key: 'project_id', type: 'text', required: true },
+      { key: 'name_server', type: 'text', required: true },
+      { key: 'notice_topic', type: 'text', required: true },
+      { key: 'receipt_topic', type: 'text', required: true },
+      { key: 'group', type: 'text', default: 'auto-pack-intake' },
+      { key: 'access_key', type: 'password', secret: true },
+      { key: 'secret_key', type: 'password', secret: true },
+      { key: 'receipt_retries', type: 'number', default: 3 },
+    ],
+  },
+  {
     kind: 'smtp',
     category: 'notification',
     fields: [

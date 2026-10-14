@@ -17,6 +17,7 @@ import (
 	"auto-pack/server/internal/crypt"
 	"auto-pack/server/internal/env"
 	"auto-pack/server/internal/iam"
+	"auto-pack/server/internal/intake"
 	"auto-pack/server/internal/job"
 	"auto-pack/server/internal/job/runner"
 	"auto-pack/server/internal/migrate"
@@ -91,6 +92,28 @@ func main() {
 	if err := eng.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
+	var intakeSvc *intake.Service
+	if in := intake.Load(ctx, envs); in.Enabled {
+		intakeSvc = intake.New(intake.Options{
+			Store:         st,
+			Projects:      projects,
+			Envs:          envs,
+			Jobs:          jobs,
+			Bindings:      map[string]string{"DATAHUB": in.ProjectID},
+			WorkspaceRoot: cfg.WorkspaceRoot,
+			Retries:       in.Retries,
+			Mailer:        eng,
+		})
+		q, err := intake.OpenRocket(in.Rocket)
+		if err != nil {
+			log.Fatal(err)
+		}
+		intakeSvc.UseRocket(q)
+		if err := intakeSvc.Start(ctx); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("intake queue notice=%s receipt=%s project=%s", in.Rocket.NoticeTopic, in.Rocket.ReceiptTopic, in.ProjectID)
+	}
 	sched := job.NewScheduler(jobs, projects)
 	if err := sched.Start(ctx); err != nil {
 		log.Fatal(err)
@@ -124,6 +147,9 @@ func main() {
 	stop, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	sched.Stop()
+	if intakeSvc != nil {
+		intakeSvc.Stop()
+	}
 	eng.Stop()
 	_ = srv.Shutdown(stop)
 }

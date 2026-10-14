@@ -60,6 +60,55 @@ func TestSendActionMailRequiresSMTPEnv(t *testing.T) {
 	}
 }
 
+func TestNotifyMailToPrefersPayload(t *testing.T) {
+	got := notifyMailTo(job.Payload{MailTo: "a@b.c,c@d.e"}, "ops@x.com", "smtp@x.com")
+	if got != "a@b.c,c@d.e" {
+		t.Fatal(got)
+	}
+	if notifyMailTo(job.Payload{}, "ops@x.com", "smtp@x.com") != "ops@x.com" {
+		t.Fatal("action")
+	}
+	if notifyMailTo(job.Payload{}, "", "smtp@x.com") != "smtp@x.com" {
+		t.Fatal("smtp")
+	}
+}
+
+func TestNotifyHoldsPackMailUntilUpload(t *testing.T) {
+	var buf bytes.Buffer
+	e := &Engine{}
+	e.notify(context.Background(), job.Job{JobType: job.TypeBuild, PayloadJSON: `{"hold_mail":true,"task_ref":"T1"}`}, true, "", &buf)
+	if !strings.Contains(buf.String(), "待安装包上传后发送") || strings.Contains(buf.String(), "未配置 SMTP") {
+		t.Fatalf("%s", buf.String())
+	}
+}
+
+func TestComposePackMailIncludesDownloadLink(t *testing.T) {
+	prj := project.Project{ProjectName: "datahub", RepoBranch: "main"}
+	payload := job.Payload{
+		TaskRef:       "TSK-1",
+		TaskNo:        "1",
+		CustomerCode:  "C01",
+		Version:       "1.2.3",
+		Branch:        "release/customer",
+		RemotePath:    "/开发/S01/app.war",
+		MailNote:      "自动打包完成，war 已推送到项目路径",
+		DownloadURL:   "https://pack.example/autopack/api/pack/abc",
+		DownloadUntil: "2026-10-15 14:00:00",
+	}
+	subject, body := composePackMail(prj, payload, true, "")
+	if !strings.Contains(subject, "datahub") || !strings.Contains(subject, "打包已完成") {
+		t.Fatal(subject)
+	}
+	for _, want := range []string{"任务号：1", "客户代码：C01", "版本：1.2.3", "项目路径：/开发/S01/app.war", "下载链接：https://pack.example/autopack/api/pack/abc", "有效期至：2026-10-15 14:00:00"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "仓库：") || strings.Contains(body, "作业编号：") {
+		t.Fatalf("%s", body)
+	}
+}
+
 func TestComposeNotifyMailIncludesKeyFields(t *testing.T) {
 	j := job.Job{
 		RecID:          "job-1",

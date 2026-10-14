@@ -57,7 +57,7 @@ const selectedKeys = ref<string[]>([])
 const pushOpen = ref(false)
 const query = ref('')
 
-/** 列宽合计 + 选择列 40px；与 scroll-x 配合使 fixed 左/右列 sticky（见 niuma-ui playground TablePage）。 */
+/** 列宽合计 + 选择列 40px；与 scroll-x 配合使 fixed 左/右列 sticky（见 ensis-ui playground TablePage）。 */
 const TABLE_SCROLL_X = 786
 
 const rows = computed(() => tree.value?.entries ?? [])
