@@ -11,7 +11,7 @@
 | 控制台 SemVer | `v2.0.0` | 本仓库；见 [CHANGELOG.md](CHANGELOG.md) |
 | 产品发版 Tag | `V9.0.0-P01` | 被打包工程，只出现在作业参数里 |
 
-发版只改根目录 `package.json` 的 `version` 和 [CHANGELOG.md](CHANGELOG.md)。`pnpm dev` / 打包会跑 `node script/sync-version.mjs`，把号写入 `server/internal/config.AppVersion`；发行包还会用 `-ldflags` 再注入一次。
+发版只改根目录 `package.json` 的 `version` 和 [CHANGELOG.md](CHANGELOG.md)（写在 `## [Unreleased]`，或直接写 `## [x.y.z]` 章节）。推到 `master` 后，若该版本相对已有 `v*` tag 尚未发布且 changelog 有说明，Actions 会自动打包、打 `v*` tag 并发 GitHub Release。`pnpm dev` / 打包会跑 `node script/sync-version.mjs`，把号写入 `server/internal/config.AppVersion`；发行包还会用 `-ldflags` 再注入一次。
 
 ## 目录
 
@@ -77,7 +77,15 @@ pnpm package:linux
 
 到发行目录后：`start.bat` / `./start.sh`。浏览器 http://127.0.0.1:8080/autopack/
 
-GitHub Actions（[`.github/workflows/pack.yml`](.github/workflows/pack.yml)）只在版本发布时打包，不跟每次提交。推送 `v*` 标签（须与 `package.json` 版本一致）会打 Linux / Windows amd64 包并上传 Release；也可在 Actions 里手动 Run。私人仓库只留最近一次构建 Artifact。
+GitHub Actions（[`.github/workflows/pack.yml`](.github/workflows/pack.yml)）在发版时打包，不跟每次无关提交：
+
+| 触发 | 行为 |
+|------|------|
+| 推 `master` | `package.json` 版本未打过 `v*` tag，且 CHANGELOG 的 Unreleased 或同号章节有说明 → 自动打 Linux / Windows amd64 包、写回 changelog 日期、打 tag、发 Release |
+| 推 `v*` 标签 | 须与 `package.json` 一致；已有 Release 资产则跳过，否则打包并发 Release |
+| Actions 手动 Run | 只打 Artifact，不发版 |
+
+私人仓库只留最近一次构建 Artifact。
 
 ## 权限（2.0）
 

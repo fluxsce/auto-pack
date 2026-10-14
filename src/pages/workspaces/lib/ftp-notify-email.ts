@@ -1,6 +1,8 @@
-/** FTP 推送成功后的运维告知邮件（对齐 1.0 DATAHUB 模板）。 */
+/** 运维告知邮件。推送后告知仍由前端拼装原文发送；project_update 仅给环境页人为改动通知。 */
 
 import { normalizeRemoteDir, resolvePushLayout } from './workspace-ftp'
+
+export type NotifyMailTemplate = 'ftp_update' | 'project_update'
 
 export type FtpNotifyEmailFields = {
   projectLabel: string
@@ -20,7 +22,36 @@ export type FtpNotifyEmailFields = {
 
 export const FTP_NOTIFY_UPDATE_METHOD = '整包更新'
 export const FTP_NOTIFY_FROM_NAME = 'DATAHUB 更新通知'
+export const PROJECT_UPDATE_FROM_NAME = '项目更新通知'
 export const FTP_NOTIFY_SCOPE_OPTIONS = ['DATAHUB共享lib', 'DATAHUB界面', 'DATAHUB服务'] as const
+
+const TEMPLATE_META: Record<NotifyMailTemplate, { status: string; brand: string; fromName: string }> = {
+  ftp_update: { status: 'FTP已更新', brand: 'DATAHUB 更新通知', fromName: FTP_NOTIFY_FROM_NAME },
+  project_update: { status: '项目已更新', brand: '项目更新通知', fromName: PROJECT_UPDATE_FROM_NAME },
+}
+
+export function notifyTemplateMeta(template: NotifyMailTemplate = 'ftp_update') {
+  return TEMPLATE_META[template] ?? TEMPLATE_META.ftp_update
+}
+
+/** JSON fields for POST /envs/{id}/mail template send. */
+export function toUpdateMailFieldsPayload(fields: FtpNotifyEmailFields) {
+  return {
+    project_label: fields.projectLabel,
+    update_content: fields.updateContent,
+    task_no: fields.taskNo,
+    ftp_version_source: fields.ftpVersionSource,
+    update_method: fields.updateMethod,
+    need_restart: fields.needRestart,
+    browser_cache_refresh: fields.browserCacheRefresh,
+    impact_scope: fields.impactScope,
+    update_scope: fields.updateScope,
+    affects_api: fields.affectsApi,
+    war_package: fields.warPackage,
+    other: fields.other,
+    backup: fields.backup,
+  }
+}
 
 const GENERIC_WORKSPACE_CODES = new Set(['default', 'defaults', 'workspace', 'ws'])
 
@@ -154,18 +185,28 @@ function renderRows(rows: Array<[string, string]>): string {
     .join('')
 }
 
-export function buildFtpNotifyEmailBody(fields: FtpNotifyEmailFields, at = new Date()): string {
+export function buildFtpNotifyEmailBody(
+  fields: FtpNotifyEmailFields,
+  at = new Date(),
+  template: NotifyMailTemplate = 'ftp_update',
+): string {
   const summary = buildFtpNotifySummary(fields)
+  const { status } = notifyTemplateMeta(template)
   const lines = [
-    `${dayGreeting(at)}。${summary}${summary ? ', ' : ''}FTP已更新`,
+    `${dayGreeting(at)}。${summary}${summary ? ', ' : ''}${status}`,
     ...notifyRows(fields, summary).map(([k, v]) => `${k}：${v}`),
   ]
   return lines.join('\n')
 }
 
-export function buildFtpNotifyEmailHTML(fields: FtpNotifyEmailFields, at = new Date()): string {
+export function buildFtpNotifyEmailHTML(
+  fields: FtpNotifyEmailFields,
+  at = new Date(),
+  template: NotifyMailTemplate = 'ftp_update',
+): string {
   const summary = buildFtpNotifySummary(fields)
-  const greeting = `${dayGreeting(at)}。${summary}${summary ? ', ' : ''}FTP已更新`
+  const { status, brand } = notifyTemplateMeta(template)
+  const greeting = `${dayGreeting(at)}。${summary}${summary ? ', ' : ''}${status}`
   const rowsHtml = renderRows(notifyRows(fields, summary))
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -177,7 +218,7 @@ export function buildFtpNotifyEmailHTML(fields: FtpNotifyEmailFields, at = new D
         <table role="presentation" cellpadding="0" cellspacing="0" width="640" style="max-width:640px;width:100%;background:#ffffff;border:1px solid #d9e2ec;border-radius:10px;overflow:hidden;">
           <tr>
             <td style="padding:18px 22px;background:#0f4c81;color:#ffffff;">
-              <div style="font-size:12px;letter-spacing:0.04em;opacity:0.85;margin-bottom:6px;">DATAHUB 更新通知</div>
+              <div style="font-size:12px;letter-spacing:0.04em;opacity:0.85;margin-bottom:6px;">${escapeHtml(brand)}</div>
               <div style="font-size:18px;font-weight:600;line-height:1.4;">${escapeHtml(greeting)}</div>
             </td>
           </tr>
@@ -201,9 +242,13 @@ export function buildFtpNotifyEmailHTML(fields: FtpNotifyEmailFields, at = new D
 </html>`
 }
 
-export function buildFtpNotifyEmailSubject(fields: Pick<FtpNotifyEmailFields, 'projectLabel' | 'updateContent'>): string {
+export function buildFtpNotifyEmailSubject(
+  fields: Pick<FtpNotifyEmailFields, 'projectLabel' | 'updateContent'>,
+  template: NotifyMailTemplate = 'ftp_update',
+): string {
   const summary = buildFtpNotifySummary(fields)
-  return summary ? `${summary}, FTP已更新` : 'FTP已更新'
+  const { status } = notifyTemplateMeta(template)
+  return summary ? `${summary}, ${status}` : status
 }
 
 export function warPackageDisplayName(fileName: string): string {

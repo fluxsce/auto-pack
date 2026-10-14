@@ -15,10 +15,13 @@ export function getWorkspaceEnv(id: string): Promise<EnvRow> {
 
 export type EnvMailPayload = {
   recipients: string
-  subject: string
-  body: string
+  subject?: string
+  body?: string
   html?: string
   from_name?: string
+  /** Built-in template: ftp_update | project_update */
+  template?: string
+  fields?: Record<string, string>
 }
 
 export function sendEnvMail(id: string, payload: EnvMailPayload): Promise<void> {

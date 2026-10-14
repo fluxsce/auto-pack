@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import {
@@ -16,6 +16,11 @@ import {
 } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
+import MailPanel from '@/pages/workspaces/components/remote/MailPanel.vue'
+import {
+  FTP_NOTIFY_UPDATE_METHOD,
+  type FtpNotifyEmailFields,
+} from '@/pages/workspaces/lib/ftp-notify-email'
 import EnvEditor from './EnvEditor.vue'
 import {
   FALLBACK_KINDS,
@@ -42,6 +47,9 @@ const probeResult = ref<{ ok: boolean; message: string } | null>(null)
 const listTestOpen = ref(false)
 const listTestTo = ref('')
 const listTestRow = ref<EnvRow | null>(null)
+const projectMailOpen = ref(false)
+const projectMailInitial = ref<FtpNotifyEmailFields | null>(null)
+const projectMailSmtpOptions = ref<{ value: string; label: string }[]>([])
 const recId = ref('')
 const envKind = ref('ftp')
 const envName = ref('')
@@ -68,7 +76,7 @@ const columns = computed<RsTableColumn<EnvRow>[]>(() => [
   { key: 'env_kind', title: t('envs.kind'), width: 120 },
   { key: 'config_hint', title: t('envs.hintCol'), minWidth: 220 },
   { key: 'is_enabled', title: t('envs.enabled'), width: 96, align: 'center' },
-  { key: 'actions', title: t('common.actions'), width: 220, align: 'right' },
+  { key: 'actions', title: t('common.actions'), width: 300, align: 'right' },
 ])
 
 const emptyTitle = computed(() => (activeKind.value === 'all' ? t('envs.empty') : t('envs.emptyKind')))
@@ -219,6 +227,29 @@ async function confirmListTest(): Promise<void> {
   await probeRow(row, to)
 }
 
+/** 人为改动通知：仅 SMTP 环境可用，走 project_update 模板。 */
+async function openProjectUpdateMail(row: EnvRow): Promise<void> {
+  if (canonicalKind(row.env_kind) !== 'smtp' || row.is_enabled === 0) return
+  projectMailSmtpOptions.value = [{ value: row.rec_id, label: row.env_name }]
+  projectMailInitial.value = {
+    projectLabel: '',
+    updateContent: '',
+    taskNo: '',
+    ftpVersionSource: '',
+    updateMethod: FTP_NOTIFY_UPDATE_METHOD,
+    needRestart: '是',
+    browserCacheRefresh: '是',
+    impactScope: '全局',
+    updateScope: 'DATAHUB界面',
+    affectsApi: '是',
+    warPackage: '',
+    other: '',
+    backup: '',
+  }
+  await nextTick()
+  projectMailOpen.value = true
+}
+
 async function probeRow(row: EnvRow, testTo = ''): Promise<void> {
   verifyingId.value = row.rec_id
   try {
@@ -346,6 +377,15 @@ async function remove(row: EnvRow): Promise<void> {
               <RsButton size="sm" variant="text" tone="success" :disabled="verifyingId === row.rec_id" @click="startProbeRow(row)">
                 {{ t('envs.verify') }}
               </RsButton>
+              <RsButton
+                v-if="canonicalKind(row.env_kind) === 'smtp' && row.is_enabled !== 0"
+                size="sm"
+                variant="text"
+                tone="primary"
+                @click="openProjectUpdateMail(row)"
+              >
+                {{ t('envs.projectUpdateMail') }}
+              </RsButton>
               <RsButton size="sm" variant="text" tone="danger" @click="remove(row)">{{ t('common.delete') }}</RsButton>
             </div>
           </template>
@@ -368,6 +408,13 @@ async function remove(row: EnvRow): Promise<void> {
         <RsButton @click="confirmListTest">{{ t('envs.verify') }}</RsButton>
       </template>
     </RsDialog>
+
+    <MailPanel
+      v-model:open="projectMailOpen"
+      template="project_update"
+      :initial="projectMailInitial"
+      :smtp-options="projectMailSmtpOptions"
+    />
   </div>
 </template>
 

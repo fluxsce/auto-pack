@@ -104,7 +104,7 @@ func (c *Controller) SendMail(w http.ResponseWriter, r *http.Request) {
 	if httpx.WriteIAM(w, err) {
 		return
 	}
-	if errors.Is(err, env.ErrMailSMTP) || errors.Is(err, env.ErrMailDisabled) || errors.Is(err, env.ErrMailRecipients) || errors.Is(err, env.ErrMailSubject) || errors.Is(err, env.ErrMailBody) {
+	if errors.Is(err, env.ErrMailSMTP) || errors.Is(err, env.ErrMailDisabled) || errors.Is(err, env.ErrMailRecipients) || errors.Is(err, env.ErrMailSubject) || errors.Is(err, env.ErrMailBody) || errors.Is(err, env.ErrMailTemplate) {
 		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}

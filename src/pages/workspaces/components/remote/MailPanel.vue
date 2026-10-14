@@ -11,14 +11,22 @@ import {
   FTP_NOTIFY_SCOPE_OPTIONS,
   FTP_NOTIFY_UPDATE_METHOD,
   normalizeNotifyRecipients,
+  notifyTemplateMeta,
   smtpFromNameFromConfig,
+  toUpdateMailFieldsPayload,
   type FtpNotifyEmailFields,
+  type NotifyMailTemplate,
 } from '../../lib/ftp-notify-email'
 
 const open = defineModel<boolean>('open', { default: false })
 const props = defineProps<{
   initial: FtpNotifyEmailFields | null
   smtpOptions: { value: string; label: string }[]
+  /**
+   * 仅人为改动通知传 project_update（走服务端模板）。
+   * 推送后「发送告知」不传，保持原来的客户端拼装 + 原文发送。
+   */
+  template?: NotifyMailTemplate
 }>()
 
 const { t } = useI18n()
@@ -31,6 +39,14 @@ const subject = ref('')
 const saving = ref(false)
 const fields = ref<FtpNotifyEmailFields>(emptyFields())
 
+const isProjectUpdate = computed(() => props.template === 'project_update')
+const defaultFromName = computed(() =>
+  isProjectUpdate.value ? notifyTemplateMeta('project_update').fromName : FTP_NOTIFY_FROM_NAME,
+)
+const dialogTitle = computed(() =>
+  isProjectUpdate.value ? t('workspaces.remote.notify.projectTitle') : t('workspaces.remote.notify.title'),
+)
+
 const yesNo = [
   { value: '是', label: t('workspaces.remote.notify.yes') },
   { value: '否', label: t('workspaces.remote.notify.no') },
@@ -40,8 +56,16 @@ const yesSkip = [
   { value: '不', label: t('workspaces.remote.notify.skip') },
 ]
 const scopeOptions = FTP_NOTIFY_SCOPE_OPTIONS.map((value) => ({ value, label: value }))
-const htmlBody = computed(() => buildFtpNotifyEmailHTML(fields.value))
-const textBody = computed(() => buildFtpNotifyEmailBody(fields.value))
+const htmlBody = computed(() =>
+  isProjectUpdate.value
+    ? buildFtpNotifyEmailHTML(fields.value, new Date(), 'project_update')
+    : buildFtpNotifyEmailHTML(fields.value),
+)
+const textBody = computed(() =>
+  isProjectUpdate.value
+    ? buildFtpNotifyEmailBody(fields.value, new Date(), 'project_update')
+    : buildFtpNotifyEmailBody(fields.value),
+)
 const canSubmit = computed(() => Boolean(smtpEnvRecId.value && recipients.value.trim() && subject.value.trim() && !saving.value))
 
 function emptyFields(): FtpNotifyEmailFields {
@@ -76,9 +100,11 @@ function applyInitial(): void {
     affectsApi: init?.affectsApi || '是',
   }
   smtpEnvRecId.value = props.smtpOptions[0]?.value || ''
-  fromName.value = FTP_NOTIFY_FROM_NAME
+  fromName.value = defaultFromName.value
   recipients.value = ''
-  subject.value = buildFtpNotifyEmailSubject(fields.value)
+  subject.value = isProjectUpdate.value
+    ? buildFtpNotifyEmailSubject(fields.value, 'project_update')
+    : buildFtpNotifyEmailSubject(fields.value)
   if (smtpEnvRecId.value) void loadSmtpDefaults(smtpEnvRecId.value)
 }
 
@@ -87,7 +113,7 @@ async function loadSmtpDefaults(id: string): Promise<void> {
     const row = await getWorkspaceEnv(id)
     if (!fromNameManual.value) {
       const name = smtpFromNameFromConfig(row.config)
-      fromName.value = !name || name === 'Auto Pack' ? FTP_NOTIFY_FROM_NAME : name
+      fromName.value = !name || name === 'Auto Pack' ? defaultFromName.value : name
     }
     const to = String(row.config?.to ?? '').trim()
     if (to && !recipients.value.trim()) recipients.value = to
@@ -103,7 +129,9 @@ watch(open, (visible) => {
 watch(
   fields,
   () => {
-    subject.value = buildFtpNotifyEmailSubject(fields.value)
+    subject.value = isProjectUpdate.value
+      ? buildFtpNotifyEmailSubject(fields.value, 'project_update')
+      : buildFtpNotifyEmailSubject(fields.value)
   },
   { deep: true },
 )
@@ -126,13 +154,25 @@ async function submit(): Promise<void> {
   }
   saving.value = true
   try {
-    await sendEnvMail(smtpEnvRecId.value, {
-      recipients: recipients.value.trim(),
-      subject: subject.value.trim(),
-      body: textBody.value.trim(),
-      html: htmlBody.value.trim(),
-      from_name: fromName.value.trim() || FTP_NOTIFY_FROM_NAME,
-    })
+    // 推送告知：仍只发 subject/body/html（原逻辑）。
+    // 人为改动：带 template=project_update，由服务端按模板渲染。
+    if (isProjectUpdate.value) {
+      await sendEnvMail(smtpEnvRecId.value, {
+        recipients: recipients.value.trim(),
+        subject: subject.value.trim(),
+        from_name: fromName.value.trim() || defaultFromName.value,
+        template: 'project_update',
+        fields: toUpdateMailFieldsPayload(fields.value),
+      })
+    } else {
+      await sendEnvMail(smtpEnvRecId.value, {
+        recipients: recipients.value.trim(),
+        subject: subject.value.trim(),
+        body: textBody.value.trim(),
+        html: htmlBody.value.trim(),
+        from_name: fromName.value.trim() || FTP_NOTIFY_FROM_NAME,
+      })
+    }
     toast.success(t('workspaces.remote.notify.sendOk'))
     open.value = false
   } catch (e) {
@@ -153,7 +193,7 @@ async function submit(): Promise<void> {
     resizable
     fullscreenable
     teleport-to="body"
-    :title="t('workspaces.remote.notify.title')"
+    :title="dialogTitle"
   >
     <template #body>
       <div class="notify-split">
@@ -173,7 +213,11 @@ async function submit(): Promise<void> {
               <RsFormItem :label="t('workspaces.remote.notify.fromName')">
                 <RsInput
                   v-model="fromName"
-                  :placeholder="t('workspaces.remote.notify.fromNamePh')"
+                  :placeholder="
+                    isProjectUpdate
+                      ? t('workspaces.remote.notify.projectFromNamePh')
+                      : t('workspaces.remote.notify.fromNamePh')
+                  "
                   @update:model-value="fromNameManual = true"
                 />
               </RsFormItem>
@@ -203,7 +247,14 @@ async function submit(): Promise<void> {
                 <RsInput v-model="fields.taskNo" />
               </RsFormItem>
               <RsFormItem class="span2" :label="t('workspaces.remote.notify.updateContent')">
-                <RsInput v-model="fields.updateContent" :placeholder="t('workspaces.remote.notify.updateContentPh')" />
+                <RsInput
+                  v-model="fields.updateContent"
+                  :placeholder="
+                    isProjectUpdate
+                      ? t('workspaces.remote.notify.projectUpdateContentPh')
+                      : t('workspaces.remote.notify.updateContentPh')
+                  "
+                />
               </RsFormItem>
               <RsFormItem class="span2" :label="t('workspaces.remote.notify.warPackage')">
                 <RsInput v-model="fields.warPackage" />
@@ -247,7 +298,13 @@ async function submit(): Promise<void> {
               <iframe v-if="open" class="preview" :title="t('workspaces.remote.notify.preview')" :srcdoc="htmlBody" sandbox />
             </div>
           </RsFormItem>
-          <p class="hint">{{ t('workspaces.remote.notify.previewHint') }}</p>
+          <p class="hint">
+            {{
+              isProjectUpdate
+                ? t('workspaces.remote.notify.projectPreviewHint')
+                : t('workspaces.remote.notify.previewHint')
+            }}
+          </p>
         </div>
       </div>
     </template>

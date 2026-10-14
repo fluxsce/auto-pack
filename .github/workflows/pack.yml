@@ -1,11 +1,17 @@
-# auto-pack 发行打包。只在版本发布时跑，不跟每次提交。
-# 触发：推送 v* 标签，或手动 Run workflow。
+# auto-pack 发行打包。
+# 触发：
+#   - 推 master：package.json 版本相对已有 v* tag 未发布，且 CHANGELOG
+#    （Unreleased 或同号章节）有说明 → 自动打包、打 tag、发 GitHub Release
+#   - 推 v* 标签：校验与 package.json 一致后打包并发 Release（已有 Release 资产则跳过）
+#   - 手动 Run workflow：只打 Artifact，不发版
 # 私人仓库只留最近一次构建 Artifact（保留 1 天，成功后删掉旧包）。
 # ensis-ui 从 npm 拉取，不 checkout 兄弟仓。
 name: Pack
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
   workflow_dispatch:
@@ -28,8 +34,140 @@ env:
   NODE_OPTIONS: '--max-old-space-size=6144'
 
 jobs:
+  decide:
+    name: Decide release
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      pack: ${{ steps.plan.outputs.pack }}
+      publish: ${{ steps.plan.outputs.publish }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      mode: ${{ steps.plan.outputs.mode }}
+      niuma_ui_version: ${{ steps.plan.outputs.niuma_ui_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ui="${{ github.event.inputs.niuma_ui_version }}"
+          if [ -z "${ui}" ]; then
+            ui="${{ vars.NIUMA_UI_VERSION || 'latest' }}"
+          fi
+          echo "niuma_ui_version=${ui}" >> "$GITHUB_OUTPUT"
+
+          if git log -1 --format=%s | grep -F '[release notes]' >/dev/null; then
+            echo "release-notes commit; skip"
+            echo "pack=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PKG="$(python3 -c 'import json; print(json.load(open("package.json", encoding="utf-8"))["version"])')"
+          DATE="$(date -u +%Y-%m-%d)"
+          PUBLISHED="$(git tag -l 'v[0-9]*' | sed -nE 's/^v([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' | paste -sd, -)"
+
+          release_exists() {
+            local ver="$1"
+            gh release view "v${ver}" >/dev/null 2>&1
+          }
+
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+            if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "tag ${TAG} is not SemVer vX.Y.Z" >&2
+              exit 1
+            fi
+            if [ "${VERSION}" != "${PKG}" ]; then
+              echo "Tag version (${VERSION}) != package.json version (${PKG})" >&2
+              exit 1
+            fi
+            # 自动发版会先 create Release 再产生 tag 事件；已有 Release 则跳过，避免双跑。
+            if release_exists "${VERSION}"; then
+              echo "v${VERSION} release already exists; skip"
+              echo "pack=false" >> "$GITHUB_OUTPUT"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+              echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+              echo "mode=skip" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "pack=true" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+            echo "mode=tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "manual pack; artifacts only"
+            echo "pack=true" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "version=${PKG}" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "mode=manual" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # master push: auto-release when package.json version is unpublished and has notes
+          VERSION="$(python3 .github/scripts/cut_changelog.py plan \
+            --version "${PKG}" \
+            --published "${PUBLISHED}" \
+            --date "${DATE}" \
+            --notes release-notes.md)"
+          if [ -z "${VERSION}" ]; then
+            echo "no unpublished changelog notes for ${PKG}; skip"
+            echo "pack=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git rev-parse "v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} already exists; skip"
+            echo "pack=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if release_exists "${VERSION}"; then
+            echo "v${VERSION} release already exists; skip"
+            echo "pack=false" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "auto-release v${VERSION}"
+          echo "pack=true" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "mode=auto" >> "$GITHUB_OUTPUT"
+
   pack:
     name: pack (${{ matrix.target }}-amd64)
+    needs: decide
+    if: needs.decide.outputs.pack == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     strategy:
@@ -41,25 +179,6 @@ jobs:
           - runner: windows-2022
             target: windows
     steps:
-      - name: Resolve version
-        id: meta
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
-            echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=" >> "$GITHUB_OUTPUT"
-            echo "version=" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -n "${{ github.event.inputs.niuma_ui_version }}" ]; then
-            echo "niuma_ui_version=${{ github.event.inputs.niuma_ui_version }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "niuma_ui_version=${{ vars.NIUMA_UI_VERSION || 'latest' }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -87,19 +206,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          UI="${{ steps.meta.outputs.niuma_ui_version }}"
+          UI="${{ needs.decide.outputs.niuma_ui_version }}"
           pnpm pkg set "dependencies.@niuma/ui=npm:ensis-ui@${UI}"
           pnpm install --no-frozen-lockfile
 
-      - name: Verify tag matches package.json
-        if: steps.meta.outputs.version != ''
+      - name: Verify package.json version
+        if: needs.decide.outputs.version != ''
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ steps.meta.outputs.version }}"
+          WANT="${{ needs.decide.outputs.version }}"
           PKG="$(node -p "require('./package.json').version")"
-          if [ "$TAG" != "$PKG" ]; then
-            echo "Tag version ($TAG) != package.json version ($PKG)" >&2
+          if [ "$WANT" != "$PKG" ]; then
+            echo "Planned version ($WANT) != package.json version ($PKG)" >&2
             exit 1
           fi
 
@@ -124,8 +243,8 @@ jobs:
 
   prune-artifacts:
     name: Keep latest artifacts
-    needs: pack
-    if: ${{ success() }}
+    needs: [decide, pack]
+    if: ${{ success() && needs.decide.outputs.pack == 'true' }}
     runs-on: ubuntu-22.04
     timeout-minutes: 5
     steps:
@@ -154,11 +273,16 @@ jobs:
 
   publish:
     name: GitHub Release
-    needs: pack
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    needs: [decide, pack]
+    if: ${{ success() && needs.decide.outputs.publish == 'true' }}
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download pack artifacts
         uses: actions/download-artifact@v4
         with:
@@ -174,16 +298,55 @@ jobs:
           ls -l
           cat SHA256SUMS.txt
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: auto-pack ${{ github.ref_name }}
-          draft: false
-          fail_on_unmatched_files: true
-          files: |
-            release-files/*.tar.gz
-            release-files/*.zip
-            release-files/SHA256SUMS.txt
+      - name: Cut changelog and publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.decide.outputs.version }}
+          TAG: ${{ needs.decide.outputs.tag }}
+          MODE: ${{ needs.decide.outputs.mode }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATE="$(date -u +%Y-%m-%d)"
+          python3 .github/scripts/cut_changelog.py apply \
+            --version "${VERSION}" \
+            --date "${DATE}" \
+            --notes release-notes.md
+
+          if [ "${MODE}" = "auto" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add CHANGELOG.md
+            if git diff --cached --quiet; then
+              echo "changelog already records v${VERSION}"
+            else
+              git commit -m "docs: 记录 v${VERSION} 版本说明 [release notes]"
+              git push origin HEAD:master
+            fi
+          fi
+
+          # 先发 Release（gh 会按 --target 建 tag），再让 tag 推送进来的二次
+          # 工作流看到已有 Release 后跳过，避免重复打包。
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" \
+              release-files/*.tar.gz \
+              release-files/*.zip \
+              release-files/SHA256SUMS.txt \
+              --clobber
+            gh release edit "${TAG}" --notes-file release-notes.md
+          elif [ "${MODE}" = "auto" ]; then
+            gh release create "${TAG}" \
+              --target master \
+              --title "auto-pack ${TAG}" \
+              --notes-file release-notes.md \
+              release-files/*.tar.gz \
+              release-files/*.zip \
+              release-files/SHA256SUMS.txt
+          else
+            gh release create "${TAG}" \
+              --title "auto-pack ${TAG}" \
+              --notes-file release-notes.md \
+              release-files/*.tar.gz \
+              release-files/*.zip \
+              release-files/SHA256SUMS.txt
+          fi
