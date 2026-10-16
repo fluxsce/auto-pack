@@ -101,6 +101,7 @@ func main() {
 		Envs:          envs,
 		Jobs:          jobs,
 		WorkspaceRoot: cfg.WorkspaceRoot,
+		DataDir:       cfg.DataDir(),
 		Mailer:        eng,
 		Audit:         aud,
 		Builds:        intake.BindWorkspaceBuild(builds),

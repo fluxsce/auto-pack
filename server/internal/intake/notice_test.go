@@ -48,6 +48,20 @@ func TestParseTransferPath(t *testing.T) {
 	}
 }
 
+func TestParseProjectAndResources(t *testing.T) {
+	raw := []byte(`{"customerCode":"LSYM","customerShortName":"零食有鸣","resourceFiles":"app.war, config.zip，lib.jar","mailTo":"zhangsan,lisi@corp.com"}`)
+	n, err := parseNotice(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.CustomerCode != "LSYM" || n.CustomerShortName != "零食有鸣" || len(n.ResourceFiles) != 3 || n.ResourceFiles[0] != "app.war" || n.ResourceFiles[2] != "lib.jar" {
+		t.Fatalf("%+v", n)
+	}
+	if len(n.Recipients) != 2 || n.Recipients[0] != "zhangsan@flux.com.cn" || n.Recipients[1] != "lisi@corp.com" {
+		t.Fatalf("%v", n.Recipients)
+	}
+}
+
 func TestParseNoticeRecipients(t *testing.T) {
 	raw := []byte(`{"taskId":"T1","emails":["a@b.c","c@d.e"],"mailTo":"a@b.c"}`)
 	n, err := parseNotice(raw)

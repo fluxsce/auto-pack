@@ -139,6 +139,10 @@ export const FALLBACK_KINDS: EnvKindSpec[] = [
       { key: 'result_queue', type: 'text', required: true, group: 'queues' },
       { key: 'batch_size', type: 'number', default: 10, group: 'queues' },
       { key: 'receipt_retries', type: 'number', default: 3, group: 'queues' },
+      { key: 'oss_env_rec_id', type: 'text', group: 'links' },
+      { key: 'ftp_env_rec_id', type: 'text', group: 'links' },
+      { key: 'smtp_env_rec_id', type: 'text', group: 'links' },
+      { key: 'mail_template', type: 'select', options: ['none', 'ftp_update', 'oss_update', 'project_update', 'mq_notify'], group: 'links' },
     ],
   },
   {

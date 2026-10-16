@@ -163,6 +163,10 @@ var Catalog = []KindSpec{
 			{Key: "result_queue", Type: FieldText, Required: true, Group: "queues"},
 			{Key: "batch_size", Type: FieldNumber, Default: 10, Group: "queues"},
 			{Key: "receipt_retries", Type: FieldNumber, Default: 3, Group: "queues"},
+			{Key: "oss_env_rec_id", Type: FieldText, Group: "links"},
+			{Key: "ftp_env_rec_id", Type: FieldText, Group: "links"},
+			{Key: "smtp_env_rec_id", Type: FieldText, Group: "links"},
+			{Key: "mail_template", Type: FieldSelect, Options: []string{"none", "ftp_update", "oss_update", "project_update", "mq_notify"}, Group: "links"},
 		},
 	},
 	{

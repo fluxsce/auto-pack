@@ -31,9 +31,44 @@ var (
 const (
 	// MailTemplateFTPUpdate is the DATAHUB FTP push notify (existing layout).
 	MailTemplateFTPUpdate = "ftp_update"
+	// MailTemplateOSSUpdate is the same layout as FTP update, for an OSS push.
+	MailTemplateOSSUpdate = "oss_update"
 	// MailTemplateProjectUpdate is the manual project-update notify.
 	MailTemplateProjectUpdate = "project_update"
+	// MailTemplateMqNotify is the queue push notify: project name, recipients, and paths.
+	MailTemplateMqNotify = "mq_notify"
+	// MailTemplatePackResult is the message-queue pack result notify.
+	MailTemplatePackResult = "pack_result"
 )
+
+// MqMailFields fills the mq_notify template with the FTP update layout.
+// Project is the project name (customerShortName). URL is the OSS access address.
+type MqMailFields struct {
+	Project   string
+	TaskNo    string
+	Resources string
+	Remote    string
+	URL       string
+	Until     string
+	Branch    string
+	Backup    string
+}
+
+// PackMailFields fills the pack_result template.
+type PackMailFields struct {
+	OK       bool
+	TaskNo   string
+	TaskID   string
+	Customer string
+	Version  string
+	Branch   string
+	Project  string
+	Result   string
+	Remote   string
+	URL      string
+	Until    string
+	Log      string
+}
 
 // UpdateMailFields fills ftp_update / project_update templates.
 type UpdateMailFields struct {
@@ -41,6 +76,7 @@ type UpdateMailFields struct {
 	UpdateContent       string `json:"update_content"`
 	TaskNo              string `json:"task_no"`
 	FTPVersionSource    string `json:"ftp_version_source"`
+	SourceLabel         string `json:"source_label,omitempty"`
 	UpdateMethod        string `json:"update_method"`
 	NeedRestart         string `json:"need_restart"`
 	BrowserCacheRefresh string `json:"browser_cache_refresh"`
@@ -142,6 +178,12 @@ func updateMailKindOf(template string) (updateMailKind, error) {
 			brand:        "DATAHUB 更新通知",
 			fromName:     "DATAHUB 更新通知",
 		}, nil
+	case MailTemplateOSSUpdate:
+		return updateMailKind{
+			statusPhrase: "OSS已更新",
+			brand:        "DATAHUB 更新通知",
+			fromName:     "DATAHUB 更新通知",
+		}, nil
 	case MailTemplateProjectUpdate:
 		return updateMailKind{
 			statusPhrase: "项目已更新",
@@ -153,6 +195,114 @@ func updateMailKindOf(template string) (updateMailKind, error) {
 	}
 }
 
+// ComposePackMail renders the pack_result subject and bodies. Log is appended when present.
+func ComposePackMail(fields PackMailFields) (ComposedMail, error) {
+	name := strings.TrimSpace(fields.Project)
+	if name == "" {
+		name = "-"
+	}
+	label := "打包失败"
+	if fields.OK {
+		label = "打包已完成"
+	}
+	parts := []string{"[auto-pack]", name}
+	if branch := strings.TrimSpace(fields.Branch); branch != "" {
+		parts = append(parts, branch)
+	}
+	parts = append(parts, label)
+	result := strings.TrimSpace(fields.Result)
+	if result == "" {
+		if fields.OK {
+			result = "已成功"
+		} else {
+			result = "失败"
+		}
+	}
+	rows := [][2]string{
+		{"任务号", dashMail(fields.TaskNo)},
+		{"任务标识", dashMail(fields.TaskID)},
+		{"客户代码", dashMail(fields.Customer)},
+		{"版本", dashMail(fields.Version)},
+		{"分支", dashMail(fields.Branch)},
+		{"工程", name},
+		{"结果", result},
+		{"项目路径", dashMail(fields.Remote)},
+	}
+	if url := strings.TrimSpace(fields.URL); url != "" {
+		rows = append(rows, [2]string{"下载链接", url}, [2]string{"有效期至", dashMail(fields.Until)})
+	}
+	var text strings.Builder
+	text.WriteString(strings.Join(parts, " "))
+	text.WriteByte('\n')
+	for _, row := range rows {
+		fmt.Fprintf(&text, "%s：%s\n", row[0], row[1])
+	}
+	logText := strings.TrimSpace(fields.Log)
+	if logText != "" {
+		text.WriteString("\n--- 构建日志 ---\n")
+		text.WriteString(logText)
+		if !strings.HasSuffix(logText, "\n") {
+			text.WriteByte('\n')
+		}
+	}
+	htmlBody := renderUpdateMailHTML("打包结果", strings.Join(parts, " "), rows)
+	if logText != "" {
+		htmlBody = strings.Replace(htmlBody, "</table>\n            </td>", `</table>
+              <div style="padding:14px 22px;border-top:1px solid #e6ebf2;">
+                <div style="font-size:12px;color:#5b677a;margin-bottom:6px;">构建日志</div>
+                <pre style="margin:0;white-space:pre-wrap;word-break:break-all;font-size:12px;line-height:1.5;color:#1f2937;">`+html.EscapeString(logText)+`</pre>
+              </div>
+            </td>`, 1)
+	}
+	return ComposedMail{
+		Subject:  strings.Join(parts, " "),
+		Text:     strings.TrimRight(text.String(), "\n"),
+		HTML:     htmlBody,
+		FromName: "Auto Pack",
+	}, nil
+}
+
+// ComposeMqMail renders the queue push notice. template is ftp_update or oss_update.
+// OSS uses 「OSS访问路径」 and 「OSS已更新」; FTP uses 「FTP版本来源」 and 「FTP已更新」. Backup is the BAK path.
+func ComposeMqMail(template string, fields MqMailFields) (ComposedMail, error) {
+	content := strings.TrimSpace(fields.TaskNo)
+	if content != "" && !strings.HasPrefix(content, "申请更新") {
+		content = "申请更新" + content
+	}
+	kind := MailTemplateFTPUpdate
+	sourceLabel := "FTP版本来源"
+	source := strings.TrimSpace(fields.Remote)
+	if strings.TrimSpace(template) == MailTemplateOSSUpdate {
+		kind = MailTemplateOSSUpdate
+		sourceLabel = "OSS访问路径"
+		if url := strings.TrimSpace(fields.URL); url != "" {
+			source = url
+		}
+	}
+	other := ""
+	if until := strings.TrimSpace(fields.Until); until != "" {
+		other = "有效期至 " + until
+	}
+	return ComposeUpdateMail(kind, UpdateMailFields{
+		ProjectLabel:     fields.Project,
+		UpdateContent:    content,
+		TaskNo:           fields.TaskNo,
+		FTPVersionSource: source,
+		SourceLabel:      sourceLabel,
+		UpdateScope:      fields.Branch,
+		WarPackage:       fields.Resources,
+		Other:            other,
+		Backup:           fields.Backup,
+	}, time.Now())
+}
+
+func dashMail(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "—"
+	}
+	return strings.TrimSpace(value)
+}
+
 // ComposeUpdateMail renders ftp_update / project_update subject and bodies.
 func ComposeUpdateMail(template string, fields UpdateMailFields, at time.Time) (ComposedMail, error) {
 	kind, err := updateMailKindOf(template)
@@ -161,6 +311,9 @@ func ComposeUpdateMail(template string, fields UpdateMailFields, at time.Time) (
 	}
 	if at.IsZero() {
 		at = time.Now()
+	}
+	if strings.TrimSpace(fields.SourceLabel) == "" && strings.TrimSpace(template) == MailTemplateOSSUpdate {
+		fields.SourceLabel = "OSS访问路径"
 	}
 	summary := buildUpdateSummary(fields)
 	greeting := dayGreeting(at) + "。" + summary
@@ -238,10 +391,14 @@ func updateMailRows(fields UpdateMailFields, summary string) [][2]string {
 	if affects == "" {
 		affects = "是"
 	}
+	sourceLabel := strings.TrimSpace(fields.SourceLabel)
+	if sourceLabel == "" {
+		sourceLabel = "FTP版本来源"
+	}
 	rows := [][2]string{
 		{"更新内容", summary},
 		{"任务编号", strings.TrimSpace(fields.TaskNo)},
-		{"FTP版本来源", strings.TrimSpace(fields.FTPVersionSource)},
+		{sourceLabel, strings.TrimSpace(fields.FTPVersionSource)},
 		{"更新方式", method},
 		{"是否重启", needRestart},
 		{"浏览器缓存刷新", browserCache},
@@ -260,6 +417,7 @@ func updateMailRows(fields UpdateMailFields, summary string) [][2]string {
 var updateHighlightLabels = map[string]struct{}{
 	"更新内容":    {},
 	"FTP版本来源": {},
+	"OSS访问路径": {},
 	"更新war包":  {},
 }
 
@@ -306,7 +464,7 @@ func renderUpdateMailHTML(brand, greeting string, rows [][2]string) string {
 		}
 		fmt.Fprintf(&b, `  <tr>
   <td style="padding:10px 14px;border-bottom:%s;color:%s;font-size:13px;font-weight:%s;width:128px;vertical-align:top;background:%s;">%s</td>
-  <td style="padding:10px 14px;border-bottom:%s;color:#1f2937;font-size:13px;line-height:1.55;word-break:break-all;background:%s;">%s</td>
+  <td style="padding:10px 14px;border-bottom:%s;color:#1f2937;font-size:13px;line-height:1.55;word-break:break-all;white-space:pre-line;background:%s;">%s</td>
 </tr>
 `, border, labelColor, labelWeight, bg, html.EscapeString(label), border, bg, renderUpdateRowValue(label, value, highlight))
 	}

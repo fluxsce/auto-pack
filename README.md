@@ -139,7 +139,7 @@ flowchart TD
 
 ### mq 环境（阿里云 MNS）
 
-不配打包工程。`customerBranch` 与工程 `repo_branch` 匹配后关联到唯一工作空间；同空间多工程时优先工程名 `datahub`，否则唯一 `maven`。空间侧用「批量改 Git 分支」把 `repo_branch` 设成与 BOMS 报文一致即可。
+不配打包工程。`customerBranch` 与工程 `repo_branch` 匹配后关联到唯一工作空间，然后做该工作空间的自动构建，结束后从与工作空间编码同名的工程推送。空间侧用「批量改 Git 分支」把 `repo_branch` 设成与 BOMS 报文一致即可。OSS 项目传 `ossProjectRoot`，FTP 项目传 `ftpProjectRoot`。
 
 | 字段 | 作用 |
 |------|------|
@@ -166,9 +166,10 @@ MNS `MessageBody` 解 Base64 后为下列 JSON（样例对齐 BOMS → DataHub�
   "taskId": "TSKIDS-20260703172557000175",
   "taskNo": "20260703172557000175",
   "packTaskId": "PACKTSKID-S01-20260703172557000175",
-  "taskTitle": "【场景S01】零食有鸣-仅业务jar-L0二进制依赖",
   "customerCode": "LSYM",
   "customerShortName": "零食有鸣",
+  "resourceFiles": "app.war,config.zip",
+  "mailTo": "zhangsan,lisi",
   "version": "V9.0.0",
   "subsystemType": "DATAHUB",
   "packagingMode": "war",
@@ -177,28 +178,36 @@ MNS `MessageBody` 解 Base64 后为下列 JSON（样例对齐 BOMS → DataHub�
   "customerBranch": "release/V9.0.0_LSYM",
   "baseRef": "V9.0.0_P11",
   "baseRefType": "tag",
-  "SYSVAL": "V10DATAHUB",
-  "passedAt": "2026-07-03 17:25:57",
-  "publishedAt": "2026-07-03 18:00:00"
+  "SYSVAL": "V10DATAHUB"
 }
 ```
 
-| 字段 | 规则 |
-|------|------|
-| `taskId` / `taskNo` / `packTaskId` | 必填；`taskId` 为处理与回执键 |
-| `subsystemType` | 必须为 `DATAHUB` |
-| `packagingMode` / `deploymentStrategy` | 必须为 `war` |
-| `ossProjectRoot` | 与 FTP 路径二选一必填；有则优先，上传走平台 OSS 环境 |
-| `ftpProjectRoot` | 兼容别名 `ftpPath` / `ftpRoot`；无 OSS 路径时作上传目标，走平台 FTP / SFTP |
-| `customerCode` / `version` | 必填，原样进打包参数 |
-| `customerBranch` | 必填；与平台工程 `repo_branch` 相等以关联工作空间，并作为构建检出分支 |
-| `baseRef` / `baseRefType` | 必填；本期 `baseRefType` 必须为 `tag` |
-| `SYSVAL` | 原样作打包参数（样例 `V10DATAHUB`） |
-| `sourceMetadata` | **禁止出现**；出现则视为旧报文，校验失败并回执 |
-| 收件人 | 可选；认 `mailTo` / `emails` / `receivers` / `recipients` / `notifyTo` / `receiver` / `email` |
-| `taskTitle` / `customerShortName` / `passedAt` / `publishedAt` | BOMS 可带；本服务不校验、不依赖 |
+FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。两条路径都写出时，OSS 和 FTP 都会推送。
 
-仓库 URL 不读报文。缺字段或不在允许范围时：不打包、不上传，直接写失败回执。
+| 字段 | 说明 |
+|------|------|
+| `taskId` | 必填。同一笔打包的处理键和回执键，再次到达不重复打包。 |
+| `taskNo` | 必填。业务任务号，写入回执和推送通知邮件。 |
+| `packTaskId` | 必填。外部打包任务标识，原样写入回执。 |
+| `resourceFiles` | 可选。要推送的资源文件，多个用英文逗号分隔，如 `app.war,config.zip`。按文件名在最终工程目录中查找。写出后只推这些文件；不写则推送全部 `war`。 |
+| `mailTo` | 可选。收件人账号，多个用英文逗号分隔，如 `zhangsan,lisi`。处理时没有 `@` 的自动补成 `@flux.com.cn`；已经写完整邮箱的保持原样。未填时用所关联 SMTP 环境里的收件人。 |
+| `customerCode` | 必填。客户代码，原样进入打包参数，并写入推送通知。 |
+| `customerShortName` | 项目名称。写入推送通知的「项目名称」，样例「零食有鸣」。 |
+| `version` | 必填。产品版本，原样进入打包参数。 |
+| `subsystemType` | 必填。必须为 `DATAHUB`。 |
+| `packagingMode` | 必填。必须为 `war`。 |
+| `deploymentStrategy` | 必填。必须为 `war`。 |
+| `ossProjectRoot` | OSS 项目的对象目录，与 `ftpProjectRoot` 至少填一个。上传走消息队列关联的 OSS，未关联时用已启用的 OSS，并签发临时访问地址。 |
+| `ftpProjectRoot` | FTP 项目的目录，与 `ossProjectRoot` 至少填一个。样例 `"/ftp/S01/"`。上传走消息队列关联的 FTP / SFTP / SSH。 |
+| `customerBranch` | 必填。与平台工程 `repo_branch` 相等，用来关联工作空间，并作为构建检出分支。 |
+| `baseRef` | 必填。基线引用，本期与 `baseRefType` 一起校验。 |
+| `baseRefType` | 必填。本期必须为 `tag`。 |
+| `SYSVAL` | 可选。原样进入打包参数，样例 `V10DATAHUB`。 |
+| `sourceMetadata` | 禁止出现。出现则视为旧报文，校验失败并回执。 |
+
+仓库 URL 不读报文。缺必填字段或不在允许范围时：不打包、不上传，直接写失败回执。`taskTitle`、`passedAt`、`publishedAt` 可以出现，本服务不使用。
+
+关联了 SMTP 和邮件模板后，处理结束发信。模板「OSS 已更新」与「FTP 已更新」同一版式：OSS 的主题是 OSS已更新，来源栏是 OSS 访问路径；FTP 的主题是 FTP已更新，来源栏是 FTP版本来源。OSS 覆盖前若对象已存在，先复制到同目录 `BAK/{时间戳}/`，邮件「备份」栏写该路径。不附构建日志。构建日志留在平台，回执按 1 打包、2 推送、3 邮件 三步写结果。
 
 ### 回执报文（生产）
 
@@ -216,7 +225,7 @@ MNS `MessageBody` 解 Base64 后为下列 JSON（样例对齐 BOMS → DataHub�
   "deploymentStrategy": "war",
   "ossProjectRoot": "/开发/S01/",
   "resultStatus": "SUCCESS",
-  "resultMessage": "自动打包完成，war 已推送到项目路径",
+  "resultMessage": "1. 打包：成功。自动打包完成，war 已推送到项目路径\n2. 推送：成功，OSS 路径 /开发/S01/app.war，资源 app.war,config.zip\n3. 邮件：已发送 收件人 a@example.com,b@example.com，模板 推送通知",
   "finishedAt": "2026-07-03 18:06:20"
 }
 ```

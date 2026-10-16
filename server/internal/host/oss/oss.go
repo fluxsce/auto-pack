@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -61,6 +62,59 @@ func probeWithClient(ctx context.Context, client *http.Client, cfg Config) error
 	}
 }
 
+// Exists 判断对象是否已在桶里。404 视为不存在。
+func Exists(cfg Config, objectKey string) (bool, error) {
+	return existsWithClient(&http.Client{Timeout: 30 * time.Second}, cfg, objectKey)
+}
+
+func existsWithClient(client *http.Client, cfg Config, objectKey string) (bool, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	req, err := newHeadObject(cfg, objectKey, time.Now().UTC())
+	if err != nil {
+		return false, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode/100 == 2 {
+		return true, nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return false, fmt.Errorf("oss head %s: %s", resp.Status, strings.TrimSpace(string(body)))
+}
+
+// Copy 把 srcKey 复制到 destKey，不下载对象内容。
+func Copy(cfg Config, srcKey, destKey string) error {
+	return copyWithClient(&http.Client{Timeout: 30 * time.Minute}, cfg, srcKey, destKey)
+}
+
+func copyWithClient(client *http.Client, cfg Config, srcKey, destKey string) error {
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Minute}
+	}
+	req, err := newCopy(cfg, srcKey, destKey, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 == 2 {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	return fmt.Errorf("oss copy %s: %s", resp.Status, strings.TrimSpace(string(body)))
+}
+
 // PutFile 把本地文件上传到 objectKey。
 func PutFile(cfg Config, local, objectKey string) error {
 	f, err := os.Open(local)
@@ -95,32 +149,71 @@ func SignGet(cfg Config, objectKey string, expire time.Duration) (string, error)
 	if sec < 1 {
 		sec = 1
 	}
-	return signGetAt(cfg, objectKey, time.Now().Add(time.Duration(sec)*time.Second))
+	return signGetAt(cfg, objectKey, time.Now().Add(time.Duration(sec)*time.Second), "")
 }
 
-func signGetAt(cfg Config, objectKey string, exp time.Time) (string, error) {
+// SignGetMode 签发 GET 临时地址。mode 为 inline 时浏览器尽量直接打开，attachment 时下载。空 mode 与 SignGet 相同。
+func SignGetMode(cfg Config, objectKey string, expire time.Duration, mode string) (string, error) {
+	sec := int64(expire / time.Second)
+	if sec < 1 {
+		sec = 1
+	}
+	return signGetAt(cfg, objectKey, time.Now().Add(time.Duration(sec)*time.Second), mode)
+}
+
+func signGetAt(cfg Config, objectKey string, exp time.Time, mode string) (string, error) {
 	host, https, err := endpointHost(cfg)
 	if err != nil {
 		return "", err
 	}
 	expires := fmt.Sprintf("%d", exp.Unix())
 	resource := "/" + cfg.Bucket + "/" + objectKey
-	if token := strings.TrimSpace(cfg.SecurityToken); token != "" {
-		resource += "?security-token=" + token
-	}
-	sig := sign(cfg.AccessKeySecret, "GET\n\n\n"+expires+"\n"+resource)
 	q := url.Values{}
 	q.Set("OSSAccessKeyId", cfg.AccessKeyID)
 	q.Set("Expires", expires)
-	q.Set("Signature", sig)
+	subs := map[string]string{}
 	if token := strings.TrimSpace(cfg.SecurityToken); token != "" {
+		subs["security-token"] = token
 		q.Set("security-token", token)
 	}
+	switch mode {
+	case "inline", "attachment":
+		name := strings.ReplaceAll(pathBase(objectKey), `"`, "")
+		subs["response-content-disposition"] = mode + `; filename="` + name + `"`
+		q.Set("response-content-disposition", subs["response-content-disposition"])
+	}
+	if len(subs) > 0 {
+		keys := make([]string, 0, len(subs))
+		for key := range subs {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		resource += "?"
+		for i, key := range keys {
+			if i > 0 {
+				resource += "&"
+			}
+			resource += key + "=" + url.QueryEscape(subs[key])
+		}
+	}
+	sig := sign(cfg.AccessKeySecret, "GET\n\n\n"+expires+"\n"+resource)
+	q.Set("Signature", sig)
 	scheme := "https"
 	if !https {
 		scheme = "http"
 	}
 	return scheme + "://" + cfg.Bucket + "." + host + "/" + escapeKey(objectKey) + "?" + q.Encode(), nil
+}
+
+func pathBase(key string) string {
+	key = strings.TrimRight(strings.ReplaceAll(key, "\\", "/"), "/")
+	if i := strings.LastIndex(key, "/"); i >= 0 {
+		return key[i+1:]
+	}
+	if key == "" {
+		return "file"
+	}
+	return key
 }
 
 func newHead(cfg Config, now time.Time) (*http.Request, error) {
@@ -146,6 +239,65 @@ func newHead(cfg Config, now time.Time) (*http.Request, error) {
 		canon = "x-oss-security-token:" + token + "\n"
 	}
 	stringToSign := "HEAD\n\n\n" + date + "\n" + canon + resource
+	req.Header.Set("Authorization", "OSS "+cfg.AccessKeyID+":"+sign(cfg.AccessKeySecret, stringToSign))
+	return req, nil
+}
+
+func newHeadObject(cfg Config, objectKey string, now time.Time) (*http.Request, error) {
+	objectKey = strings.TrimLeft(strings.ReplaceAll(objectKey, "\\", "/"), "/")
+	host, https, err := endpointHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "https"
+	if !https {
+		scheme = "http"
+	}
+	raw := scheme + "://" + cfg.Bucket + "." + host + "/" + escapeKey(objectKey)
+	req, err := http.NewRequest(http.MethodHead, raw, nil)
+	if err != nil {
+		return nil, err
+	}
+	date := now.Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	resource := "/" + cfg.Bucket + "/" + objectKey
+	canon := ""
+	if token := strings.TrimSpace(cfg.SecurityToken); token != "" {
+		req.Header.Set("x-oss-security-token", token)
+		canon = "x-oss-security-token:" + token + "\n"
+	}
+	stringToSign := "HEAD\n\n\n" + date + "\n" + canon + resource
+	req.Header.Set("Authorization", "OSS "+cfg.AccessKeyID+":"+sign(cfg.AccessKeySecret, stringToSign))
+	return req, nil
+}
+
+func newCopy(cfg Config, srcKey, destKey string, now time.Time) (*http.Request, error) {
+	srcKey = strings.TrimLeft(strings.ReplaceAll(srcKey, "\\", "/"), "/")
+	destKey = strings.TrimLeft(strings.ReplaceAll(destKey, "\\", "/"), "/")
+	host, https, err := endpointHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "https"
+	if !https {
+		scheme = "http"
+	}
+	raw := scheme + "://" + cfg.Bucket + "." + host + "/" + escapeKey(destKey)
+	req, err := http.NewRequest(http.MethodPut, raw, nil)
+	if err != nil {
+		return nil, err
+	}
+	source := "/" + cfg.Bucket + "/" + escapeKey(srcKey)
+	req.Header.Set("x-oss-copy-source", source)
+	date := now.Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	resource := "/" + cfg.Bucket + "/" + destKey
+	canon := "x-oss-copy-source:" + source + "\n"
+	if token := strings.TrimSpace(cfg.SecurityToken); token != "" {
+		req.Header.Set("x-oss-security-token", token)
+		canon += "x-oss-security-token:" + token + "\n"
+	}
+	stringToSign := "PUT\n\n\n" + date + "\n" + canon + resource
 	req.Header.Set("Authorization", "OSS "+cfg.AccessKeyID+":"+sign(cfg.AccessKeySecret, stringToSign))
 	return req, nil
 }

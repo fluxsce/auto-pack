@@ -47,6 +47,7 @@ type Options struct {
 	NoticeDir     string
 	ReceiptDir    string
 	WorkspaceRoot string
+	DataDir       string
 	Retries       int
 	Mailer        Mailer
 	Audit         Auditor
@@ -81,26 +82,35 @@ type WorkspaceBuild interface {
 
 // Service 处理一笔打包通知。
 type Service struct {
-	st         *store.Store
-	projects   *project.Service
-	envs       *env.Service
-	jobs       Jobs
-	noticeDir  string
-	receiptDir string
-	wsRoot     string
-	retries    int
-	mailer     Mailer
-	aud        Auditor
-	fromMQ     bool
-	upload     func(ctx context.Context, prj project.Project, local, remote string) error
-	sign       func(objectKey string, expire time.Duration) (string, error)
-	publish    func(ctx context.Context, body []byte) error
-	builds     WorkspaceBuild
-	mq         *MNSQueue
-	mqSrc      mqSource
-	mqlog      *mqlog.Log
-	mqEnvID    string
-	stop       context.CancelFunc
+	st          *store.Store
+	projects    *project.Service
+	envs        *env.Service
+	jobs        Jobs
+	noticeDir   string
+	receiptDir  string
+	wsRoot      string
+	dataDir     string
+	retries     int
+	mailer      Mailer
+	aud         Auditor
+	fromMQ      bool
+	upload      func(ctx context.Context, prj project.Project, local, remote string) error
+	sign        func(objectKey string, expire time.Duration) (string, error)
+	publish     func(ctx context.Context, body []byte) error
+	builds      WorkspaceBuild
+	mq          *MNSQueue
+	mqSrc       mqSource
+	mqlog       *mqlog.Log
+	mqEnvID     string
+	pendingMail mailDraft
+	stop        context.CancelFunc
+}
+
+type mailDraft struct {
+	remote string
+	signed string
+	until  string
+	backup string
 }
 
 // New 构造接入层。customerBranch 关联工作空间。未给工程名时走该空间自动构建；给出工程名时只构建该工程。
@@ -117,6 +127,7 @@ func New(opt Options) *Service {
 		noticeDir:  opt.NoticeDir,
 		receiptDir: opt.ReceiptDir,
 		wsRoot:     opt.WorkspaceRoot,
+		dataDir:    opt.DataDir,
 		retries:    retries,
 		mailer:     opt.Mailer,
 		aud:        opt.Audit,
@@ -158,13 +169,6 @@ func (s *Service) Handle(ctx context.Context, raw []byte) error {
 	if err != nil {
 		return s.finish(ctx, n, project.Project{}, "", resultFailed, "报文校验失败："+err.Error())
 	}
-	if name := strings.TrimSpace(n.ProjectName); name != "" {
-		prj, perr := s.packProject(ctx, wsID, name)
-		if perr != nil {
-			return s.finish(ctx, n, project.Project{WorkspaceRecID: wsID}, "", resultFailed, "报文校验失败："+perr.Error())
-		}
-		return s.buildOne(ctx, n, prj)
-	}
 	return s.buildWorkspace(ctx, n, wsID)
 }
 
@@ -199,13 +203,19 @@ func (s *Service) buildOne(ctx context.Context, n Notice, prj project.Project) e
 	if done.JobStatus != job.StatusSucceeded {
 		return s.finish(ctx, n, prj, done.RecID, resultFailed, msgBuild)
 	}
-	_, remote, signed, until, err := s.pushProjectWars(ctx, prj, n)
+	_, remote, signed, until, backup, err := s.pushProjectWars(ctx, prj, n)
 	if err != nil {
 		log.Printf("intake upload %s: %v", n.TaskID, err)
-		s.deliverMail(ctx, done.RecID, false, msgUpload, "", "", "")
+		if !s.mqMailReady(ctx) {
+			s.deliverMail(ctx, done.RecID, false, msgUpload, "", "", "")
+		}
 		return s.finish(ctx, n, prj, done.RecID, resultFailed, msgUpload)
 	}
-	s.deliverMail(ctx, done.RecID, true, msgSuccess, remote, signed, until)
+	if s.mqMailReady(ctx) {
+		s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
+	} else {
+		s.deliverMail(ctx, done.RecID, true, msgSuccess, remote, signed, until)
+	}
 	return s.finish(ctx, n, prj, done.RecID, resultSuccess, msgSuccess)
 }
 
@@ -238,10 +248,12 @@ func (s *Service) buildWorkspace(ctx context.Context, n Notice, workspaceID stri
 	if !ok {
 		return s.finish(ctx, n, anchor, ref, resultFailed, message)
 	}
-	if _, _, _, _, err := s.pushProjectWars(ctx, pack, n); err != nil {
+	_, remote, signed, until, backup, err := s.pushProjectWars(ctx, pack, n)
+	if err != nil {
 		log.Printf("intake upload %s: %v", n.TaskID, err)
 		return s.finish(ctx, n, anchor, ref, resultFailed, msgUpload)
 	}
+	s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
 	return s.finish(ctx, n, anchor, ref, resultSuccess, message)
 }
 
@@ -434,7 +446,7 @@ func (s *Service) workspaceByCustomerBranch(ctx context.Context, branch string) 
 	return id, nil
 }
 
-// packProject 决定上传哪个工程。报文给出工程名时用该工程；否则用与工作空间编码同名的工程。
+// packProject 决定上传哪个工程。explicit 非空时按工程名查找；为空时用与工作空间编码同名的工程。消息队列报文不传工程名，走后一种。
 func (s *Service) packProject(ctx context.Context, workspaceID, explicit string) (project.Project, error) {
 	if s.projects == nil {
 		return project.Project{}, errNoBranchWorkspace
@@ -485,6 +497,9 @@ func pickNamedProject(list []project.Project, name string) (project.Project, err
 }
 
 func (s *Service) finishWithoutTask(ctx context.Context, n Notice, message string) error {
+	if s.fromMQ {
+		message = receiptSteps(resultFailed, message, n, mailDraft{}, "未发送")
+	}
 	err := s.writeReceipt(ctx, n, resultFailed, message)
 	text := message
 	if err != nil {
@@ -499,10 +514,18 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 	if result == resultSuccess {
 		rowStatus = statusSucceeded
 	}
-	pubErr := s.writeReceipt(ctx, n, result, message)
+	draft := s.pendingMail
+	s.pendingMail = mailDraft{}
+	text := message
+	if s.fromMQ {
+		mailNote := s.notifyLinked(ctx, n, prj, jobID, result == resultSuccess, message, draft.remote, draft.signed, draft.until, draft.backup)
+		text = receiptSteps(result, message, n, draft, mailNote)
+	}
+	pubErr := s.writeReceipt(ctx, n, result, text)
 	if pubErr != nil {
 		rowStatus = statusReceiptFailed
 		log.Printf("intake receipt %s: %v", n.TaskID, pubErr)
+		text += "；回执未写入"
 	}
 	finished := time.Now().UTC().Format("2006-01-02 15:04:05")
 	storeID := jobID
@@ -515,14 +538,10 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 		JobRecID:       storeID,
 		TaskStatus:     rowStatus,
 		ResultStatus:   result,
-		ResultMessage:  message,
+		ResultMessage:  text,
 		OSSProjectRoot: firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot),
 		FinishedAt:     finished,
 	})
-	text := message
-	if pubErr != nil {
-		text += "；回执未写入"
-	}
 	s.noteMQ(ctx, prj.WorkspaceRecID, n, text, jobID, result == resultSuccess && pubErr == nil && err == nil)
 	if pubErr != nil && err == nil {
 		return nil

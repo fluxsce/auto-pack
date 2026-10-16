@@ -157,32 +157,24 @@ func TestDuplicateAfterFinishStatesReason(t *testing.T) {
 		t.Fatalf("calls=%d", len(aud.calls))
 	}
 	got := aud.calls[2].summary
-	if !aud.calls[2].ok || !strings.Contains(got, "不重复打包") || !strings.Contains(got, "原因："+msgSuccess) || !strings.Contains(got, "build=build-1") {
+	if !aud.calls[2].ok || !strings.Contains(got, "不重复打包") || !strings.Contains(got, "原因：1. 打包") || !strings.Contains(got, msgSuccess) || !strings.Contains(got, "2. 推送") || !strings.Contains(got, "3. 邮件") || !strings.Contains(got, "build=build-1") {
 		t.Fatalf("%s", got)
 	}
 }
 
 func TestHandleBuildFailureSkipsUpload(t *testing.T) {
 	svc, jobs, receipts, mails := setupIntake(t)
-	jobs.status = job.StatusFailed
-	n := sampleNotice()
-	n.ProjectName = "datahub"
+	svc.builds.(*fakeBuild).status = "failed"
 	uploads := 0
 	svc.upload = func(context.Context, project.Project, string, string) error {
 		uploads++
 		return nil
 	}
-	if err := svc.Handle(context.Background(), mustNotice(n)); err != nil {
+	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
 		t.Fatal(err)
 	}
-	if uploads != 0 {
-		t.Fatalf("uploads=%d", uploads)
-	}
-	if jobs.submitted[0].Payload.MailTo != "a@b.c,c@d.e" || !jobs.submitted[0].Payload.HoldMail {
-		t.Fatalf("%+v", jobs.submitted[0].Payload)
-	}
-	if mails.n != 0 {
-		t.Fatalf("build failure mail is sent by the job, got %d", mails.n)
+	if uploads != 0 || len(jobs.submitted) != 0 || mails.n != 0 {
+		t.Fatalf("uploads=%d submitted=%d mails=%d", uploads, len(jobs.submitted), mails.n)
 	}
 	if decodeReceipt(t, (*receipts)[0]).ResultStatus != resultFailed {
 		t.Fatal(string((*receipts)[0]))
@@ -191,47 +183,37 @@ func TestHandleBuildFailureSkipsUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.TaskStatus != statusFailed || row.JobRecID != "job-1" {
+	if row.TaskStatus != statusFailed || row.JobRecID != "build-1" {
 		t.Fatalf("%+v", row)
 	}
 }
 
-func TestHandleUploadFailureKeepsJobSuccess(t *testing.T) {
-	svc, jobs, receipts, mails := setupIntake(t)
-	jobs.status = job.StatusSucceeded
-	n := sampleNotice()
-	n.ProjectName = "datahub"
+func TestHandleUploadFailureKeepsBuildResult(t *testing.T) {
+	svc, _, receipts, mails := setupIntake(t)
 	svc.upload = func(context.Context, project.Project, string, string) error {
 		return errNoWar
 	}
-	if err := svc.Handle(context.Background(), mustNotice(n)); err != nil {
+	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
 		t.Fatal(err)
 	}
 	got := decodeReceipt(t, (*receipts)[0])
-	if got.ResultStatus != resultFailed || got.OSSProjectRoot != "/开发/S01/" {
+	if got.ResultStatus != resultFailed || got.OSSProjectRoot != "/开发/S01/" || !strings.Contains(got.ResultMessage, msgUpload) {
 		t.Fatalf("%+v", got)
 	}
 	row, err := svc.taskByID(context.Background(), sampleNotice().TaskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if row.ResultStatus != resultFailed || row.TaskStatus != statusFailed {
+	if row.ResultStatus != resultFailed || row.TaskStatus != statusFailed || row.JobRecID != "build-1" {
 		t.Fatalf("%+v", row)
 	}
-	if mails.n != 1 || mails.ok || mails.msg != msgUpload {
-		t.Fatalf("mail n=%d ok=%v msg=%s", mails.n, mails.ok, mails.msg)
-	}
-	payload := jobPayload(t, svc, "job-1")
-	if payload.DownloadURL != "" || payload.HoldMail || payload.MailNote != msgUpload {
-		t.Fatalf("%+v", payload)
+	if mails.n != 0 {
+		t.Fatalf("mail n=%d", mails.n)
 	}
 }
 
 func TestHandleSuccess(t *testing.T) {
-	svc, jobs, receipts, mails := setupIntake(t)
-	jobs.status = job.StatusSucceeded
-	n := sampleNotice()
-	n.ProjectName = "datahub"
+	svc, jobs, receipts, _ := setupIntake(t)
 	var remote, uploaded string
 	svc.upload = func(_ context.Context, prj project.Project, local, dest string) error {
 		uploaded = prj.ProjectName
@@ -241,35 +223,15 @@ func TestHandleSuccess(t *testing.T) {
 		}
 		return nil
 	}
-	if err := svc.Handle(context.Background(), mustNotice(n)); err != nil {
+	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
 		t.Fatal(err)
 	}
-	if remote != "/开发/S01/app.war" || uploaded != "datahub" || svc.builds.(*fakeBuild).starts != 0 {
-		t.Fatalf("remote=%s project=%s starts=%d", remote, uploaded, svc.builds.(*fakeBuild).starts)
-	}
-	req := jobs.submitted[0]
-	if req.Payload.SkipSync || req.Payload.CloneDir != "" || req.Payload.Branch != "release/customer" || req.Payload.TaskRef != sampleNotice().TaskID {
-		t.Fatalf("%+v", req.Payload)
-	}
-	if req.Payload.Origin != "" || req.WorkspaceRecID != "ws-1" || req.Payload.MailTo != "a@b.c,c@d.e" || !req.Payload.HoldMail {
-		t.Fatalf("origin=%q ws=%q to=%q", req.Payload.Origin, req.WorkspaceRecID, req.Payload.MailTo)
-	}
-	if !strings.Contains(req.Payload.Command, "SYSVAL") || !strings.Contains(req.Payload.Command, "V10DATAHUB") || !strings.Contains(req.Payload.Command, "customerCode") || !strings.Contains(req.Payload.Command, "C01") {
-		t.Fatal(req.Payload.Command)
+	if remote != "/开发/S01/app.war" || uploaded != "dh" || svc.builds.(*fakeBuild).starts != 1 || len(jobs.submitted) != 0 {
+		t.Fatalf("remote=%s project=%s starts=%d submitted=%d", remote, uploaded, svc.builds.(*fakeBuild).starts, len(jobs.submitted))
 	}
 	got := decodeReceipt(t, (*receipts)[0])
 	if got.ResultStatus != resultSuccess || got.ResultMessage != msgSuccess {
 		t.Fatalf("%+v", got)
-	}
-	if mails.n != 1 || !mails.ok || mails.msg != msgSuccess {
-		t.Fatalf("mail n=%d ok=%v msg=%s", mails.n, mails.ok, mails.msg)
-	}
-	payload := jobPayload(t, svc, "job-1")
-	if payload.HoldMail || payload.RemotePath != "/开发/S01/app.war" || payload.MailNote != msgSuccess {
-		t.Fatalf("%+v", payload)
-	}
-	if !strings.Contains(payload.DownloadURL, "开发/S01/app.war") || !strings.Contains(payload.DownloadURL, "Signature=") || payload.DownloadUntil == "" {
-		t.Fatalf("%+v", payload)
 	}
 }
 
@@ -537,8 +499,8 @@ func noticeJSON(n Notice) map[string]string {
 		"mailTo":             strings.Join(n.Recipients, ","),
 		"ftpProjectRoot":     n.FTPProjectRoot,
 	}
-	if n.ProjectName != "" {
-		out["projectName"] = n.ProjectName
+	if short := strings.TrimSpace(n.CustomerShortName); short != "" {
+		out["customerShortName"] = short
 	}
 	return out
 }
@@ -583,7 +545,7 @@ func TestHandleFromMQWritesAudit(t *testing.T) {
 	if !got.ok || got.ws != "ws-1" || got.action != audit.ActionIntakeMQ || got.targetType != "intake" || got.targetID != sampleNotice().TaskID {
 		t.Fatalf("%+v", got)
 	}
-	if !strings.Contains(got.summary, "消息队列") || !strings.Contains(got.summary, "release/customer") || !strings.Contains(got.summary, msgSuccess) || !strings.Contains(got.summary, "build=build-1") {
+	if !strings.Contains(got.summary, "消息队列") || !strings.Contains(got.summary, "release/customer") || !strings.Contains(got.summary, msgSuccess) || !strings.Contains(got.summary, "build=build-1") || !strings.Contains(got.summary, "1. 打包") || !strings.Contains(got.summary, "2. 推送") || !strings.Contains(got.summary, "3. 邮件") {
 		t.Fatalf("%s", got.summary)
 	}
 	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
@@ -591,6 +553,31 @@ func TestHandleFromMQWritesAudit(t *testing.T) {
 	}
 	if len(aud.calls) != 2 {
 		t.Fatal("direct handle must not audit")
+	}
+}
+
+func TestReceiptSteps(t *testing.T) {
+	n := sampleNotice()
+	got := receiptSteps(resultSuccess, msgSuccess, n, mailDraft{remote: "/开发/S01/app.war"}, "已发送 收件人 a@b.c，模板 FTP 已更新")
+	for _, part := range []string{
+		"1. 打包：成功。" + msgSuccess,
+		"2. 推送：成功，OSS 路径 /开发/S01/app.war",
+		"3. 邮件：已发送 收件人 a@b.c，模板 FTP 已更新",
+	} {
+		if !strings.Contains(got, part) {
+			t.Fatalf("missing %q in %s", part, got)
+		}
+	}
+	ftp := n
+	ftp.OSSProjectRoot = ""
+	ftp.FTPProjectRoot = "/ftp/app"
+	pushed := receiptSteps(resultFailed, msgUpload, ftp, mailDraft{}, "未发送：未配置收件人")
+	if !strings.Contains(pushed, "1. 打包：成功") || !strings.Contains(pushed, "2. 推送：失败。"+msgUpload) || !strings.Contains(pushed, "3. 邮件：未发送：未配置收件人") {
+		t.Fatalf("%s", pushed)
+	}
+	early := receiptSteps(resultFailed, msgBuild, n, mailDraft{}, "")
+	if !strings.Contains(early, "1. 打包：失败。"+msgBuild) || !strings.Contains(early, "2. 推送：未执行") || !strings.Contains(early, "3. 邮件：未发送") {
+		t.Fatalf("%s", early)
 	}
 }
 

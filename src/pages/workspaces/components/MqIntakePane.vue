@@ -87,10 +87,23 @@ function parseSummary(summary: string): { taskId: string; branch: string; messag
   }
 }
 
+function isProgressMessage(message: string): boolean {
+  return message.startsWith('已接收') || message.includes('正在构建')
+}
+
 function phaseOf(item: MqItem): 'run' | 'ok' | 'fail' {
-  const msg = item.message
-  if (msg.startsWith('已接收') || msg.includes('正在构建')) return 'run'
+  if (isProgressMessage(item.message)) return 'run'
   return item.ok ? 'ok' : 'fail'
+}
+
+/** 同一任务已经有成功或失败记录时，不再把更早的「已接收 / 正在构建」显示为进行中。 */
+function hideSettledProgress(rows: MqItem[]): MqItem[] {
+  const settled = new Set<string>()
+  for (const item of rows) {
+    if (item.title && !isProgressMessage(item.message)) settled.add(item.title)
+  }
+  if (!settled.size) return rows
+  return rows.filter((item) => !item.title || !settled.has(item.title) || !isProgressMessage(item.message))
 }
 
 function phaseVariant(item: MqItem): 'warning' | 'success' | 'danger' {
@@ -245,7 +258,7 @@ async function reload(): Promise<void> {
       },
     })
     if (seq !== listSeq) return
-    items.value = (out.items ?? []).map(toItem)
+    items.value = hideSettledProgress((out.items ?? []).map(toItem))
     const current = items.value.find((item) => item.rec_id === selectedId.value) ?? items.value[0]
     if (!current) {
       selectedId.value = ''
@@ -498,6 +511,7 @@ defineExpose({ reload })
   margin: 0;
   font-size: 0.78rem;
   word-break: break-word;
+  white-space: pre-line;
 }
 
 .mq__list {

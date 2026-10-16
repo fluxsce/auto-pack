@@ -27,13 +27,14 @@ type Notice struct {
 	DeploymentStrategy string
 	OSSProjectRoot     string
 	CustomerCode       string
+	CustomerShortName  string
 	Version            string
 	CustomerBranch     string
-	ProjectName        string
 	BaseRef            string
 	BaseRefType        string
 	SYSVAL             string
 	Recipients         []string
+	ResourceFiles      []string
 	FTPProjectRoot     string
 	Legacy             bool
 }
@@ -66,13 +67,14 @@ func parseNotice(raw []byte) (Notice, error) {
 	n.DeploymentStrategy = jsonString(fields["deploymentStrategy"])
 	n.OSSProjectRoot = jsonString(fields["ossProjectRoot"])
 	n.CustomerCode = jsonString(fields["customerCode"])
+	n.CustomerShortName = jsonString(fields["customerShortName"])
 	n.Version = jsonString(fields["version"])
 	n.CustomerBranch = jsonString(fields["customerBranch"])
-	n.ProjectName = firstJSON(fields, "projectName", "project", "project_name")
 	n.BaseRef = jsonString(fields["baseRef"])
 	n.BaseRefType = jsonString(fields["baseRefType"])
 	n.SYSVAL = jsonString(fields["SYSVAL"])
 	n.Recipients = noticeRecipients(fields)
+	n.ResourceFiles = noticeList(fields, "resourceFiles")
 	n.FTPProjectRoot = firstJSON(fields, "ftpProjectRoot", "ftpPath", "ftpRoot")
 	n.Legacy = present(fields["sourceMetadata"])
 	return n, nil
@@ -87,13 +89,40 @@ func firstJSON(fields map[string]json.RawMessage, keys ...string) string {
 	return ""
 }
 
+const defaultMailDomain = "flux.com.cn"
+
+// completeMailAddr 给没有域名的收件人补上 @flux.com.cn。已写完整邮箱的保持原样。
+func completeMailAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	at := strings.Index(addr, "@")
+	if at < 0 {
+		return addr + "@" + defaultMailDomain
+	}
+	local := strings.TrimSpace(addr[:at])
+	host := strings.TrimSpace(addr[at+1:])
+	if local == "" {
+		return ""
+	}
+	if host == "" {
+		return local + "@" + defaultMailDomain
+	}
+	return local + "@" + host
+}
+
+func noticeList(fields map[string]json.RawMessage, key string) []string {
+	return jsonAddresses(fields[key])
+}
+
 func noticeRecipients(fields map[string]json.RawMessage) []string {
 	keys := []string{"mailTo", "emails", "receivers", "recipients", "notifyTo", "receiver", "email"}
 	seen := map[string]struct{}{}
 	var out []string
 	for _, key := range keys {
 		for _, addr := range jsonAddresses(fields[key]) {
-			addr = strings.TrimSpace(addr)
+			addr = completeMailAddr(addr)
 			if addr == "" {
 				continue
 			}
@@ -128,7 +157,7 @@ func jsonAddresses(raw json.RawMessage) []string {
 }
 
 func splitAddrs(raw string) []string {
-	raw = strings.ReplaceAll(raw, ";", ",")
+	raw = strings.NewReplacer(";", ",", "；", ",", "，", ",").Replace(raw)
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {

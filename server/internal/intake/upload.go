@@ -14,6 +14,7 @@ import (
 	hostftp "auto-pack/server/internal/host/ftp"
 	hostoss "auto-pack/server/internal/host/oss"
 	hostssh "auto-pack/server/internal/host/ssh"
+	"auto-pack/server/internal/host/utils"
 	"auto-pack/server/internal/project"
 )
 
@@ -22,39 +23,56 @@ var (
 	errNoWar   = errors.New("war not found")
 )
 
-// pushProjectWars 上传一个工程目录里的全部 war。返回最后一份的远程路径和签名，供结果邮件使用。
-func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n Notice) (local, remote, signed, until string, err error) {
+// pushProjectWars 上传工程产物。报文写了 resourceFiles 时只推这些文件，否则上传目录里的全部 war。
+// 多份文件的远程路径和临时地址用换行拼在一起，供回执和邮件使用。
+func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n Notice) (local, remote, signed, until, backup string, err error) {
 	work, err := s.projectWork(ctx, prj)
 	if err != nil {
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
-	wars, err := findWars(work)
+	files, err := selectPushFiles(work, n.ResourceFiles)
 	if err != nil {
-		return "", "", "", "", err
+		return "", "", "", "", "", err
 	}
-	for _, file := range wars {
-		local, remote, signed, until, err = s.pushWarFile(ctx, prj, file, n)
+	at := time.Now()
+	var remotes, urls, backups []string
+	for _, file := range files {
+		var oneBackup string
+		local, remote, signed, until, oneBackup, err = s.pushWarFile(ctx, prj, file, n, at)
 		if err != nil {
-			return local, remote, signed, until, err
+			return local, remote, signed, until, backup, err
+		}
+		if remote != "" {
+			remotes = append(remotes, remote)
+		}
+		if signed != "" {
+			urls = append(urls, signed)
+		}
+		if oneBackup != "" {
+			backups = append(backups, oneBackup)
 		}
 	}
-	return local, remote, signed, until, nil
+	return local, strings.Join(remotes, "\n"), strings.Join(urls, "\n"), until, strings.Join(backups, "；"), nil
 }
 
-func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local string, n Notice) (string, string, string, string, error) {
-	var remote, signed, until string
+func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local string, n Notice, at time.Time) (string, string, string, string, string, error) {
+	var remote, signed, until, backup string
 	var err error
 	name := filepath.Base(local)
 	if root := strings.TrimSpace(n.OSSProjectRoot); root != "" {
 		remote = remoteWar(root, name)
 		key := objectKey(root, name)
+		backup, err = s.backupOSS(ctx, prj, key, at)
+		if err != nil {
+			return local, remote, "", "", "", err
+		}
 		if s.upload != nil {
 			err = s.upload(ctx, prj, local, remote)
 		} else {
 			err = s.putOSS(ctx, prj, local, key)
 		}
 		if err != nil {
-			return local, remote, "", "", err
+			return local, remote, "", "", backup, err
 		}
 		expire := s.ossExpire(ctx, prj)
 		if s.sign != nil {
@@ -63,7 +81,7 @@ func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local st
 			signed, err = s.signOSS(ctx, prj, key, expire)
 		}
 		if err != nil {
-			return local, remote, "", "", err
+			return local, remote, "", "", backup, err
 		}
 		until = time.Now().Add(expire).In(receiptTZ).Format("2006-01-02 15:04:05")
 	}
@@ -78,13 +96,47 @@ func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local st
 			err = s.putFTP(ctx, prj, local, dest)
 		}
 		if err != nil {
-			return local, remote, "", "", err
+			return local, remote, "", "", backup, err
 		}
 	}
 	if remote == "" {
-		return local, "", "", "", errors.New("missing transfer path")
+		return local, "", "", "", "", errors.New("missing transfer path")
 	}
-	return local, remote, signed, until, nil
+	return local, remote, signed, until, backup, nil
+}
+
+// backupOSS 在覆盖前把已有对象复制到同目录 BAK/{时间戳}/，规则与 FTP 推送一致。对象不存在时返回空路径。
+func (s *Service) backupOSS(ctx context.Context, prj project.Project, key string, at time.Time) (string, error) {
+	if s == nil || s.upload != nil {
+		return "", nil
+	}
+	cfg, err := s.ossConfig(ctx, prj)
+	if err != nil {
+		return "", err
+	}
+	exists, err := hostoss.Exists(cfg, key)
+	if err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", nil
+	}
+	dest := ossBackupKey(key, at)
+	if err := hostoss.Copy(cfg, key, dest); err != nil {
+		return "", err
+	}
+	return "/" + strings.TrimLeft(dest, "/"), nil
+}
+
+func ossBackupKey(objectKey string, at time.Time) string {
+	objectKey = strings.Trim(strings.ReplaceAll(objectKey, "\\", "/"), "/")
+	dir := path.Dir(objectKey)
+	name := path.Base(objectKey)
+	if dir == "." {
+		dir = ""
+	}
+	folder := utils.DefaultBackupDir("/"+dir, at)
+	return strings.TrimLeft(utils.RemoteJoin(folder, name), "/")
 }
 
 func findWars(work string) ([]string, error) {
@@ -119,6 +171,118 @@ func findWars(work string) ([]string, error) {
 	return wars, nil
 }
 
+// selectPushFiles 按资源文件名挑选要推送的文件。names 为空时退回全部 war。
+func selectPushFiles(work string, names []string) ([]string, error) {
+	wanted := cleanResourceNames(names)
+	if len(wanted) == 0 {
+		return findWars(work)
+	}
+	index, err := indexWorkFiles(work)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	out := make([]string, 0, len(wanted))
+	seen := map[string]struct{}{}
+	for _, name := range wanted {
+		full, ok := matchWorkFile(index, name)
+		if !ok {
+			missing = append(missing, name)
+			continue
+		}
+		if _, dup := seen[full]; dup {
+			continue
+		}
+		seen[full] = struct{}{}
+		out = append(out, full)
+	}
+	if len(missing) > 0 {
+		return nil, errors.New("未找到资源文件 " + strings.Join(missing, ", "))
+	}
+	if len(out) == 0 {
+		return nil, errNoWar
+	}
+	return out, nil
+}
+
+func cleanResourceNames(names []string) []string {
+	out := make([]string, 0, len(names))
+	seen := map[string]struct{}{}
+	for _, name := range names {
+		name = strings.TrimSpace(strings.ReplaceAll(name, "\\", "/"))
+		name = strings.Trim(name, "/")
+		if name == "" || name == "." {
+			continue
+		}
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+type workFile struct {
+	full string
+	rel  string
+}
+
+func indexWorkFiles(work string) ([]workFile, error) {
+	work = strings.TrimSpace(work)
+	st, err := os.Stat(work)
+	if err != nil || !st.IsDir() {
+		return nil, errNoWar
+	}
+	var files []workFile
+	err = filepath.WalkDir(work, func(name string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if name != work && (d.Name() == ".git" || strings.HasPrefix(d.Name(), ".")) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		rel, err := filepath.Rel(work, name)
+		if err != nil {
+			return err
+		}
+		files = append(files, workFile{full: name, rel: filepath.ToSlash(rel)})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].rel < files[j].rel })
+	return files, nil
+}
+
+func matchWorkFile(files []workFile, token string) (string, bool) {
+	token = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(token, "\\", "/")))
+	token = strings.Trim(token, "/")
+	if token == "" {
+		return "", false
+	}
+	base := path.Base(token)
+	var baseHit string
+	for _, file := range files {
+		rel := strings.ToLower(file.rel)
+		if rel == token || strings.HasSuffix(rel, "/"+token) {
+			return file.full, true
+		}
+		if baseHit == "" && strings.ToLower(path.Base(file.rel)) == base {
+			baseHit = file.full
+		}
+	}
+	if baseHit != "" {
+		return baseHit, true
+	}
+	return "", false
+}
+
 func (s *Service) putOSS(ctx context.Context, prj project.Project, local, key string) error {
 	cfg, err := s.ossConfig(ctx, prj)
 	if err != nil {
@@ -135,10 +299,19 @@ func (s *Service) signOSS(ctx context.Context, prj project.Project, key string, 
 	return hostoss.SignGet(cfg, key, expire)
 }
 
-// ossConfig 读取已启用的 oss 环境，与环境页探测同一套 MapConfig。报文只提供对象路径。
+// ossConfig 优先用该 mq 环境关联的 OSS。未关联时用已启用的 oss 环境。报文只提供对象路径。
 func (s *Service) ossConfig(ctx context.Context, prj project.Project) (hostoss.Config, error) {
 	if s.envs == nil {
 		return hostoss.Config{}, errors.New("oss env is not configured")
+	}
+	if raw, ok, err := s.linkedOSSRaw(ctx); err != nil {
+		return hostoss.Config{}, err
+	} else if ok {
+		cfg := hostoss.MapConfig(raw)
+		if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKeyID == "" || cfg.AccessKeySecret == "" {
+			return hostoss.Config{}, errors.New("linked oss env is not configured")
+		}
+		return cfg, nil
 	}
 	cfg := hostoss.MapConfig(s.envs.KindConfig(ctx, prj.WorkspaceRecID, "oss"))
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKeyID == "" || cfg.AccessKeySecret == "" {
@@ -149,7 +322,9 @@ func (s *Service) ossConfig(ctx context.Context, prj project.Project) (hostoss.C
 
 func (s *Service) ossExpire(ctx context.Context, prj project.Project) time.Duration {
 	hours := 24
-	if s.envs != nil {
+	if raw, ok, err := s.linkedOSSRaw(ctx); err == nil && ok {
+		hours = hostoss.ExpireHours(raw)
+	} else if s.envs != nil {
 		hours = hostoss.ExpireHours(s.envs.KindConfig(ctx, prj.WorkspaceRecID, "oss"))
 	}
 	return time.Duration(hours) * time.Hour
@@ -159,7 +334,12 @@ func (s *Service) putFTP(ctx context.Context, prj project.Project, local, remote
 	if s.envs == nil {
 		return errors.New("ftp env is not configured")
 	}
-	envID, kind := uploadEnv(project.ParseRecipe(prj.RecipeJSON))
+	envID, kind := "", ""
+	if id := configString(s.mqConfig(ctx), "ftp_env_rec_id"); id != "" {
+		envID = id
+	} else {
+		envID, kind = uploadEnv(project.ParseRecipe(prj.RecipeJSON))
+	}
 	if envID == "" {
 		return errors.New("ftp env is not configured")
 	}

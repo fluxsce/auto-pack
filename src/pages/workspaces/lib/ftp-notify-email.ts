@@ -2,13 +2,14 @@
 
 import { normalizeRemoteDir, resolvePushLayout } from './workspace-ftp'
 
-export type NotifyMailTemplate = 'ftp_update' | 'project_update'
+export type NotifyMailTemplate = 'ftp_update' | 'oss_update' | 'project_update'
 
 export type FtpNotifyEmailFields = {
   projectLabel: string
   updateContent: string
   taskNo: string
   ftpVersionSource: string
+  sourceLabel?: string
   updateMethod: string
   needRestart: string
   browserCacheRefresh: string
@@ -27,6 +28,7 @@ export const FTP_NOTIFY_SCOPE_OPTIONS = ['DATAHUB共享lib', 'DATAHUB界面', 'D
 
 const TEMPLATE_META: Record<NotifyMailTemplate, { status: string; brand: string; fromName: string }> = {
   ftp_update: { status: 'FTP已更新', brand: 'DATAHUB 更新通知', fromName: FTP_NOTIFY_FROM_NAME },
+  oss_update: { status: 'OSS已更新', brand: 'DATAHUB 更新通知', fromName: FTP_NOTIFY_FROM_NAME },
   project_update: { status: '项目已更新', brand: '项目更新通知', fromName: PROJECT_UPDATE_FROM_NAME },
 }
 
@@ -122,13 +124,14 @@ export function normalizeNotifyRecipients(raw: string, domain = DEFAULT_NOTIFY_E
     .join(', ')
 }
 
-const HIGHLIGHT_LABELS = new Set(['更新内容', 'FTP版本来源', '更新war包'])
+const HIGHLIGHT_LABELS = new Set(['更新内容', 'FTP版本来源', 'OSS访问路径', '更新war包'])
 
-function notifyRows(fields: FtpNotifyEmailFields, summary: string): Array<[string, string]> {
+function notifyRows(fields: FtpNotifyEmailFields, summary: string, template: NotifyMailTemplate): Array<[string, string]> {
+  const sourceLabel = fields.sourceLabel?.trim() || (template === 'oss_update' ? 'OSS访问路径' : 'FTP版本来源')
   const rows: Array<[string, string]> = [
     ['更新内容', summary],
     ['任务编号', fields.taskNo.trim()],
-    ['FTP版本来源', fields.ftpVersionSource.trim()],
+    [sourceLabel, fields.ftpVersionSource.trim()],
     ['更新方式', fields.updateMethod.trim() || FTP_NOTIFY_UPDATE_METHOD],
     ['是否重启', fields.needRestart.trim() || '是'],
     ['浏览器缓存刷新', fields.browserCacheRefresh.trim() || '是'],
@@ -194,7 +197,7 @@ export function buildFtpNotifyEmailBody(
   const { status } = notifyTemplateMeta(template)
   const lines = [
     `${dayGreeting(at)}。${summary}${summary ? ', ' : ''}${status}`,
-    ...notifyRows(fields, summary).map(([k, v]) => `${k}：${v}`),
+    ...notifyRows(fields, summary, template).map(([k, v]) => `${k}：${v}`),
   ]
   return lines.join('\n')
 }
@@ -207,7 +210,7 @@ export function buildFtpNotifyEmailHTML(
   const summary = buildFtpNotifySummary(fields)
   const { status, brand } = notifyTemplateMeta(template)
   const greeting = `${dayGreeting(at)}。${summary}${summary ? ', ' : ''}${status}`
-  const rowsHtml = renderRows(notifyRows(fields, summary))
+  const rowsHtml = renderRows(notifyRows(fields, summary, template))
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" /></head>

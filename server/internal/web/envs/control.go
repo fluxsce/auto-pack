@@ -134,6 +134,40 @@ func (c *Controller) MQMessages(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// OSSObjects 列出该 OSS 环境桶内一层目录。只读。
+func (c *Controller) OSSObjects(w http.ResponseWriter, r *http.Request) {
+	if c.envs == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "env service not configured")
+		return
+	}
+	out, err := c.envs.OSSList(r.Context(), middleware.ActorFrom(r), r.PathValue("id"), r.URL.Query().Get("prefix"), r.URL.Query().Get("marker"))
+	if httpx.WriteSvcErr(w, err) {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// OSSSign 为桶内对象签发临时访问地址。mode=view 打开，download 下载，link 只生成地址。
+func (c *Controller) OSSSign(w http.ResponseWriter, r *http.Request) {
+	if c.envs == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "env service not configured")
+		return
+	}
+	var in struct {
+		Key  string `json:"key"`
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	out, err := c.envs.OSSSign(r.Context(), middleware.ActorFrom(r), r.PathValue("id"), in.Key, in.Mode)
+	if httpx.WriteSvcErr(w, err) {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // SendMail 用已存 SMTP 环境发送一封告知邮件。
 func (c *Controller) SendMail(w http.ResponseWriter, r *http.Request) {
 	var in env.MailIn

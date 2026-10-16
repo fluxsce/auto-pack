@@ -121,6 +121,13 @@ func TestRunProbeGitBinary(t *testing.T) {
 	}
 }
 
+func TestCompleteTestRecipientAddsDomain(t *testing.T) {
+	got := completeTestRecipient("shangjian")
+	if got != "shangjian@flux.com.cn" {
+		t.Fatal(got)
+	}
+}
+
 func TestRunProbeSMTPRequiresTestTo(t *testing.T) {
 	res := runProbe(context.Background(), "smtp", map[string]any{"host": "smtp.example.com"}, "")
 	if res.OK || res.Message != "test recipient required" {

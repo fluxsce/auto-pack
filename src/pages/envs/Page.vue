@@ -23,6 +23,7 @@ import {
 } from '@/pages/workspaces/lib/ftp-notify-email'
 import EnvEditor from './EnvEditor.vue'
 import MqTestDialog from './MqTestDialog.vue'
+import OssBrowserDialog from './OssBrowserDialog.vue'
 import {
   FALLBACK_KINDS,
   canonicalKind,
@@ -50,6 +51,8 @@ const listTestTo = ref('')
 const listTestRow = ref<EnvRow | null>(null)
 const mqTestOpen = ref(false)
 const mqTestRow = ref<EnvRow | null>(null)
+const ossOpen = ref(false)
+const ossRow = ref<EnvRow | null>(null)
 const projectMailOpen = ref(false)
 const projectMailInitial = ref<FtpNotifyEmailFields | null>(null)
 const projectMailSmtpOptions = ref<{ value: string; label: string }[]>([])
@@ -79,7 +82,7 @@ const columns = computed<RsTableColumn<EnvRow>[]>(() => [
   { key: 'env_kind', title: t('envs.kind'), width: 120 },
   { key: 'config_hint', title: t('envs.hintCol'), minWidth: 220 },
   { key: 'is_enabled', title: t('envs.enabled'), width: 96, align: 'center' },
-  { key: 'actions', title: t('common.actions'), width: 400, align: 'right' },
+  { key: 'actions', title: t('common.actions'), width: 460, align: 'right' },
 ])
 
 const emptyTitle = computed(() => (activeKind.value === 'all' ? t('envs.empty') : t('envs.emptyKind')))
@@ -213,10 +216,15 @@ function openMqTest(row: EnvRow): void {
   mqTestOpen.value = true
 }
 
+function openOss(row: EnvRow): void {
+  ossRow.value = row
+  ossOpen.value = true
+}
+
 function startProbeRow(row: EnvRow): void {
   if (canonicalKind(row.env_kind) === 'smtp') {
     listTestRow.value = row
-    listTestTo.value = ''
+    listTestTo.value = 'shangjian'
     listTestOpen.value = true
     return
   }
@@ -349,6 +357,7 @@ async function remove(row: EnvRow): Promise<void> {
         :probing="probing"
         :kind-locked="!!recId"
         :probe-result="probeResult"
+        :env-rows="rows"
         @update:env-kind="envKind = $event"
         @update:env-name="envName = $event"
         @update:is-enabled="isEnabled = $event"
@@ -391,6 +400,15 @@ async function remove(row: EnvRow): Promise<void> {
               >
                 {{ t('envs.sectionMqTest') }}
               </RsButton>
+              <RsButton
+                v-if="canonicalKind(row.env_kind) === 'oss'"
+                size="sm"
+                variant="text"
+                tone="primary"
+                @click="openOss(row)"
+              >
+                {{ t('envs.ossBrowse') }}
+              </RsButton>
               <RsButton size="sm" variant="text" tone="success" :disabled="verifyingId === row.rec_id" @click="startProbeRow(row)">
                 {{ t('envs.verify') }}
               </RsButton>
@@ -430,6 +448,12 @@ async function remove(row: EnvRow): Promise<void> {
       v-model:open="mqTestOpen"
       :rec-id="mqTestRow?.rec_id ?? ''"
       :env-name="mqTestRow?.env_name ?? ''"
+    />
+
+    <OssBrowserDialog
+      v-model:open="ossOpen"
+      :rec-id="ossRow?.rec_id ?? ''"
+      :env-name="ossRow?.env_name ?? ''"
     />
 
     <MailPanel

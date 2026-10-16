@@ -275,7 +275,7 @@ func probeSMTP(ctx context.Context, cfg map[string]any, testTo string) ProbeResu
 	if strings.TrimSpace(sc.Host) == "" {
 		return ProbeResult{OK: false, Message: "host required"}
 	}
-	to := strings.TrimSpace(testTo)
+	to := completeTestRecipient(testTo)
 	if to == "" {
 		return ProbeResult{OK: false, Message: "test recipient required"}
 	}
@@ -293,6 +293,45 @@ func probeSMTP(ctx context.Context, cfg map[string]any, testTo string) ProbeResu
 		return ProbeResult{OK: false, Message: err.Error()}
 	}
 	return ProbeResult{OK: true, Message: "smtp test mail sent", Details: map[string]string{"addr": sc.Addr(), "to": to}}
+}
+
+func completeTestRecipient(raw string) string {
+	raw = strings.NewReplacer(";", ",", "；", ",", "，", ",").Replace(raw)
+	var out []string
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		addr := completeTestAddr(part)
+		if addr == "" {
+			continue
+		}
+		key := strings.ToLower(addr)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, addr)
+	}
+	return strings.Join(out, ",")
+}
+
+func completeTestAddr(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	at := strings.Index(addr, "@")
+	if at < 0 {
+		return addr + "@flux.com.cn"
+	}
+	local := strings.TrimSpace(addr[:at])
+	host := strings.TrimSpace(addr[at+1:])
+	if local == "" {
+		return ""
+	}
+	if host == "" {
+		return local + "@flux.com.cn"
+	}
+	return local + "@" + host
 }
 
 func probeHomeOrBin(ctx context.Context, home, bin, fallback string, args ...string) ProbeResult {
