@@ -27,9 +27,11 @@ var (
 	rePomProperties = regexp.MustCompile(`(?s)<properties>(.*?)</properties>`)
 	rePomPropEntry  = regexp.MustCompile(`(?s)<([A-Za-z_][A-Za-z0-9_.-]*)>\s*([^<]*?)\s*</([A-Za-z_][A-Za-z0-9_.-]*)>`)
 	rePomHeadCut    = regexp.MustCompile(`(?is)<(dependencyManagement|dependencies|build|profiles|modules)\b`)
+	rePomPackaging  = regexp.MustCompile(`(?is)<packaging>\s*([^<]+?)\s*</packaging>`)
 	rePomModules    = regexp.MustCompile(`(?s)<modules>.*?</modules>`)
 	rePomModule     = regexp.MustCompile(`(?s)<module>\s*([^<]+?)\s*</module>`)
 	rePomPropToken  = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_.-]*)\}`)
+	reXMLComment    = regexp.MustCompile(`(?s)<!--.*?-->`)
 )
 
 // MavenModule is one workspace Maven project in build order.
@@ -142,7 +144,6 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			byGA[extra] = n.prj
 		}
 	}
-	incoming := map[string]int{}
 	edges := map[string][]string{}
 	workspaceGroups := map[string]bool{}
 	seenEdge := map[string]bool{}
@@ -153,7 +154,6 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 		}
 	}
 	for _, n := range nodes {
-		incoming[n.prj.RecID] = incoming[n.prj.RecID]
 		for _, dep := range n.deps {
 			prov, ok := byGA[dep.ga]
 			if ok && prov.RecID != n.prj.RecID {
@@ -165,7 +165,6 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 						ProviderRecID: prov.RecID, ProviderName: prov.ProjectName,
 					})
 					edges[prov.RecID] = append(edges[prov.RecID], n.prj.RecID)
-					incoming[n.prj.RecID]++
 				}
 				if prov.IsEnabled == 0 && !seenDisabledWarn[ek] {
 					seenDisabledWarn[ek] = true
@@ -186,55 +185,17 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			})
 		}
 	}
-	byID := map[string]mavenNode{}
-	for _, n := range nodes {
-		byID[n.prj.RecID] = n
-	}
-	queue := make([]string, 0, len(nodes))
-	for _, n := range nodes {
-		if incoming[n.prj.RecID] == 0 {
-			queue = append(queue, n.prj.RecID)
-		}
-	}
-	sortIDsByName(queue, byID)
-	seen := map[string]bool{}
-	for len(queue) > 0 {
-		id := queue[0]
-		queue = queue[1:]
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
-		n := byID[id]
+	ordered, cycles := orderByEdges(nodes, edges)
+	for _, n := range ordered {
 		out.FullBuildOrder = append(out.FullBuildOrder, moduleOf(n.prj, n.ga))
-		for _, next := range edges[id] {
-			incoming[next]--
-			if incoming[next] == 0 {
-				queue = append(queue, next)
-			}
-		}
-		// 同层无依赖模块按工程名排出，预览与实际队列稳定一致。
-		sortIDsByName(queue, byID)
 	}
-	var leftover []mavenNode
-	for _, n := range nodes {
-		if !seen[n.prj.RecID] {
-			leftover = append(leftover, n)
+	if len(cycles) > 0 {
+		out.CyclicGroups = cycles
+		parts := make([]string, 0, len(cycles))
+		for _, c := range cycles {
+			parts = append(parts, strings.Join(c.ProjectNames, "、"))
 		}
-	}
-	sort.SliceStable(leftover, func(i, j int) bool {
-		return leftover[i].prj.ProjectName < leftover[j].prj.ProjectName
-	})
-	if len(leftover) > 0 {
-		ids := make([]string, 0, len(leftover))
-		names := make([]string, 0, len(leftover))
-		for _, n := range leftover {
-			ids = append(ids, n.prj.RecID)
-			names = append(names, n.prj.ProjectName)
-			out.FullBuildOrder = append(out.FullBuildOrder, moduleOf(n.prj, n.ga))
-		}
-		out.CyclicGroups = append(out.CyclicGroups, MavenCycle{ProjectRecIDs: ids, ProjectNames: names})
-		out.Warnings = append(out.Warnings, "检测到循环依赖，按工程名追加剩余模块")
+		out.Warnings = append(out.Warnings, "检测到循环依赖（"+strings.Join(parts, "；")+"），组内按工程名排列")
 	}
 	sort.SliceStable(unparsed, func(i, j int) bool {
 		return unparsed[i].ProjectName < unparsed[j].ProjectName
@@ -256,10 +217,151 @@ func moduleOf(prj project.Project, ga string) MavenModule {
 	}
 }
 
-func sortIDsByName(ids []string, byID map[string]mavenNode) {
-	sort.SliceStable(ids, func(i, j int) bool {
-		return byID[ids[i]].prj.ProjectName < byID[ids[j]].prj.ProjectName
+// orderByEdges 按「上游先于下游」排出节点。只有互相可达的工程算循环；
+// 仅仅依赖环上工程的下游仍排在环之后，不并进循环组。
+func orderByEdges(nodes []mavenNode, succ map[string][]string) ([]mavenNode, []MavenCycle) {
+	byID := map[string]mavenNode{}
+	ids := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		byID[n.prj.RecID] = n
+		ids = append(ids, n.prj.RecID)
+	}
+	pred := map[string][]string{}
+	for prov, consumers := range succ {
+		for _, cons := range consumers {
+			pred[cons] = append(pred[cons], prov)
+		}
+	}
+	sccs := tarjan(ids, pred)
+	sccOf := map[string]int{}
+	for i, comp := range sccs {
+		sort.Slice(comp, func(a, b int) bool {
+			return byID[comp[a]].prj.ProjectName < byID[comp[b]].prj.ProjectName
+		})
+		sccs[i] = comp
+		for _, id := range comp {
+			sccOf[id] = i
+		}
+	}
+	superSucc := map[int][]int{}
+	superIn := make([]int, len(sccs))
+	seenSuper := map[string]bool{}
+	for prov, consumers := range succ {
+		for _, cons := range consumers {
+			a, b := sccOf[prov], sccOf[cons]
+			if a == b {
+				continue
+			}
+			key := fmt.Sprintf("%d>%d", a, b)
+			if seenSuper[key] {
+				continue
+			}
+			seenSuper[key] = true
+			superSucc[a] = append(superSucc[a], b)
+			superIn[b]++
+		}
+	}
+	queue := make([]int, 0, len(sccs))
+	for i := range sccs {
+		if superIn[i] == 0 {
+			queue = append(queue, i)
+		}
+	}
+	sortSCCQueue(queue, sccs, byID)
+	var ordered []mavenNode
+	var cycles []MavenCycle
+	seen := map[int]bool{}
+	for len(queue) > 0 {
+		i := queue[0]
+		queue = queue[1:]
+		if seen[i] {
+			continue
+		}
+		seen[i] = true
+		comp := sccs[i]
+		if len(comp) > 1 {
+			names := make([]string, len(comp))
+			recIDs := make([]string, len(comp))
+			for j, id := range comp {
+				names[j] = byID[id].prj.ProjectName
+				recIDs[j] = id
+				ordered = append(ordered, byID[id])
+			}
+			cycles = append(cycles, MavenCycle{ProjectRecIDs: recIDs, ProjectNames: names})
+		} else if len(comp) == 1 {
+			ordered = append(ordered, byID[comp[0]])
+		}
+		for _, next := range superSucc[i] {
+			superIn[next]--
+			if superIn[next] == 0 {
+				queue = append(queue, next)
+			}
+		}
+		sortSCCQueue(queue, sccs, byID)
+	}
+	return ordered, cycles
+}
+
+func sortSCCQueue(queue []int, sccs [][]string, byID map[string]mavenNode) {
+	sort.SliceStable(queue, func(i, j int) bool {
+		return sccSortName(sccs[queue[i]], byID) < sccSortName(sccs[queue[j]], byID)
 	})
+}
+
+func sccSortName(comp []string, byID map[string]mavenNode) string {
+	if len(comp) == 0 {
+		return ""
+	}
+	return byID[comp[0]].prj.ProjectName
+}
+
+// tarjan 在「依赖谁」的方向上求强连通分量。
+func tarjan(ids []string, adj map[string][]string) [][]string {
+	index := 0
+	var stack []string
+	on := map[string]bool{}
+	idx := map[string]int{}
+	low := map[string]int{}
+	var comps [][]string
+	var strong func(string)
+	strong = func(v string) {
+		idx[v] = index
+		low[v] = index
+		index++
+		stack = append(stack, v)
+		on[v] = true
+		for _, w := range adj[v] {
+			if _, ok := idx[w]; !ok {
+				strong(w)
+				if low[w] < low[v] {
+					low[v] = low[w]
+				}
+			} else if on[w] && idx[w] < low[v] {
+				low[v] = idx[w]
+			}
+		}
+		if low[v] == idx[v] {
+			var comp []string
+			for {
+				w := stack[len(stack)-1]
+				stack = stack[:len(stack)-1]
+				on[w] = false
+				comp = append(comp, w)
+				if w == v {
+					break
+				}
+			}
+			comps = append(comps, comp)
+		}
+	}
+	order := append([]string(nil), ids...)
+	sort.Strings(order)
+	for _, id := range order {
+		if _, ok := idx[id]; !ok {
+			strong(id)
+		}
+	}
+	return comps
 }
 
 const pomReactorDepth = 6
@@ -285,7 +387,7 @@ func collectPomReactor(path string, seen map[string]bool, depth int) (ga string,
 	if err != nil {
 		return "", nil, nil
 	}
-	content := string(raw)
+	content := stripXMLComments(string(raw))
 	ga, deps = parsePomCoords(content)
 	if ga != "" {
 		extra = append(extra, ga)
@@ -393,8 +495,10 @@ func uniqueStrings(in []string) []string {
 }
 
 // parsePomCoords 读单个 pom.xml：坐标取项目头；边含 <parent>、import BOM、正式 <dependencies>。
-// 本文件 <properties> 做字面量替换（不递归读父 POM）。
+// 本文件 <properties> 做字面量替换（不递归读父 POM）。XML 注释不参与。
+// packaging=pom 的 <dependencies> 是子工程继承项，不作为「先构建这些依赖再构建本 POM」。
 func parsePomCoords(content string) (ga string, deps []pomDep) {
+	content = stripXMLComments(content)
 	props := parsePomProperties(content)
 	parentBlock := rePomParent.FindString(content)
 	parentG := resolvePropertyRefs(firstCapture(rePomGroup, parentBlock), props)
@@ -446,16 +550,26 @@ func parsePomCoords(content string) (ga string, deps []pomDep) {
 		addDep(dg, da, ver)
 	}
 
-	body := rePomParent.ReplaceAllString(content, "")
-	body = rePomDepMgmt.ReplaceAllString(body, "")
-	body = rePomPlugin.ReplaceAllString(body, "")
-	for _, block := range rePomDepBlock.FindAllString(body, -1) {
-		dg := resolvePropertyRefs(resolveCoordToken(firstCapture(rePomGroup, block), parentG, g), props)
-		da := resolvePropertyRefs(strings.TrimSpace(firstCapture(rePomArtifact, block)), props)
-		ver := resolveVersionToken(firstCapture(rePomVersion, block), projectV, parentV, props)
-		addDep(dg, da, ver)
+	packaging := strings.ToLower(strings.TrimSpace(firstCapture(rePomPackaging, head)))
+	if packaging != "pom" {
+		body := rePomParent.ReplaceAllString(content, "")
+		body = rePomDepMgmt.ReplaceAllString(body, "")
+		body = rePomPlugin.ReplaceAllString(body, "")
+		for _, block := range rePomDepBlock.FindAllString(body, -1) {
+			dg := resolvePropertyRefs(resolveCoordToken(firstCapture(rePomGroup, block), parentG, g), props)
+			da := resolvePropertyRefs(strings.TrimSpace(firstCapture(rePomArtifact, block)), props)
+			ver := resolveVersionToken(firstCapture(rePomVersion, block), projectV, parentV, props)
+			addDep(dg, da, ver)
+		}
 	}
 	return ga, deps
+}
+
+func stripXMLComments(s string) string {
+	if !strings.Contains(s, "<!--") {
+		return s
+	}
+	return reXMLComment.ReplaceAllString(s, "")
 }
 
 func importBOMBlocks(content string) []string {

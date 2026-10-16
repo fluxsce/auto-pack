@@ -490,3 +490,204 @@ func TestAnalyzeMavenWorkspaceUnmatchedSnapshot(t *testing.T) {
 		t.Fatalf("coord %s", out.UnmatchedDeps[0].Coordinates)
 	}
 }
+
+func TestCommentedDependencyDoesNotCycle(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "parent")
+	lib := filepath.Join(dir, "lib")
+	_ = os.MkdirAll(parent, 0o755)
+	_ = os.MkdirAll(lib, 0o755)
+	if err := os.WriteFile(filepath.Join(parent, "pom.xml"), []byte(`<project>
+		<groupId>com.flux.scev6</groupId>
+		<artifactId>datahub-utils-parentPom</artifactId>
+		<packaging>pom</packaging>
+		<!--<dependency>
+			<groupId>com.flux.wmsv6</groupId>
+			<artifactId>moonbox-data</artifactId>
+			<version>1</version>
+		</dependency>-->
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lib, "pom.xml"), []byte(`<project>
+		<parent><groupId>com.flux.scev6</groupId><artifactId>datahub-utils-parentPom</artifactId><version>1</version></parent>
+		<artifactId>moonbox-data</artifactId>
+		<dependencies>
+			<!-- <dependency>-->
+			<!-- <groupId>com.flux.wmsv6</groupId>-->
+			<!-- <artifactId>datahub-utils-parentPom</artifactId>-->
+			<!-- </dependency>-->
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "lib", ProjectName: "flux-collaboration-storage-repeater", ProjectType: "maven"},
+		{RecID: "parent", ProjectName: "flux-collaboration-parentpom", ProjectType: "maven"},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		if p.RecID == "parent" {
+			return parent
+		}
+		return lib
+	})
+	if len(out.CyclicGroups) != 0 {
+		t.Fatalf("comment must not cycle: %+v", out.CyclicGroups)
+	}
+	if len(out.InternalEdges) != 1 || out.InternalEdges[0].ConsumerRecID != "lib" || out.InternalEdges[0].ProviderRecID != "parent" {
+		t.Fatalf("want only parent edge, got %+v", out.InternalEdges)
+	}
+	if out.FullBuildOrder[0].ProjectRecID != "parent" {
+		t.Fatalf("parent first: %+v", out.FullBuildOrder)
+	}
+}
+
+func TestPackagingPomDependenciesDoNotPrecedeParent(t *testing.T) {
+	dir := t.TempDir()
+	sce := filepath.Join(dir, "sce")
+	parent := filepath.Join(dir, "parent")
+	cache := filepath.Join(dir, "cache")
+	_ = os.MkdirAll(sce, 0o755)
+	_ = os.MkdirAll(parent, 0o755)
+	_ = os.MkdirAll(cache, 0o755)
+	if err := os.WriteFile(filepath.Join(sce, "pom.xml"), []byte(`<project>
+		<groupId>com.flux.scev6</groupId><artifactId>scev6-utils-parentPom</artifactId>
+		<packaging>pom</packaging>
+		<dependencies>
+			<dependency><groupId>com.flux.datahub</groupId><artifactId>flux-datahub-cache</artifactId><version>V10.0.0-SNAPSHOT</version></dependency>
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "pom.xml"), []byte(`<project>
+		<groupId>com.flux.scev6</groupId><artifactId>datahub-utils-parentPom</artifactId>
+		<packaging>pom</packaging>
+		<parent><groupId>com.flux.scev6</groupId><artifactId>scev6-utils-parentPom</artifactId><version>1</version></parent>
+		<dependencies>
+			<dependency><groupId>com.flux.datahub</groupId><artifactId>flux-middleware-kafka-api</artifactId><version>1</version></dependency>
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "pom.xml"), []byte(`<project>
+		<groupId>com.flux.datahub</groupId><artifactId>flux-datahub-cache</artifactId>
+		<parent><groupId>com.flux.scev6</groupId><artifactId>datahub-utils-parentPom</artifactId><version>1</version></parent>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "cache", ProjectName: "flux-datahub-cache", ProjectType: "maven"},
+		{RecID: "parent", ProjectName: "flux-collaboration-parentpom", ProjectType: "maven"},
+		{RecID: "sce", ProjectName: "scev6-utils-parentpom", ProjectType: "maven"},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		switch p.RecID {
+		case "sce":
+			return sce
+		case "parent":
+			return parent
+		default:
+			return cache
+		}
+	})
+	if len(out.CyclicGroups) != 0 {
+		t.Fatalf("inherited parent deps must not cycle: %+v edges=%+v", out.CyclicGroups, out.InternalEdges)
+	}
+	idx := map[string]int{}
+	for i, m := range out.FullBuildOrder {
+		idx[m.ProjectRecID] = i
+	}
+	if idx["sce"] > idx["parent"] || idx["parent"] > idx["cache"] {
+		t.Fatalf("want sce, parent, cache: %+v", out.FullBuildOrder)
+	}
+}
+
+func TestReactorModuleDependencyStillOrders(t *testing.T) {
+	dir := t.TempDir()
+	reactor := filepath.Join(dir, "reactor")
+	mod := filepath.Join(reactor, "mod")
+	lib := filepath.Join(dir, "lib")
+	skipped := filepath.Join(dir, "skipped")
+	_ = os.MkdirAll(mod, 0o755)
+	_ = os.MkdirAll(lib, 0o755)
+	_ = os.MkdirAll(skipped, 0o755)
+	if err := os.WriteFile(filepath.Join(reactor, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>reactor</artifactId><packaging>pom</packaging>
+		<modules><module>mod</module></modules>
+		<dependencies><dependency><groupId>g</groupId><artifactId>skipped</artifactId></dependency></dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mod, "pom.xml"), []byte(`<project>
+		<parent><groupId>g</groupId><artifactId>reactor</artifactId><version>1</version></parent>
+		<artifactId>mod</artifactId>
+		<dependencies><dependency><groupId>g</groupId><artifactId>lib</artifactId></dependency></dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lib, "pom.xml"), []byte(`<project><groupId>g</groupId><artifactId>lib</artifactId></project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skipped, "pom.xml"), []byte(`<project><groupId>g</groupId><artifactId>skipped</artifactId></project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "reactor", ProjectName: "reactor", ProjectType: "maven"},
+		{RecID: "lib", ProjectName: "lib", ProjectType: "maven"},
+		{RecID: "skipped", ProjectName: "skipped", ProjectType: "maven"},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		switch p.RecID {
+		case "lib":
+			return lib
+		case "skipped":
+			return skipped
+		default:
+			return reactor
+		}
+	})
+	if len(out.InternalEdges) != 1 || out.InternalEdges[0].ConsumerRecID != "reactor" || out.InternalEdges[0].ProviderRecID != "lib" {
+		t.Fatalf("module dep should remain and pom dependency should not, got %+v", out.InternalEdges)
+	}
+	if out.FullBuildOrder[0].ProjectRecID != "lib" {
+		t.Fatalf("lib first: %+v", out.FullBuildOrder)
+	}
+}
+
+func TestCycleDoesNotSwallowDownstream(t *testing.T) {
+	dir := t.TempDir()
+	dirs := map[string]string{}
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		p := filepath.Join(dir, name)
+		_ = os.MkdirAll(p, 0o755)
+		dirs[name] = p
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dirs[name], "pom.xml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("alpha", `<project><groupId>g</groupId><artifactId>alpha</artifactId><dependencies><dependency><groupId>g</groupId><artifactId>beta</artifactId></dependency></dependencies></project>`)
+	write("beta", `<project><groupId>g</groupId><artifactId>beta</artifactId><dependencies><dependency><groupId>g</groupId><artifactId>gamma</artifactId></dependency></dependencies></project>`)
+	write("gamma", `<project><groupId>g</groupId><artifactId>gamma</artifactId><dependencies><dependency><groupId>g</groupId><artifactId>beta</artifactId></dependency></dependencies></project>`)
+	list := []project.Project{
+		{RecID: "a", ProjectName: "alpha", ProjectType: "maven"},
+		{RecID: "b", ProjectName: "beta", ProjectType: "maven"},
+		{RecID: "c", ProjectName: "gamma", ProjectType: "maven"},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string { return dirs[p.ProjectName] })
+	if len(out.CyclicGroups) != 1 {
+		t.Fatalf("groups %+v", out.CyclicGroups)
+	}
+	cyc := map[string]bool{}
+	for _, id := range out.CyclicGroups[0].ProjectRecIDs {
+		cyc[id] = true
+	}
+	if cyc["a"] || !cyc["b"] || !cyc["c"] {
+		t.Fatalf("only beta/gamma cycle, got %+v", out.CyclicGroups)
+	}
+	if out.FullBuildOrder[0].ProjectName != "beta" || out.FullBuildOrder[1].ProjectName != "gamma" || out.FullBuildOrder[2].ProjectName != "alpha" {
+		t.Fatalf("downstream alpha must follow the cycle: %+v", out.FullBuildOrder)
+	}
+}
