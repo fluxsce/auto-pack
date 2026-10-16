@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@niuma/ui':
-        specifier: npm:ensis-ui@latest
-        version: ensis-ui@3.0.0(antlr4ng-cli@1.0.7)(rollup@4.63.1)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0))(vue@3.5.42(typescript@5.9.3))
+        specifier: npm:ensis-ui@^3.0.1
+        version: ensis-ui@3.0.1(antlr4ng-cli@1.0.7)(rollup@4.63.1)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0))(vue@3.5.42(typescript@5.9.3))
       axios:
         specifier: ^1.13.2
         version: 1.20.0
@@ -871,8 +871,8 @@ packages:
     resolution: {integrity: sha512-L1l8TNvomm6UVW5B253AGxQagSQr+vGwhMlrrfRS2qmhx46AMpMVJKQYLvWYbysTMY8VoicOvzHzoHMbyzB+4A==}
     engines: {node: '>=10.13.0'}
 
-  ensis-ui@3.0.0:
-    resolution: {integrity: sha512-4iQUjKpxjzlx1MvmEwEJ1YMIaex2oliX2KAjHoEYnN3oI8IEZLe4ost0Nn4iGOhMetlU/dzQswdXSvOYTRCszw==}
+  ensis-ui@3.0.1:
+    resolution: {integrity: sha512-aJJEERRFymBFzI91Ksx5L+O6nkCTxmK7ppNWmdDJ44hQ1kBucl0KvEVPahzG3KNC87tw/jiPcDtom5Xq3YrLOA==}
     engines: {node: '>=20'}
     peerDependencies:
       vite: '>=5'
@@ -2239,7 +2239,7 @@ snapshots:
       graceful-fs: 4.2.11
       tapable: 2.3.3
 
-  ensis-ui@3.0.0(antlr4ng-cli@1.0.7)(rollup@4.63.1)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0))(vue@3.5.42(typescript@5.9.3)):
+  ensis-ui@3.0.1(antlr4ng-cli@1.0.7)(rollup@4.63.1)(vite@7.3.6(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0))(vue@3.5.42(typescript@5.9.3)):
     dependencies:
       '@codemirror/commands': 6.11.1
       '@codemirror/lang-cpp': 6.0.3

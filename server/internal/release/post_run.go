@@ -29,6 +29,9 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 	analysis := order.AnalyzeMavenWorkspace(list, func(prj project.Project) string {
 		return s.workDir(ws, prj)
 	})
+	for _, w := range analysis.Warnings {
+		s.appendLog(logPath, stamp()+" "+w)
+	}
 	byName := map[string]project.Project{}
 	for _, p := range list {
 		byName[p.ProjectName] = p
@@ -46,7 +49,10 @@ func (s *Service) runPost(ctx context.Context, actor iam.Actor, ws workspace.Wor
 		releasedIDs = append(releasedIDs, p.RecID)
 		releasedSet[p.RecID] = struct{}{}
 	}
-	queue := order.Queue(list, analysis, order.QueueOpts{TargetRecIDs: releasedIDs})
+	queue, skipNotes := order.Queue(list, analysis, order.QueueOpts{TargetRecIDs: releasedIDs})
+	for _, line := range skipNotes {
+		s.appendLog(logPath, stamp()+" "+line)
+	}
 	if len(queue) == 0 {
 		s.appendLog(logPath, stamp()+" 发版后没有可构建的工程")
 		return

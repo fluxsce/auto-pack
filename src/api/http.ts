@@ -11,6 +11,14 @@ http.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  // FormData 须由浏览器带 boundary；默认 application/json 会破坏 multipart。
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    if (typeof config.headers?.set === 'function') {
+      config.headers.set('Content-Type', false as unknown as string)
+    } else if (config.headers) {
+      delete (config.headers as Record<string, unknown>)['Content-Type']
+    }
+  }
   return config
 })
 

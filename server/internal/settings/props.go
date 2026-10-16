@@ -175,3 +175,8 @@ func (s *Service) requireWrite(ctx context.Context, actor iam.Actor, workspaceID
 	}
 	return s.guard.Allow(ctx, actor, access.WorkspaceOrDefault(workspaceID), iam.ActionSettingsWrite)
 }
+
+// AuthorizeWrite 校验 settings.write（系统属性、界面升级等）。
+func (s *Service) AuthorizeWrite(ctx context.Context, actor iam.Actor, workspaceID string) error {
+	return s.requireWrite(ctx, actor, workspaceID)
+}

@@ -63,7 +63,7 @@ func TestGateIgnoresProvidersOutsideQueue(t *testing.T) {
 
 func TestQueueSelectedStillPullsUpstream(t *testing.T) {
 	list := testQueueAB()
-	got := Queue(list, testAnalysisChain(), QueueOpts{TargetRecIDs: []string{"c"}})
+	got, _ := Queue(list, testAnalysisChain(), QueueOpts{TargetRecIDs: []string{"c"}})
 	if len(got) != 3 || got[0].RecID != "a" || got[1].RecID != "b" || got[2].RecID != "c" {
 		t.Fatalf("upstream expand lost: %+v", got)
 	}

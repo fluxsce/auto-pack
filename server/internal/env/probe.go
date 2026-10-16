@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"auto-pack/server/internal/host/ftp"
+	hostmns "auto-pack/server/internal/host/mns"
+	hostoss "auto-pack/server/internal/host/oss"
 	hostsmtp "auto-pack/server/internal/host/smtp"
 	"auto-pack/server/internal/iam"
 
@@ -20,6 +22,7 @@ import (
 
 const probeTimeout = 8 * time.Second
 const smtpProbeTimeout = 20 * time.Second
+const mqProbeTimeout = 45 * time.Second
 
 // ProbeResult is a connectivity check. Failed tests still return HTTP 200.
 type ProbeResult struct {
@@ -48,8 +51,11 @@ func (s *Service) Probe(ctx context.Context, actor iam.Actor, in ProbeIn) (Probe
 		return ProbeResult{}, err
 	}
 	timeout := probeTimeout
-	if kind == "smtp" {
+	switch kind {
+	case "smtp":
 		timeout = smtpProbeTimeout
+	case "mq":
+		timeout = mqProbeTimeout
 	}
 	pctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -101,6 +107,10 @@ func runProbe(ctx context.Context, kind string, cfg map[string]any, testTo strin
 		return probeSSH(ctx, cfg)
 	case "ftp":
 		return probeFTP(ctx, cfg)
+	case "oss":
+		return probeOSS(ctx, cfg)
+	case "mq":
+		return probeMQ(ctx, cfg)
 	case "smtp":
 		return probeSMTP(ctx, cfg, testTo)
 	case "git":
@@ -113,6 +123,55 @@ func runProbe(ctx context.Context, kind string, cfg map[string]any, testTo strin
 		return probeHomeOrBin(ctx, "", asString(cfg["node_path"]), "node", "-v")
 	default:
 		return ProbeResult{OK: false, Message: "probe not supported"}
+	}
+}
+
+func probeOSS(ctx context.Context, cfg map[string]any) ProbeResult {
+	oc := hostoss.MapConfig(cfg)
+	if strings.TrimSpace(oc.Endpoint) == "" {
+		return ProbeResult{OK: false, Message: "endpoint required"}
+	}
+	if strings.TrimSpace(oc.Bucket) == "" {
+		return ProbeResult{OK: false, Message: "bucket required"}
+	}
+	if strings.TrimSpace(oc.AccessKeyID) == "" || strings.TrimSpace(oc.AccessKeySecret) == "" {
+		return ProbeResult{OK: false, Message: "access_key_id / access_key_secret required"}
+	}
+	if err := hostoss.Probe(ctx, oc); err != nil {
+		return ProbeResult{OK: false, Message: err.Error()}
+	}
+	return ProbeResult{
+		OK:      true,
+		Message: "oss ok",
+		Details: map[string]string{"bucket": oc.Bucket, "endpoint": oc.Endpoint},
+	}
+}
+
+func probeMQ(ctx context.Context, cfg map[string]any) ProbeResult {
+	mc := hostmns.MapConfig(cfg)
+	if strings.TrimSpace(mc.Endpoint) == "" {
+		return ProbeResult{OK: false, Message: "endpoint required"}
+	}
+	if strings.TrimSpace(mc.RequestQueue) == "" {
+		return ProbeResult{OK: false, Message: "request_queue required"}
+	}
+	if strings.TrimSpace(mc.ResultQueue) == "" {
+		return ProbeResult{OK: false, Message: "result_queue required"}
+	}
+	if strings.TrimSpace(mc.AccessKeyID) == "" || strings.TrimSpace(mc.AccessKeySecret) == "" {
+		return ProbeResult{OK: false, Message: "access_key_id / access_key_secret required"}
+	}
+	if err := hostmns.Probe(ctx, mc); err != nil {
+		return ProbeResult{OK: false, Message: err.Error()}
+	}
+	return ProbeResult{
+		OK:      true,
+		Message: "mns send/receive ok",
+		Details: map[string]string{
+			"endpoint":      mc.Endpoint,
+			"request_queue": mc.RequestQueue,
+			"result_queue":  mc.ResultQueue,
+		},
 	}
 }
 

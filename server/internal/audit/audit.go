@@ -38,6 +38,7 @@ const (
 	ActionSettingsSave    = "settings.save"
 	ActionVarSave         = "settings.var.save"
 	ActionVarDelete       = "settings.var.delete"
+	ActionServerUpgrade   = "settings.upgrade"
 )
 
 const (

@@ -2,163 +2,147 @@ package intake
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
+	"log"
 	"strings"
 	"time"
 
-	"github.com/apache/rocketmq-client-go/v2"
-	"github.com/apache/rocketmq-client-go/v2/consumer"
-	"github.com/apache/rocketmq-client-go/v2/primitive"
-	"github.com/apache/rocketmq-client-go/v2/producer"
+	"auto-pack/server/internal/host/mns"
 )
 
-// RocketConfig 是打包通知队列和回执队列。消息键使用 taskId。
-type RocketConfig struct {
-	NameServer   string
-	NoticeTopic  string
-	ReceiptTopic string
-	Group        string
-	AccessKey    string
-	SecretKey    string
+// MNSConfig 是打包请求队列与结果队列（阿里云 MNS）。
+type MNSConfig struct {
+	Endpoint        string
+	RequestQueue    string
+	ResultQueue     string
+	AccessKeyID     string
+	AccessKeySecret string
+	BatchSize       int
 }
 
-// RocketQueue 订阅打包通知，并把回执按 taskId 写回回执主题。
-type RocketQueue struct {
-	noticeTopic  string
-	receiptTopic string
-	producer     rocketmq.Producer
-	consumer     rocketmq.PushConsumer
+// MNSQueue 轮询请求队列，业务收下后删除；回执写入结果队列。
+type MNSQueue struct {
+	client       *mns.Client
+	requestQueue string
+	resultQueue  string
+	batchSize    int
+	idleWait     time.Duration // 空队列等待，默认 2s；测试可改短
+	errWait      time.Duration // 收消息出错等待，默认 3s
+	stop         context.CancelFunc
 }
 
-// OpenRocket 连接 NameServer。未配置地址时返回错误，调用方继续走目录通知。
-func OpenRocket(cfg RocketConfig) (*RocketQueue, error) {
-	servers := splitServers(cfg.NameServer)
-	if len(servers) == 0 {
-		return nil, errNoNameServer
+// OpenMNS 校验配置并创建客户端。
+func OpenMNS(cfg MNSConfig) (*MNSQueue, error) {
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		return nil, errNoEndpoint
 	}
-	notice := strings.TrimSpace(cfg.NoticeTopic)
-	receipt := strings.TrimSpace(cfg.ReceiptTopic)
-	if notice == "" || receipt == "" {
-		return nil, errNoTopic
+	reqQ := strings.TrimSpace(cfg.RequestQueue)
+	resQ := strings.TrimSpace(cfg.ResultQueue)
+	if reqQ == "" || resQ == "" {
+		return nil, errNoQueue
 	}
-	group := strings.TrimSpace(cfg.Group)
-	if group == "" {
-		group = "auto-pack-intake"
-	}
-	ns, err := primitive.NewNamesrvAddr(servers...)
-	if err != nil {
-		return nil, err
-	}
-	prodOpts := []producer.Option{
-		producer.WithNameServer(ns),
-		producer.WithGroupName(group + "-receipt"),
-		producer.WithInstanceName("intake-receipt"),
-		producer.WithRetry(0),
-		producer.WithSendMsgTimeout(10 * time.Second),
-		producer.WithVIPChannel(false),
-	}
-	consOpts := []consumer.Option{
-		consumer.WithNameServer(ns),
-		consumer.WithGroupName(group),
-		consumer.WithInstance("intake-notice"),
-		consumer.WithVIPChannel(false),
-		consumer.WithConsumeGoroutineNums(1),
-		consumer.WithConsumeTimeout(2 * time.Hour),
-	}
-	if cfg.AccessKey != "" || cfg.SecretKey != "" {
-		cred := primitive.Credentials{AccessKey: cfg.AccessKey, SecretKey: cfg.SecretKey}
-		prodOpts = append(prodOpts, producer.WithCredentials(cred))
-		consOpts = append(consOpts, consumer.WithCredentials(cred))
-	}
-	p, err := rocketmq.NewProducer(prodOpts...)
-	if err != nil {
-		return nil, err
-	}
-	if err := p.Start(); err != nil {
-		return nil, err
-	}
-	c, err := rocketmq.NewPushConsumer(consOpts...)
-	if err != nil {
-		_ = p.Shutdown()
-		return nil, err
-	}
-	return &RocketQueue{noticeTopic: notice, receiptTopic: receipt, producer: p, consumer: c}, nil
-}
-
-// Listen 开始消费通知。处理失败时稍后重投。已有 taskId 仍写回执，由 Handle 确认。
-func (q *RocketQueue) Listen(handle func(context.Context, []byte) error) error {
-	if q == nil || q.consumer == nil {
-		return errNoNameServer
-	}
-	err := q.consumer.Subscribe(q.noticeTopic, consumer.MessageSelector{}, func(ctx context.Context, msgs ...*primitive.MessageExt) (consumer.ConsumeResult, error) {
-		for _, msg := range msgs {
-			if msg == nil {
-				continue
-			}
-			if err := handle(ctx, msg.Body); err != nil {
-				return consumer.ConsumeRetryLater, nil
-			}
-		}
-		return consumer.ConsumeSuccess, nil
+	client, err := mns.New(mns.Config{
+		Endpoint:        cfg.Endpoint,
+		RequestQueue:    reqQ,
+		ResultQueue:     resQ,
+		AccessKeyID:     cfg.AccessKeyID,
+		AccessKeySecret: cfg.AccessKeySecret,
+		BatchSize:       cfg.BatchSize,
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return q.consumer.Start()
+	batch := cfg.BatchSize
+	if batch <= 0 {
+		batch = 10
+	}
+	return &MNSQueue{client: client, requestQueue: reqQ, resultQueue: resQ, batchSize: batch}, nil
 }
 
-// Publish 把回执写入回执主题，消息键为 taskId。
-func (q *RocketQueue) Publish(ctx context.Context, body []byte) error {
-	if q == nil || q.producer == nil {
-		return errNoNameServer
+// Listen 后台轮询请求队列。Handle 成功（业务已收下）后再删消息。
+func (q *MNSQueue) Listen(handle func(context.Context, []byte) error) error {
+	if q == nil || q.client == nil {
+		return errNoEndpoint
 	}
-	msg := receiptMessage(q.receiptTopic, body)
-	sendCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	q.stop = cancel
+	go q.loop(ctx, handle)
+	return nil
+}
+
+func (q *MNSQueue) loop(ctx context.Context, handle func(context.Context, []byte) error) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		msgs, err := q.client.Receive(ctx, q.requestQueue, q.batchSize, 0)
+		if errors.Is(err, mns.ErrMessageNotExist) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(q.waitIdle()):
+			}
+			continue
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("intake mns receive: %v", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(q.waitErr()):
+			}
+			continue
+		}
+		for _, msg := range msgs {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := handle(ctx, msg.Body); err != nil {
+				log.Printf("intake mns handle %s: %v", msg.MessageID, err)
+				continue
+			}
+			if err := q.client.Delete(ctx, q.requestQueue, msg.ReceiptHandle); err != nil {
+				log.Printf("intake mns delete %s: %v", msg.MessageID, err)
+			}
+		}
+	}
+}
+
+// Publish 把回执 JSON 写入结果队列。
+func (q *MNSQueue) Publish(ctx context.Context, body []byte) error {
+	if q == nil || q.client == nil {
+		return errNoEndpoint
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	_, err := q.producer.SendSync(sendCtx, msg)
+	_, err := q.client.Send(sendCtx, q.resultQueue, body)
 	return err
 }
 
-// Close 停止消费并关闭生产者。
-func (q *RocketQueue) Close() {
+// Close 停止轮询。
+func (q *MNSQueue) Close() {
 	if q == nil {
 		return
 	}
-	if q.consumer != nil {
-		_ = q.consumer.Shutdown()
-	}
-	if q.producer != nil {
-		_ = q.producer.Shutdown()
+	if q.stop != nil {
+		q.stop()
+		q.stop = nil
 	}
 }
 
-func receiptMessage(topic string, body []byte) *primitive.Message {
-	msg := primitive.NewMessage(topic, body)
-	if key := receiptTaskID(body); key != "" {
-		msg.WithKeys([]string{key})
+func (q *MNSQueue) waitIdle() time.Duration {
+	if q != nil && q.idleWait > 0 {
+		return q.idleWait
 	}
-	return msg
+	return 2 * time.Second
 }
 
-func receiptTaskID(body []byte) string {
-	var probe struct {
-		TaskID string `json:"taskId"`
+func (q *MNSQueue) waitErr() time.Duration {
+	if q != nil && q.errWait > 0 {
+		return q.errWait
 	}
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(probe.TaskID)
-}
-
-func splitServers(raw string) []string {
-	raw = strings.ReplaceAll(raw, ";", ",")
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			out = append(out, part)
-		}
-	}
-	return out
+	return 3 * time.Second
 }

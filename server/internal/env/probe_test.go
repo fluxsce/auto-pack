@@ -19,6 +19,47 @@ func TestRunProbeRejectsEmptySMTPHost(t *testing.T) {
 	}
 }
 
+func TestRunProbeRejectsEmptyOSSEndpoint(t *testing.T) {
+	res := runProbe(context.Background(), "oss", map[string]any{"bucket": "b"}, "")
+	if res.OK || res.Message != "endpoint required" {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestRunProbeOSSRequiresSecrets(t *testing.T) {
+	res := runProbe(context.Background(), "oss", map[string]any{
+		"endpoint": "https://oss-cn-hangzhou.aliyuncs.com",
+		"bucket":   "datahub",
+	}, "")
+	if res.OK || !strings.Contains(res.Message, "access_key") {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestRunProbeRejectsEmptyMNSEndpoint(t *testing.T) {
+	res := runProbe(context.Background(), "mq", map[string]any{
+		"request_queue": "REQ",
+		"result_queue":  "RES",
+	}, "")
+	if res.OK || res.Message != "endpoint required" {
+		t.Fatalf("%+v", res)
+	}
+}
+
+func TestRunProbeRejectsEmptyMNSQueues(t *testing.T) {
+	res := runProbe(context.Background(), "mq", map[string]any{"endpoint": "https://mns.example"}, "")
+	if res.OK || res.Message != "request_queue required" {
+		t.Fatalf("%+v", res)
+	}
+	res = runProbe(context.Background(), "mq", map[string]any{
+		"endpoint":      "https://mns.example",
+		"request_queue": "REQ",
+	}, "")
+	if res.OK || res.Message != "result_queue required" {
+		t.Fatalf("%+v", res)
+	}
+}
+
 func TestRunProbeRejectsEmptySSHHost(t *testing.T) {
 	res := runProbe(context.Background(), "ssh", map[string]any{}, "")
 	if res.OK {

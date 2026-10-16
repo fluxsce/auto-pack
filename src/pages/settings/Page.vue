@@ -6,6 +6,7 @@ import { SETTINGS_SECTIONS, type SettingsSection } from './sections'
 import SettingsSidebar from './components/SettingsSidebar.vue'
 import PropsPane from './components/PropsPane.vue'
 import VarsPane from './components/VarsPane.vue'
+import UpgradePane from './components/UpgradePane.vue'
 import EnvsPage from '@/pages/envs/Page.vue'
 
 const { t } = useI18n()
@@ -51,6 +52,7 @@ watch(
         <EnvsPage v-if="section === 'sdk'" />
         <PropsPane v-else-if="section === 'props'" />
         <VarsPane v-else-if="section === 'vars'" />
+        <UpgradePane v-else-if="section === 'upgrade'" />
       </div>
     </div>
   </section>

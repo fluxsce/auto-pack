@@ -15,16 +15,21 @@ import (
 )
 
 var (
-	rePomGroup    = regexp.MustCompile(`(?s)<groupId>\s*([^<]+?)\s*</groupId>`)
-	rePomArtifact = regexp.MustCompile(`(?s)<artifactId>\s*([^<]+?)\s*</artifactId>`)
-	rePomVersion  = regexp.MustCompile(`(?s)<version>\s*([^<]+?)\s*</version>`)
-	rePomDepBlock = regexp.MustCompile(`(?s)<dependency>.*?</dependency>`)
-	rePomParent   = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
-	rePomDepMgmt  = regexp.MustCompile(`(?s)<dependencyManagement>.*?</dependencyManagement>`)
-	rePomPlugin   = regexp.MustCompile(`(?s)<plugin>.*?</plugin>`)
-	rePomHeadCut  = regexp.MustCompile(`(?is)<(dependencyManagement|dependencies|build|profiles|modules)\b`)
-	rePomModules  = regexp.MustCompile(`(?s)<modules>.*?</modules>`)
-	rePomModule   = regexp.MustCompile(`(?s)<module>\s*([^<]+?)\s*</module>`)
+	rePomGroup      = regexp.MustCompile(`(?s)<groupId>\s*([^<]+?)\s*</groupId>`)
+	rePomArtifact   = regexp.MustCompile(`(?s)<artifactId>\s*([^<]+?)\s*</artifactId>`)
+	rePomVersion    = regexp.MustCompile(`(?s)<version>\s*([^<]+?)\s*</version>`)
+	rePomScope      = regexp.MustCompile(`(?s)<scope>\s*([^<]+?)\s*</scope>`)
+	rePomType       = regexp.MustCompile(`(?s)<type>\s*([^<]+?)\s*</type>`)
+	rePomDepBlock   = regexp.MustCompile(`(?s)<dependency>.*?</dependency>`)
+	rePomParent     = regexp.MustCompile(`(?s)<parent>.*?</parent>`)
+	rePomDepMgmt    = regexp.MustCompile(`(?s)<dependencyManagement>.*?</dependencyManagement>`)
+	rePomPlugin     = regexp.MustCompile(`(?s)<plugin>.*?</plugin>`)
+	rePomProperties = regexp.MustCompile(`(?s)<properties>(.*?)</properties>`)
+	rePomPropEntry  = regexp.MustCompile(`(?s)<([A-Za-z_][A-Za-z0-9_.-]*)>\s*([^<]*?)\s*</([A-Za-z_][A-Za-z0-9_.-]*)>`)
+	rePomHeadCut    = regexp.MustCompile(`(?is)<(dependencyManagement|dependencies|build|profiles|modules)\b`)
+	rePomModules    = regexp.MustCompile(`(?s)<modules>.*?</modules>`)
+	rePomModule     = regexp.MustCompile(`(?s)<module>\s*([^<]+?)\s*</module>`)
+	rePomPropToken  = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_.-]*)\}`)
 )
 
 // MavenModule is one workspace Maven project in build order.
@@ -84,6 +89,7 @@ type mavenNode struct {
 
 // AnalyzeMavenWorkspace builds a workspace graph: Maven POM plus npm / Node / Vue package.json.
 func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project) string) MavenAnalysis {
+	out := MavenAnalysis{}
 	nodes := make([]mavenNode, 0, len(list))
 	unparsed := make([]project.Project, 0)
 	byGA := map[string]project.Project{}
@@ -108,6 +114,13 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			continue
 		}
 		nodes = append(nodes, mavenNode{prj: prj, ga: ga, extraGAs: extra, deps: deps})
+		if prev, ok := byGA[ga]; ok && prev.RecID != prj.RecID {
+			out.Warnings = append(out.Warnings, fmt.Sprintf(
+				"坐标 %s 同时对应工程 %s 与 %s，排序以先登记的为准",
+				ga, prev.ProjectName, prj.ProjectName,
+			))
+			continue
+		}
 		byGA[ga] = prj
 	}
 	// Nested Spring Boot / reactor modules share the workspace project.
@@ -117,15 +130,23 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 			if extra == "" || extra == n.ga {
 				continue
 			}
-			if _, ok := byGA[extra]; !ok {
-				byGA[extra] = n.prj
+			if prev, ok := byGA[extra]; ok {
+				if prev.RecID != n.prj.RecID {
+					out.Warnings = append(out.Warnings, fmt.Sprintf(
+						"坐标 %s 同时对应工程 %s 与嵌套模块（%s），排序以已登记工程为准",
+						extra, prev.ProjectName, n.prj.ProjectName,
+					))
+				}
+				continue
 			}
+			byGA[extra] = n.prj
 		}
 	}
-	out := MavenAnalysis{}
 	incoming := map[string]int{}
 	edges := map[string][]string{}
 	workspaceGroups := map[string]bool{}
+	seenEdge := map[string]bool{}
+	seenDisabledWarn := map[string]bool{}
 	for _, n := range nodes {
 		if g := coordGroup(n.ga); g != "" {
 			workspaceGroups[g] = true
@@ -136,12 +157,23 @@ func AnalyzeMavenWorkspace(list []project.Project, workDir func(project.Project)
 		for _, dep := range n.deps {
 			prov, ok := byGA[dep.ga]
 			if ok && prov.RecID != n.prj.RecID {
-				out.InternalEdges = append(out.InternalEdges, MavenEdge{
-					ConsumerRecID: n.prj.RecID, ConsumerName: n.prj.ProjectName,
-					ProviderRecID: prov.RecID, ProviderName: prov.ProjectName,
-				})
-				edges[prov.RecID] = append(edges[prov.RecID], n.prj.RecID)
-				incoming[n.prj.RecID]++
+				ek := n.prj.RecID + ">" + prov.RecID
+				if !seenEdge[ek] {
+					seenEdge[ek] = true
+					out.InternalEdges = append(out.InternalEdges, MavenEdge{
+						ConsumerRecID: n.prj.RecID, ConsumerName: n.prj.ProjectName,
+						ProviderRecID: prov.RecID, ProviderName: prov.ProjectName,
+					})
+					edges[prov.RecID] = append(edges[prov.RecID], n.prj.RecID)
+					incoming[n.prj.RecID]++
+				}
+				if prov.IsEnabled == 0 && !seenDisabledWarn[ek] {
+					seenDisabledWarn[ek] = true
+					out.Warnings = append(out.Warnings, fmt.Sprintf(
+						"工程 %s 依赖已停用的 %s，自动构建将跳过该下游",
+						n.prj.ProjectName, prov.ProjectName,
+					))
+				}
 				continue
 			}
 			if ok || !flagUnmatchedDep(dep, n.ga, workspaceGroups) {
@@ -360,11 +392,14 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
-// parsePomCoords 读单个 pom.xml：坐标取项目头，依赖只取正式 <dependencies>。
+// parsePomCoords 读单个 pom.xml：坐标取项目头；边含 <parent>、import BOM、正式 <dependencies>。
+// 本文件 <properties> 做字面量替换（不递归读父 POM）。
 func parsePomCoords(content string) (ga string, deps []pomDep) {
+	props := parsePomProperties(content)
 	parentBlock := rePomParent.FindString(content)
-	parentG := firstCapture(rePomGroup, parentBlock)
-	parentV := firstCapture(rePomVersion, parentBlock)
+	parentG := resolvePropertyRefs(firstCapture(rePomGroup, parentBlock), props)
+	parentA := resolvePropertyRefs(firstCapture(rePomArtifact, parentBlock), props)
+	parentV := resolvePropertyRefs(firstCapture(rePomVersion, parentBlock), props)
 
 	head := content
 	if loc := rePomHeadCut.FindStringIndex(content); loc != nil {
@@ -375,49 +410,142 @@ func parsePomCoords(content string) (ga string, deps []pomDep) {
 	if g == "" {
 		g = parentG
 	}
+	g = resolvePropertyRefs(g, props)
 	a := resolveCoordToken(firstCapture(rePomArtifact, head), parentG, g)
+	a = resolvePropertyRefs(a, props)
 	if g == "" || a == "" {
 		return "", nil
 	}
 	ga = g + ":" + a
-	projectV := resolveVersionToken(firstCapture(rePomVersion, head), "", parentV)
+	projectV := resolveVersionToken(firstCapture(rePomVersion, head), "", parentV, props)
+
+	seen := map[string]bool{}
+	addDep := func(dg, da, ver string) {
+		dg = strings.TrimSpace(dg)
+		da = strings.TrimSpace(da)
+		if dg == "" || da == "" {
+			return
+		}
+		coord := dg + ":" + da
+		if coord == ga || seen[coord] {
+			return
+		}
+		seen[coord] = true
+		deps = append(deps, pomDep{ga: coord, version: ver})
+	}
+
+	// parent 本身也要 install；同反应器子模块 parent 指向本工程时 coord==ga 被跳过。
+	if parentG != "" && parentA != "" {
+		addDep(parentG, parentA, parentV)
+	}
+	// dependencyManagement 里 scope=import + type=pom 的 BOM 需先构建。
+	for _, block := range importBOMBlocks(content) {
+		dg := resolvePropertyRefs(resolveCoordToken(firstCapture(rePomGroup, block), parentG, g), props)
+		da := resolvePropertyRefs(strings.TrimSpace(firstCapture(rePomArtifact, block)), props)
+		ver := resolveVersionToken(firstCapture(rePomVersion, block), projectV, parentV, props)
+		addDep(dg, da, ver)
+	}
 
 	body := rePomParent.ReplaceAllString(content, "")
 	body = rePomDepMgmt.ReplaceAllString(body, "")
 	body = rePomPlugin.ReplaceAllString(body, "")
-	seen := map[string]bool{}
 	for _, block := range rePomDepBlock.FindAllString(body, -1) {
-		dg := resolveCoordToken(firstCapture(rePomGroup, block), parentG, g)
-		da := strings.TrimSpace(firstCapture(rePomArtifact, block))
-		if dg == "" || da == "" {
-			continue
-		}
-		coord := dg + ":" + da
-		if seen[coord] {
-			continue
-		}
-		seen[coord] = true
-		deps = append(deps, pomDep{
-			ga:      coord,
-			version: resolveVersionToken(firstCapture(rePomVersion, block), projectV, parentV),
-		})
+		dg := resolvePropertyRefs(resolveCoordToken(firstCapture(rePomGroup, block), parentG, g), props)
+		da := resolvePropertyRefs(strings.TrimSpace(firstCapture(rePomArtifact, block)), props)
+		ver := resolveVersionToken(firstCapture(rePomVersion, block), projectV, parentV, props)
+		addDep(dg, da, ver)
 	}
 	return ga, deps
 }
 
-func resolveVersionToken(raw, projectVer, parentVer string) string {
+func importBOMBlocks(content string) []string {
+	var out []string
+	for _, dm := range rePomDepMgmt.FindAllString(content, -1) {
+		for _, block := range rePomDepBlock.FindAllString(dm, -1) {
+			scope := strings.ToLower(strings.TrimSpace(firstCapture(rePomScope, block)))
+			typ := strings.ToLower(strings.TrimSpace(firstCapture(rePomType, block)))
+			if scope == "import" && typ == "pom" {
+				out = append(out, block)
+			}
+		}
+	}
+	return out
+}
+
+// parsePomProperties 只读本 POM 的 <properties> 字面量，不做父 POM 继承。
+func parsePomProperties(content string) map[string]string {
+	body := rePomParent.ReplaceAllString(content, "")
+	block := rePomProperties.FindStringSubmatch(body)
+	if len(block) < 2 {
+		return nil
+	}
+	props := map[string]string{}
+	for _, m := range rePomPropEntry.FindAllStringSubmatch(block[1], -1) {
+		if len(m) < 4 || m[1] != m[3] {
+			continue
+		}
+		key := strings.TrimSpace(m[1])
+		if key == "" || strings.EqualFold(key, "properties") {
+			continue
+		}
+		props[key] = strings.TrimSpace(m[2])
+	}
+	return props
+}
+
+// resolvePropertyRefs 用本文件 properties 替换 ${key}；仍含 ${} 则视为未解析。
+func resolvePropertyRefs(raw string, props map[string]string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" || !strings.Contains(s, "${") || len(props) == 0 {
+		if strings.Contains(s, "${") {
+			return ""
+		}
+		return s
+	}
+	out := s
+	for pass := 0; pass < 4 && strings.Contains(out, "${"); pass++ {
+		changed := false
+		for _, m := range rePomPropToken.FindAllStringSubmatch(out, -1) {
+			if len(m) < 2 {
+				continue
+			}
+			key := m[1]
+			val, ok := props[key]
+			if !ok || strings.Contains(val, "${") {
+				continue
+			}
+			next := strings.ReplaceAll(out, m[0], val)
+			if next != out {
+				out = next
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	if strings.Contains(out, "${") {
+		return ""
+	}
+	return out
+}
+
+func resolveVersionToken(raw, projectVer, parentVer string, props map[string]string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
 		return ""
 	}
 	switch s {
 	case "${project.version}", "${pom.version}":
-		return projectVer
+		if projectVer != "" {
+			return projectVer
+		}
+		return resolvePropertyRefs(s, props)
 	case "${project.parent.version}", "${parent.version}", "${pom.parent.version}":
 		return parentVer
 	default:
 		if strings.Contains(s, "${") {
-			return ""
+			return resolvePropertyRefs(s, props)
 		}
 		return s
 	}
@@ -470,9 +598,7 @@ func resolveCoordToken(raw, parentGroup, projectGroup string) string {
 	case "${project.parent.groupId}", "${parent.groupId}", "${pom.parent.groupId}":
 		return parentGroup
 	default:
-		if strings.Contains(s, "${") {
-			return ""
-		}
+		// 其它 ${...} 留给 resolvePropertyRefs 用本 POM properties 展开。
 		return s
 	}
 }

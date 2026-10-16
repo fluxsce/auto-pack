@@ -51,3 +51,32 @@ export function deleteVar(key: string): Promise<void> {
     url: apiPath('settings', 'vars', key),
   })
 }
+
+export type UpgradeStatus = {
+  version: string
+  goos: string
+  goarch: string
+  upgradable: boolean
+  message?: string
+  install_root?: string
+}
+
+export function getUpgradeStatus(): Promise<UpgradeStatus> {
+  return request<UpgradeStatus>({
+    method: 'GET',
+    url: apiPath('settings', 'upgrade'),
+  })
+}
+
+/** 上传发行包并安排重启；成功后服务会退出，前端不必再刷新状态。 */
+export function upgradeServer(file: File, sha256: string): Promise<{ message: string }> {
+  const body = new FormData()
+  body.append('file', file)
+  body.append('sha256', sha256)
+  return request<{ message: string }>({
+    method: 'POST',
+    url: apiPath('settings', 'upgrade'),
+    data: body,
+    timeout: 30 * 60 * 1000,
+  })
+}

@@ -1,9 +1,11 @@
 // Package intake 接收其它平台的打包通知，校验后按分支提交现有 build 作业，再上传和回执。
 //
 // 不改作业的同步、构建、构建后动作、结束邮件和 depends_on。
-// 队列和打包工程从全局 mq 环境读取，不读配置文件。
+// 队列走阿里云 MNS HTTP：全局 mq 环境配 Endpoint、请求/结果队列与 AK。
+// 打包工程按报文 customerBranch 与工程 repo_branch 关联工作空间，不在 mq 环境写死。
 // 打包使用当前工作空间里的工程，按报文分支走现有同步和构建。
 // 报文收件人写入作业。OSS 与 FTP 的连接配置用平台环境，目标路径用报文。
 // 构建失败沿用作业结束邮件；上传完成后再发结果邮件。传到 OSS 时附带临时访问地址。
-// 回执写入回执主题，消息键为 taskId。同一 taskId 再次到达时不重复打包，按已有结果再写回执。
+// 回执写入结果队列。同一 taskId 再次到达时不重复打包，按已有结果再写回执。
+// 请求队列：业务 Handle 成功后再 Delete（ReceiptHandle）；空队列 MessageNotExist 属正常。
 package intake

@@ -2,6 +2,7 @@
 package oss
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
@@ -21,6 +22,43 @@ type Config struct {
 	AccessKeyID     string
 	AccessKeySecret string
 	SecurityToken   string
+}
+
+// Probe 用 HeadBucket 校验 endpoint / bucket / 密钥（不写对象）。
+func Probe(ctx context.Context, cfg Config) error {
+	return probeWithClient(ctx, &http.Client{Timeout: 15 * time.Second}, cfg)
+}
+
+func probeWithClient(ctx context.Context, client *http.Client, cfg Config) error {
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	req, err := newHead(cfg, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	req = req.WithContext(ctx)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 == 2 {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	msg := strings.TrimSpace(string(body))
+	if msg == "" {
+		msg = resp.Status
+	}
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return fmt.Errorf("oss bucket not found: %s", msg)
+	case http.StatusForbidden:
+		return fmt.Errorf("oss access denied: %s", msg)
+	default:
+		return fmt.Errorf("oss probe %s: %s", resp.Status, msg)
+	}
 }
 
 // PutFile 把本地文件上传到 objectKey。
@@ -83,6 +121,33 @@ func signGetAt(cfg Config, objectKey string, exp time.Time) (string, error) {
 		scheme = "http"
 	}
 	return scheme + "://" + cfg.Bucket + "." + host + "/" + escapeKey(objectKey) + "?" + q.Encode(), nil
+}
+
+func newHead(cfg Config, now time.Time) (*http.Request, error) {
+	host, https, err := endpointHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "https"
+	if !https {
+		scheme = "http"
+	}
+	raw := scheme + "://" + cfg.Bucket + "." + host + "/"
+	req, err := http.NewRequest(http.MethodHead, raw, nil)
+	if err != nil {
+		return nil, err
+	}
+	date := now.Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	resource := "/" + cfg.Bucket + "/"
+	canon := ""
+	if token := strings.TrimSpace(cfg.SecurityToken); token != "" {
+		req.Header.Set("x-oss-security-token", token)
+		canon = "x-oss-security-token:" + token + "\n"
+	}
+	stringToSign := "HEAD\n\n\n" + date + "\n" + canon + resource
+	req.Header.Set("Authorization", "OSS "+cfg.AccessKeyID+":"+sign(cfg.AccessKeySecret, stringToSign))
+	return req, nil
 }
 
 func newPut(cfg Config, objectKey string, body io.Reader, size int64, now time.Time) (*http.Request, error) {

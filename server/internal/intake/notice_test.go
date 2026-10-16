@@ -1,7 +1,6 @@
 package intake
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -57,25 +56,6 @@ func TestParseNoticeRecipients(t *testing.T) {
 	}
 	if len(n.Recipients) != 2 || n.Recipients[0] != "a@b.c" || n.Recipients[1] != "c@d.e" {
 		t.Fatalf("%v", n.Recipients)
-	}
-}
-
-func TestLoadMQConfig(t *testing.T) {
-	got := fromConfig(map[string]any{
-		"project_id":      "p-dh",
-		"name_server":     "10.0.0.1:9876",
-		"notice_topic":    "DATAHUB_PACK_NOTICE",
-		"receipt_topic":   "DATAHUB_PACK_RECEIPT",
-		"receipt_retries": float64(5),
-	})
-	if !got.Enabled || got.ProjectID != "p-dh" || got.Rocket.NoticeTopic != "DATAHUB_PACK_NOTICE" || got.Retries != 5 {
-		t.Fatalf("%+v", got)
-	}
-	if fromConfig(map[string]any{"name_server": "10.0.0.1:9876"}).Enabled {
-		t.Fatal("incomplete")
-	}
-	if Load(context.Background(), nil).Enabled {
-		t.Fatal("nil env")
 	}
 }
 

@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// UseRocket 改走队列：订阅通知主题，回执按 taskId 写入回执主题。
-func (s *Service) UseRocket(q *RocketQueue) {
+// UseMNS 改走阿里云 MNS：轮询请求队列，回执写入结果队列。
+func (s *Service) UseMNS(q *MNSQueue) {
 	if s == nil || q == nil {
 		return
 	}

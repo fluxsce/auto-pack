@@ -1,6 +1,7 @@
 package order
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -19,18 +20,21 @@ func IsOrderedType(projectType string) bool {
 
 // QueueOpts selects which enabled projects enter an auto-build queue.
 type QueueOpts struct {
-	TargetRecIDs   []string
-	IncludeOthers  bool
+	TargetRecIDs  []string
+	IncludeOthers bool
 	// ExactTargets keeps TargetRecIDs as-is (no pom.xml upstream expansion).
 	ExactTargets bool
 }
 
 // Queue returns enabled projects in dependency order, then leftovers, then optional non-graph projects.
-func Queue(list []project.Project, analysis MavenAnalysis, opts QueueOpts) []project.Project {
+// skipped 为因工作空间上游已停用而未入队的下游说明（可直接写构建日志）。
+func Queue(list []project.Project, analysis MavenAnalysis, opts QueueOpts) (out []project.Project, skipped []string) {
 	enabled := make([]project.Project, 0, len(list))
 	byID := map[string]project.Project{}
+	disabled := map[string]project.Project{}
 	for _, p := range list {
 		if p.IsEnabled == 0 {
+			disabled[p.RecID] = p
 			continue
 		}
 		enabled = append(enabled, p)
@@ -61,7 +65,14 @@ func Queue(list []project.Project, analysis MavenAnalysis, opts QueueOpts) []pro
 			collectUpstream(analysis.InternalEdges, needed)
 		}
 	}
-	out := make([]project.Project, 0, len(needed))
+
+	blocked, skipMsgs := consumersBlockedByDisabled(analysis.InternalEdges, needed, disabled, byID)
+	skipped = skipMsgs
+	for id := range blocked {
+		delete(needed, id)
+	}
+
+	out = make([]project.Project, 0, len(needed))
 	seen := map[string]struct{}{}
 	for _, m := range analysis.FullBuildOrder {
 		if _, ok := needed[m.ProjectRecID]; !ok {
@@ -105,7 +116,56 @@ func Queue(list []project.Project, analysis MavenAnalysis, opts QueueOpts) []pro
 		sort.Slice(extras, func(i, j int) bool { return extras[i].ProjectName < extras[j].ProjectName })
 		out = append(out, extras...)
 	}
-	return out
+	return out, skipped
+}
+
+// consumersBlockedByDisabled 若 needed 中消费者的上游（含传递）已停用，则跳过该消费者。
+func consumersBlockedByDisabled(
+	edges []MavenEdge,
+	needed map[string]struct{},
+	disabled map[string]project.Project,
+	enabledByID map[string]project.Project,
+) (blocked map[string]struct{}, msgs []string) {
+	blocked = map[string]struct{}{}
+	if len(disabled) == 0 {
+		return blocked, nil
+	}
+	grew := true
+	for grew {
+		grew = false
+		for _, e := range edges {
+			if _, ok := needed[e.ConsumerRecID]; !ok {
+				continue
+			}
+			if _, ok := blocked[e.ConsumerRecID]; ok {
+				continue
+			}
+			_, provDisabled := disabled[e.ProviderRecID]
+			_, provBlocked := blocked[e.ProviderRecID]
+			if !provDisabled && !provBlocked {
+				continue
+			}
+			blocked[e.ConsumerRecID] = struct{}{}
+			grew = true
+			consumerName := e.ConsumerName
+			if p, ok := enabledByID[e.ConsumerRecID]; ok {
+				consumerName = p.ProjectName
+			}
+			providerName := e.ProviderName
+			if p, ok := disabled[e.ProviderRecID]; ok {
+				providerName = p.ProjectName
+			} else if p, ok := enabledByID[e.ProviderRecID]; ok {
+				providerName = p.ProjectName
+			}
+			reason := "已停用"
+			if provBlocked && !provDisabled {
+				reason = "因上游停用而被跳过"
+			}
+			msgs = append(msgs, fmt.Sprintf("跳过 %s：上游 %s %s", consumerName, providerName, reason))
+		}
+	}
+	sort.Strings(msgs)
+	return blocked, msgs
 }
 
 func collectUpstream(edges []MavenEdge, needed map[string]struct{}) {

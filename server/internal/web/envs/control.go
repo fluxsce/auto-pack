@@ -85,6 +85,42 @@ func (c *Controller) Probe(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// MQProduce 向 MNS 请求/结果队列发送一条测试消息，失败也回 200 + ok=false。
+func (c *Controller) MQProduce(w http.ResponseWriter, r *http.Request) {
+	if c.envs == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "env service not configured")
+		return
+	}
+	var in env.MQTestIn
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	out, err := c.envs.MQProduce(r.Context(), middleware.ActorFrom(r), in)
+	if httpx.WriteSvcErr(w, err) {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// MQConsume 从 MNS 请求/结果队列拉取测试消息，失败也回 200 + ok=false。
+func (c *Controller) MQConsume(w http.ResponseWriter, r *http.Request) {
+	if c.envs == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "env service not configured")
+		return
+	}
+	var in env.MQTestIn
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	out, err := c.envs.MQConsume(r.Context(), middleware.ActorFrom(r), in)
+	if httpx.WriteSvcErr(w, err) {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // SendMail 用已存 SMTP 环境发送一封告知邮件。
 func (c *Controller) SendMail(w http.ResponseWriter, r *http.Request) {
 	var in env.MailIn

@@ -156,14 +156,13 @@ var Catalog = []KindSpec{
 	{
 		Kind: "mq", Category: CategoryRemote,
 		Fields: []FieldSpec{
-			{Key: "project_id", Type: FieldText, Required: true},
-			{Key: "name_server", Type: FieldText, Required: true},
-			{Key: "notice_topic", Type: FieldText, Required: true},
-			{Key: "receipt_topic", Type: FieldText, Required: true},
-			{Key: "group", Type: FieldText, Default: "auto-pack-intake"},
-			{Key: "access_key", Type: FieldPassword, Secret: true},
-			{Key: "secret_key", Type: FieldPassword, Secret: true},
-			{Key: "receipt_retries", Type: FieldNumber, Default: 3},
+			{Key: "endpoint", Type: FieldText, Required: true, Group: "mns"},
+			{Key: "access_key_id", Type: FieldText, Required: true, Group: "mns"},
+			{Key: "access_key_secret", Type: FieldPassword, Secret: true, Required: true, Group: "mns"},
+			{Key: "request_queue", Type: FieldText, Required: true, Group: "queues"},
+			{Key: "result_queue", Type: FieldText, Required: true, Group: "queues"},
+			{Key: "batch_size", Type: FieldNumber, Default: 10, Group: "queues"},
+			{Key: "receipt_retries", Type: FieldNumber, Default: 3, Group: "queues"},
 		},
 	},
 	{
@@ -338,7 +337,7 @@ func ConfigHint(kind string, cfg map[string]any) string {
 	if cfg == nil {
 		return ""
 	}
-	prefer := []string{"host", "from", "to", "java_home", "maven_home", "node_path", "username", "email", "registry"}
+	prefer := []string{"host", "endpoint", "request_queue", "from", "to", "java_home", "maven_home", "node_path", "username", "email", "registry"}
 	secret := secretKeys(kind)
 	for _, k := range prefer {
 		if secret[k] {

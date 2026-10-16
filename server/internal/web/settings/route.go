@@ -20,4 +20,6 @@ func Init(d mod.Deps) {
 	d.Mux.Handle("GET "+mod.Path("settings", "vars"), d.Authz(http.HandlerFunc(c.ListVars)))
 	d.Mux.Handle("POST "+mod.Path("settings", "vars"), d.Authz(http.HandlerFunc(c.SaveVar)))
 	d.Mux.Handle("DELETE "+mod.Path("settings", "vars", "{key}"), d.Authz(http.HandlerFunc(c.DeleteVar)))
+	d.Mux.Handle("GET "+mod.Path("settings", "upgrade"), d.Authz(http.HandlerFunc(c.UpgradeStatus)))
+	d.Mux.Handle("POST "+mod.Path("settings", "upgrade"), d.Authz(http.HandlerFunc(c.UpgradeServer)))
 }

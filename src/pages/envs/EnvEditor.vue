@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   RsAlert,
@@ -10,9 +10,14 @@ import {
   RsInput,
   RsSelect,
   RsSwitch,
+  RsTextarea,
+  useRsToast,
   type RsSelectModelValue,
 } from '@/ui'
+import { apiPath } from '@/api/prefix'
+import { request } from '@/api/http'
 import {
+  canonicalKind,
   defaultsOf,
   fieldVisible,
   findKind,
@@ -47,7 +52,158 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const toast = useRsToast()
 const testTo = ref(props.envKind === 'smtp' ? String(props.config.to ?? '') : '')
+const isMq = computed(() => canonicalKind(props.envKind) === 'mq')
+
+type MqConsumeMsg = {
+  message_id: string
+  body: string
+  receipt_handle?: string
+  deleted?: boolean
+}
+
+const mqBusy = ref(false)
+/** 往返自测默认结果队列：请求队列会被本服务 intake 抢走。 */
+const mqQueue = ref<'request' | 'result'>('result')
+const mqDeleteAfter = ref(false)
+const mqBody = ref(
+  JSON.stringify(
+    {
+      taskId: 'TSKIDS-TEST-001',
+      taskNo: 'TEST-001',
+      packTaskId: 'PACK-TEST-001',
+      subsystemType: 'DATAHUB',
+      packagingMode: 'war',
+      deploymentStrategy: 'war',
+      ossProjectRoot: '/开发/S01/',
+      customerCode: 'DEMO',
+      version: 'V9.0.0',
+      customerBranch: 'release/V9.0.0_DEMO',
+      baseRef: 'V9.0.0_P01',
+      baseRefType: 'tag',
+      SYSVAL: 'V10DATAHUB',
+    },
+    null,
+    2,
+  ),
+)
+const mqProduceResult = ref<{ ok: boolean; message: string; message_id?: string; queue?: string } | null>(null)
+const mqConsumeResult = ref<{
+  ok: boolean
+  message: string
+  queue?: string
+  empty?: boolean
+  messages?: MqConsumeMsg[]
+} | null>(null)
+
+const mqQueueOptions = computed(() => [
+  { value: 'request', label: t('envs.mqQueueRequest') },
+  { value: 'result', label: t('envs.mqQueueResult') },
+])
+
+watch(
+  () => props.envKind,
+  (kind) => {
+    if (canonicalKind(kind) !== 'mq') {
+      mqProduceResult.value = null
+      mqConsumeResult.value = null
+    }
+  },
+)
+
+function mqPayload() {
+  return {
+    rec_id: props.recId,
+    env_kind: props.envKind,
+    config: props.config,
+    queue: mqQueue.value,
+  }
+}
+
+async function mqProduce(): Promise<void> {
+  const body = mqBody.value.trim()
+  if (!body) {
+    toast.error(t('envs.mqBodyRequired'))
+    return
+  }
+  mqBusy.value = true
+  mqProduceResult.value = null
+  try {
+    const res = await request<{ ok: boolean; message: string; message_id?: string; queue?: string }>({
+      method: 'POST',
+      url: apiPath('envs', 'mq-produce'),
+      data: { ...mqPayload(), body },
+    })
+    mqProduceResult.value = res
+    if (res.ok) toast.success(t('envs.mqProduceOk'))
+    else toast.error(res.message || t('envs.mqProduceFail'))
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    mqBusy.value = false
+  }
+}
+
+async function mqConsume(): Promise<void> {
+  mqBusy.value = true
+  mqConsumeResult.value = null
+  try {
+    const res = await request<{
+      ok: boolean
+      message: string
+      queue?: string
+      empty?: boolean
+      messages?: MqConsumeMsg[]
+    }>({
+      method: 'POST',
+      url: apiPath('envs', 'mq-consume'),
+      data: { ...mqPayload(), delete: mqDeleteAfter.value },
+    })
+    mqConsumeResult.value = res
+    if (res.ok) {
+      toast.success(res.empty ? t('envs.mqConsumeEmpty') : t('envs.mqConsumeOk'))
+    } else {
+      toast.error(res.message || t('envs.mqConsumeFail'))
+    }
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    mqBusy.value = false
+  }
+}
+
+function formatMqProduce(res: { ok: boolean; message: string; message_id?: string; queue?: string }): string {
+  const lines = [res.message]
+  if (res.queue) lines.push(`queue: ${res.queue}`)
+  if (res.message_id) lines.push(`message_id: ${res.message_id}`)
+  return lines.filter(Boolean).join('\n')
+}
+
+function formatMqConsume(res: {
+  ok: boolean
+  message: string
+  queue?: string
+  empty?: boolean
+  messages?: MqConsumeMsg[]
+}): string {
+  const lines = [res.message]
+  if (res.queue) lines.push(`queue: ${res.queue}`)
+  if (res.empty) return lines.join('\n')
+  const msgs = res.messages ?? []
+  if (!msgs.length) return lines.join('\n')
+  lines.push(`count: ${msgs.length}`)
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i]
+    lines.push('')
+    lines.push(`--- #${i + 1} ---`)
+    if (m.message_id) lines.push(`message_id: ${m.message_id}`)
+    if (m.deleted != null) lines.push(`deleted: ${m.deleted}`)
+    lines.push('body:')
+    lines.push(m.body || '')
+  }
+  return lines.join('\n')
+}
 
 const spec = computed(() => findKind(props.kinds, props.envKind))
 
@@ -78,6 +234,23 @@ function fieldLabel(key: string): string {
   const label = t(i18nKey)
   return label === i18nKey ? key : label
 }
+
+function fieldPlaceholder(key: string, secret: boolean | undefined): string {
+  if (secret && props.secretsSet.includes(key)) return t('envs.secretKeep')
+  const kind = canonicalKind(props.envKind)
+  const byKind = `envs.placeholders.${kind}.${key}`
+  const kindLabelText = t(byKind)
+  if (kindLabelText !== byKind) return kindLabelText
+  const i18nKey = `envs.placeholders.${key}`
+  const label = t(i18nKey)
+  if (label !== i18nKey) return label
+  return fieldLabel(key)
+}
+
+const configHint = computed(() => {
+  if (canonicalKind(props.envKind) === 'mq') return t('envs.mqHint')
+  return t('envs.editorHint')
+})
 
 function groupLabel(group: string): string {
   const key = `envs.groups.${group}`
@@ -110,6 +283,12 @@ function boolValue(key: string): boolean {
 
 function setConfig(key: string, value: unknown): void {
   emit('update:config', { ...props.config, [key]: value })
+}
+
+function numberOrEmpty(raw: string | number): number | '' {
+  if (raw === '' || raw == null) return ''
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  return Number.isFinite(n) ? n : ''
 }
 
 function onKind(value: RsSelectModelValue): void {
@@ -187,7 +366,7 @@ function showGroup(index: number): string {
         <div class="env-editor__config">
           <div class="env-editor__config-head">
             <span>{{ categoryLabel }}</span>
-            <p>{{ t('envs.editorHint') }}</p>
+            <p>{{ configHint }}</p>
           </div>
           <div class="env-editor__grid">
           <template v-for="(field, index) in visibleFields" :key="field.key">
@@ -206,15 +385,84 @@ function showGroup(index: number): string {
             <RsFormItem v-else :label="fieldLabel(field.key)" :required="field.required">
               <RsInput
                 :model-value="textValue(field.key)"
-                :type="field.type === 'password' ? 'password' : 'text'"
-                :placeholder="
-                  field.secret && secretsSet.includes(field.key) ? t('envs.secretKeep') : fieldLabel(field.key)
-                "
-                @update:model-value="setConfig(field.key, $event)"
+                :type="field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'"
+                :placeholder="fieldPlaceholder(field.key, field.secret || field.type === 'password')"
+                @update:model-value="setConfig(field.key, field.type === 'number' ? numberOrEmpty($event) : $event)"
               />
             </RsFormItem>
           </template>
           </div>
+        </div>
+      </section>
+
+      <section v-if="isMq" class="env-editor__section">
+        <h3 class="env-editor__section-title">{{ t('envs.sectionMqTest') }}</h3>
+        <p class="env-editor__mq-desc">{{ t('envs.mqTestHint') }}</p>
+        <div class="env-editor__mq">
+          <RsFormItem :label="t('envs.mqQueue')">
+            <RsSelect
+              class="env-editor__full"
+              :model-value="mqQueue"
+              :options="mqQueueOptions"
+              :disabled="saving || probing || mqBusy"
+              @update:model-value="(v: RsSelectModelValue) => (mqQueue = asString(v) === 'result' ? 'result' : 'request')"
+            />
+          </RsFormItem>
+
+          <RsFormItem :label="t('envs.mqBody')">
+            <RsTextarea
+              v-model="mqBody"
+              :rows="10"
+              :placeholder="t('envs.mqBodyPlaceholder')"
+              :disabled="saving || probing || mqBusy"
+            />
+          </RsFormItem>
+
+          <div class="env-editor__mq-actions">
+            <RsButton
+              variant="ghost"
+              :disabled="saving || probing || mqBusy"
+              @click="mqProduce"
+            >
+              {{ t('envs.mqProduce') }}
+            </RsButton>
+            <RsSwitch
+              :model-value="mqDeleteAfter"
+              :disabled="saving || probing || mqBusy"
+              @update:model-value="mqDeleteAfter = !!$event"
+            >
+              {{ t('envs.mqDeleteAfter') }}
+            </RsSwitch>
+            <RsButton
+              variant="ghost"
+              :disabled="saving || probing || mqBusy"
+              @click="mqConsume"
+            >
+              {{ t('envs.mqConsume') }}
+            </RsButton>
+          </div>
+
+          <RsAlert
+            v-if="mqProduceResult"
+            class="env-editor__mq-result"
+            :type="mqProduceResult.ok ? 'success' : 'danger'"
+            :title="mqProduceResult.ok ? t('envs.mqProduceOk') : t('envs.mqProduceFail')"
+            closable
+            @close="mqProduceResult = null"
+          >
+            <pre class="env-editor__mq-pre">{{ formatMqProduce(mqProduceResult) }}</pre>
+          </RsAlert>
+
+          <RsAlert
+            v-if="mqConsumeResult"
+            class="env-editor__mq-result"
+            :type="mqConsumeResult.ok ? 'success' : 'danger'"
+            :title="mqConsumeResult.ok ? (mqConsumeResult.empty ? t('envs.mqConsumeEmpty') : t('envs.mqConsumeOk')) : t('envs.mqConsumeFail')"
+            closable
+            @close="mqConsumeResult = null"
+          >
+            <pre class="env-editor__mq-pre">{{ formatMqConsume(mqConsumeResult) }}</pre>
+          </RsAlert>
         </div>
       </section>
 
@@ -242,13 +490,13 @@ function showGroup(index: number): string {
             :title="t('envs.testRecipientHint')"
             :disabled="saving || probing"
           />
-          <RsButton variant="ghost" :disabled="saving || probing" @click="onProbe">
+          <RsButton variant="ghost" :disabled="saving || probing || mqBusy" @click="onProbe">
             {{ t('envs.testConnection') }}
           </RsButton>
         </div>
         <div class="env-editor__footer-main">
-          <RsButton variant="ghost" :disabled="saving || probing" @click="emit('cancel')">{{ t('common.cancel') }}</RsButton>
-          <RsButton :disabled="saving || probing" @click="emit('save')">{{ t('common.save') }}</RsButton>
+          <RsButton variant="ghost" :disabled="saving || probing || mqBusy" @click="emit('cancel')">{{ t('common.cancel') }}</RsButton>
+          <RsButton :disabled="saving || probing || mqBusy" @click="emit('save')">{{ t('common.save') }}</RsButton>
         </div>
       </div>
     </template>
@@ -352,6 +600,43 @@ function showGroup(index: number): string {
 
 .env-editor__full {
   width: 100%;
+}
+
+.env-editor__mq-desc {
+  margin: -0.35rem 0 0.85rem;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--shell-muted);
+}
+
+.env-editor__mq {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.15rem 1.15rem 1.05rem;
+  border: 1px solid var(--shell-border);
+  border-radius: 0.75rem;
+  background: var(--shell-inset-bg);
+}
+
+.env-editor__mq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.env-editor__mq-result {
+  margin: 0;
+}
+
+.env-editor__mq-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .env-editor__footer {

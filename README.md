@@ -77,6 +77,8 @@ pnpm package:linux
 
 到发行目录后：`start.bat` / `./start.sh`。浏览器 http://127.0.0.1:8080/autopack/
 
+已用发行包启动的实例可在 **设置 → 界面升级** 上传同平台的 `auto-pack-{版本}-{os}-{arch}.tar.gz`（Windows 亦可 `.zip`）与 SHA256，由控制台替换 `bin` / `web` / `script` 后重启；`configs/*.yaml`、`data`、`logs` 保留。开发态 `go run` / `pnpm dev` 不可升级。
+
 GitHub Actions（[`.github/workflows/pack.yml`](.github/workflows/pack.yml)）在发版时打包，不跟每次无关提交：
 
 | 触发 | 行为 |
@@ -101,7 +103,9 @@ JWT 只证明身份。写操作走 `iam.Allow(actor, workspace, action)`。
 
 ## 外部打包
 
-其它平台把打包通知写入 RocketMQ。在全局环境里新增并启用一条 `mq` 后才会订阅，不写在 `app.yaml`，也不读进程环境变量。OSS 密钥、FTP 账号和 SMTP 同样用平台环境。报文提供分支、收件人，以及这次要传到的 `ossProjectRoot` 或 `ftpProjectRoot`。
+其它平台（如 BOMS）把打包通知写入**阿里云 MNS** 队列。在全局环境里新增并启用一条 `mq` 后才会订阅，不写在 `app.yaml`，也不读进程环境变量。OSS / FTP / SMTP 同样用平台环境。仓库地址不随报文下发，按 `customerBranch` 与工程 `repo_branch` 关联工作空间后构建。
+
+实现见 `server/internal/intake/`、`server/internal/host/mns/`。
 
 ```mermaid
 flowchart TD
@@ -111,7 +115,7 @@ flowchart TD
   Claim -->|已有| Replay["不重复打包<br/>按已有结果再写回执"]
   Claim -->|新任务| Check{"报文校验"}
   Check -->|不通过| ReceiptFail
-  Check -->|通过| Job["提交现有构建作业<br/>当前工作空间，分支取 customerBranch"]
+  Check -->|通过| Job["按 customerBranch=repo_branch<br/>关联工作空间并提交构建"]
   Job --> Run["同步并构建<br/>成功邮件先挂起"]
   Run -->|构建失败| FailMail["作业结束邮件：失败"]
   FailMail --> ReceiptBuild["失败回执，不上传"]
@@ -133,17 +137,98 @@ flowchart TD
 
 同一 `taskId` 无论进行中、成功或失败，再次投递都不重新打包。已有结果原样再写一笔回执；还在处理时回执说明不重复打包。回执写入失败会重试，耗尽后把该任务记为回执失败，不改成成功。邮件失败不影响回执。
 
-`mq` 环境字段：
+### mq 环境（阿里云 MNS）
+
+不配打包工程。`customerBranch` 与工程 `repo_branch` 匹配后关联到唯一工作空间；同空间多工程时优先工程名 `datahub`，否则唯一 `maven`。空间侧用「批量改 Git 分支」把 `repo_branch` 设成与 BOMS 报文一致即可。
 
 | 字段 | 作用 |
 |------|------|
-| `project_id` | 当前工作空间里要打包的工程 |
-| `name_server` | NameServer，多个用逗号或分号 |
-| `notice_topic` | 打包通知主题 |
-| `receipt_topic` | 回执主题，消息键为 `taskId` |
-| `group` | 消费组，默认 `auto-pack-intake` |
-| `access_key` / `secret_key` | 可空 |
+| `endpoint` | MNS Endpoint，如 `https://{AccountId}.mns.cn-hangzhou.aliyuncs.com` |
+| `request_queue` | 请求队列（本服务消费），测试环境样例 `BOMS-DEVTSK-PACK-REQ-TEST` |
+| `result_queue` | 结果队列（本服务生产回执），测试环境样例 `BOMS-DEVTSK-PACK-RESULT-TEST` |
+| `access_key_id` / `access_key_secret` | 无 STS；签名不含 security-token |
+| `batch_size` | 每次拉取条数，默认 10 |
 | `receipt_retries` | 回执重试次数，默认 3 |
+
+接入要点：
+
+- 签名串：`METHOD` / `Content-MD5` / `Content-Type` / `Date` / `x-mns-version:2015-06-06` / `resourcePath`（`\n` 分隔；空字段占行；`resourcePath` 以 `/queues/` 开头含 query，末尾无换行）。HMAC-SHA1 + Base64 → `Authorization: MNS {AK}:{Sig}`。
+- 收：`GET /queues/{名}/messages?numofmessages=N&waitseconds=0`；`404 MessageNotExist` 表示空队列，属正常。
+- 删：业务 `Handle` 成功后再 `DELETE ...?ReceiptHandle=`（句柄按 Java `URLEncoder` 规则编码）。
+- 发：`POST` XML，`<MessageBody>` 为 JSON 的 UTF-8 再标准 Base64；`Content-MD5` 针对整段 XML。
+
+### 通知报文（消费）
+
+MNS `MessageBody` 解 Base64 后为下列 JSON（样例对齐 BOMS → DataHub）：
+
+```json
+{
+  "taskId": "TSKIDS-20260703172557000175",
+  "taskNo": "20260703172557000175",
+  "packTaskId": "PACKTSKID-S01-20260703172557000175",
+  "taskTitle": "【场景S01】零食有鸣-仅业务jar-L0二进制依赖",
+  "customerCode": "LSYM",
+  "customerShortName": "零食有鸣",
+  "version": "V9.0.0",
+  "subsystemType": "DATAHUB",
+  "packagingMode": "war",
+  "deploymentStrategy": "war",
+  "ossProjectRoot": "/开发/S01/",
+  "customerBranch": "release/V9.0.0_LSYM",
+  "baseRef": "V9.0.0_P11",
+  "baseRefType": "tag",
+  "SYSVAL": "V10DATAHUB",
+  "passedAt": "2026-07-03 17:25:57",
+  "publishedAt": "2026-07-03 18:00:00"
+}
+```
+
+| 字段 | 规则 |
+|------|------|
+| `taskId` / `taskNo` / `packTaskId` | 必填；`taskId` 为处理与回执键 |
+| `subsystemType` | 必须为 `DATAHUB` |
+| `packagingMode` / `deploymentStrategy` | 必须为 `war` |
+| `ossProjectRoot` | 与 FTP 路径二选一必填；有则优先，上传走平台 OSS 环境 |
+| `ftpProjectRoot` | 兼容别名 `ftpPath` / `ftpRoot`；无 OSS 路径时作上传目标，走平台 FTP / SFTP |
+| `customerCode` / `version` | 必填，原样进打包参数 |
+| `customerBranch` | 必填；与平台工程 `repo_branch` 相等以关联工作空间，并作为构建检出分支 |
+| `baseRef` / `baseRefType` | 必填；本期 `baseRefType` 必须为 `tag` |
+| `SYSVAL` | 原样作打包参数（样例 `V10DATAHUB`） |
+| `sourceMetadata` | **禁止出现**；出现则视为旧报文，校验失败并回执 |
+| 收件人 | 可选；认 `mailTo` / `emails` / `receivers` / `recipients` / `notifyTo` / `receiver` / `email` |
+| `taskTitle` / `customerShortName` / `passedAt` / `publishedAt` | BOMS 可带；本服务不校验、不依赖 |
+
+仓库 URL 不读报文。缺字段或不在允许范围时：不打包、不上传，直接写失败回执。
+
+### 回执报文（生产）
+
+写入 `result_queue`（MNS 发送）。`resultMessage` 最长 500 字；`finishedAt` 为 `yyyy-MM-dd HH:mm:ss`（东八区）。
+
+成功：
+
+```json
+{
+  "taskId": "TSKIDS-20260703172557000175",
+  "taskNo": "20260703172557000175",
+  "packTaskId": "PACKTSKID-S01-20260703172557000175",
+  "subsystemType": "DATAHUB",
+  "packagingMode": "war",
+  "deploymentStrategy": "war",
+  "ossProjectRoot": "/开发/S01/",
+  "resultStatus": "SUCCESS",
+  "resultMessage": "自动打包完成，war 已推送到项目路径",
+  "finishedAt": "2026-07-03 18:06:20"
+}
+```
+
+失败时 `resultStatus` 为 `FAILED`，`resultMessage` 说明原因（校验 / 构建 / 上传）。`ossProjectRoot` 回填通知里的目标路径。
+
+| 阶段 | 上传 | 回执 | 邮件 |
+|------|------|------|------|
+| 报文校验失败 | 不上传 | `FAILED` | 发送（有收件人时） |
+| war 构建失败 | 不上传 | `FAILED` | 作业结束邮件 |
+| 构建成功、上传失败 | 未完成 | `FAILED` | 结果邮件 |
+| 上传成功 | 已落在目标路径 | `SUCCESS` | 结果邮件（OSS 带临时链接） |
 
 ## 作业类型
 

@@ -172,11 +172,14 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 	if body.Scope != "selected" {
 		targets = nil
 	}
-	queue := order.Queue(list, analysis, order.QueueOpts{
+	queue, skipNotes := order.Queue(list, analysis, order.QueueOpts{
 		TargetRecIDs:  targets,
 		IncludeOthers: body.Scope == "workspace" && body.IncludeNonMaven,
 		ExactTargets:  body.Scope == "selected" && body.ExactTargets,
 	})
+	for _, line := range skipNotes {
+		s.appendLog(logPath, stamp()+" "+line)
+	}
 	if len(queue) == 0 {
 		s.appendLog(logPath, stamp()+" 没有可构建的工程")
 		_ = record.Finish(context.Background(), s.st, job.BuildRecID, record.RecordFailed, "no projects", 0, 0, 0)

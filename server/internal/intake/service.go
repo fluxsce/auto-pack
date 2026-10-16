@@ -33,7 +33,6 @@ type Options struct {
 	Projects      *project.Service
 	Envs          *env.Service
 	Jobs          Jobs
-	Bindings      map[string]string
 	NoticeDir     string
 	ReceiptDir    string
 	WorkspaceRoot string
@@ -50,7 +49,6 @@ type Service struct {
 	projects   *project.Service
 	envs       *env.Service
 	jobs       Jobs
-	bindings   map[string]string
 	noticeDir  string
 	receiptDir string
 	wsRoot     string
@@ -59,30 +57,21 @@ type Service struct {
 	upload     func(ctx context.Context, prj project.Project, local, remote string) error
 	sign       func(objectKey string, expire time.Duration) (string, error)
 	publish    func(ctx context.Context, body []byte) error
-	mq         *RocketQueue
+	mq         *MNSQueue
 	stop       context.CancelFunc
 }
 
-// New 构造接入层。bindings 的键是 subsystemType。
+// New 构造接入层。打包工程按报文 customerBranch 关联工作空间，不在 mq 环境里写死。
 func New(opt Options) *Service {
 	retries := opt.Retries
 	if retries <= 0 {
 		retries = 3
-	}
-	bindings := map[string]string{}
-	for k, v := range opt.Bindings {
-		k = strings.TrimSpace(k)
-		v = strings.TrimSpace(v)
-		if k != "" && v != "" {
-			bindings[k] = v
-		}
 	}
 	s := &Service{
 		st:         opt.Store,
 		projects:   opt.Projects,
 		envs:       opt.Envs,
 		jobs:       opt.Jobs,
-		bindings:   bindings,
 		noticeDir:  opt.NoticeDir,
 		receiptDir: opt.ReceiptDir,
 		wsRoot:     opt.WorkspaceRoot,
@@ -116,10 +105,10 @@ func (s *Service) Handle(ctx context.Context, raw []byte) error {
 		return s.receiptExisting(ctx, n)
 	}
 	if reason := validateDataHub(n); reason != "" {
-		prj, _ := s.dataHubProject(ctx)
+		prj, _ := s.projectByCustomerBranch(ctx, n.CustomerBranch)
 		return s.finish(ctx, n, prj, "", resultFailed, "报文校验失败："+reason)
 	}
-	prj, err := s.boundProject(ctx, n.SubsystemType)
+	prj, err := s.projectByCustomerBranch(ctx, n.CustomerBranch)
 	if err != nil {
 		return s.finish(ctx, n, project.Project{}, "", resultFailed, "报文校验失败："+err.Error())
 	}
@@ -264,26 +253,57 @@ func (s *Service) workspaceCode(ctx context.Context, id string) string {
 	return strings.TrimSpace(code)
 }
 
-func (s *Service) dataHubProject(ctx context.Context) (project.Project, error) {
-	return s.boundProject(ctx, subsystemDataHub)
-}
-
-func (s *Service) boundProject(ctx context.Context, subsystem string) (project.Project, error) {
-	id := s.bindings[subsystem]
-	if id == "" {
-		return project.Project{}, errUnbound
+// projectByCustomerBranch 按工程 repo_branch = customerBranch 找到唯一工作空间，再选定打包工程。
+// 同空间多工程时优先工程名 datahub（忽略大小写），否则唯一 maven，再否则报错。
+func (s *Service) projectByCustomerBranch(ctx context.Context, branch string) (project.Project, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || s.projects == nil {
+		return project.Project{}, errNoBranchWorkspace
 	}
-	if s.projects == nil {
-		return project.Project{}, errUnbound
-	}
-	prj, err := s.projects.GetRaw(ctx, id)
+	list, err := s.projects.ListEnabledByRepoBranch(ctx, branch)
 	if err != nil {
 		return project.Project{}, err
 	}
-	if prj.IsEnabled == 0 {
-		return project.Project{}, errDisabled
+	if len(list) == 0 {
+		return project.Project{}, errNoBranchWorkspace
 	}
-	return prj, nil
+	ws := map[string]struct{}{}
+	for _, p := range list {
+		ws[p.WorkspaceRecID] = struct{}{}
+	}
+	if len(ws) > 1 {
+		return project.Project{}, errAmbiguousWorkspace
+	}
+	return pickDataHubProject(list)
+}
+
+func pickDataHubProject(list []project.Project) (project.Project, error) {
+	if len(list) == 0 {
+		return project.Project{}, errNoBranchWorkspace
+	}
+	if len(list) == 1 {
+		if list[0].IsEnabled == 0 {
+			return project.Project{}, errDisabled
+		}
+		return list[0], nil
+	}
+	var named []project.Project
+	var maven []project.Project
+	for _, p := range list {
+		if strings.EqualFold(strings.TrimSpace(p.ProjectName), "datahub") {
+			named = append(named, p)
+		}
+		if strings.EqualFold(strings.TrimSpace(p.ProjectType), "maven") {
+			maven = append(maven, p)
+		}
+	}
+	if len(named) == 1 {
+		return named[0], nil
+	}
+	if len(maven) == 1 {
+		return maven[0], nil
+	}
+	return project.Project{}, errAmbiguousProject
 }
 
 func (s *Service) finishWithoutTask(ctx context.Context, n Notice, message string) error {

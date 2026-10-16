@@ -8,6 +8,23 @@
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-16
+
+### 修复
+
+- Maven 构建排序把 POM 的 `<parent>` 也当作工作空间内依赖边：parent 工程会排到引用它的工程之前（此前只继承 groupId/version，不提前构建 parent）。
+- 构建排序补齐 `dependencyManagement` 中 `scope=import` + `type=pom` 的 BOM 边；本 POM `<properties>` 字面量解析 `${revision}` 等；上游工程停用时告警并跳过下游；同坐标多工程时告警。
+
+### 新增
+
+- 设置页「界面升级」：owner（`settings.write`）可上传 `auto-pack-版本-系统-架构.tar.gz/.zip` 与 SHA256，校验后替换 `bin`/`web`/`script` 并由 start/restart 拉起；保留 `configs/*.yaml`、`data`、`logs`。开发态 `go run` 不可用。
+- MNS 环境编辑页支持「生产测试 / 消费测试」：可选请求或结果队列，输入消息正文发送，拉取并展示消费到的消息（可选消费后删除）。接口为 `POST envs/mq-produce`、`POST envs/mq-consume`。不删除时用 Peek；往返自测默认结果队列（请求队列会被本服务 intake 取走）。
+
+### 变更
+
+- 外部打包队列由 RocketMQ 改为阿里云 **MNS** HTTP：环境字段为 `endpoint` / `request_queue` / `result_queue` / `access_key_id` / `access_key_secret`。轮询请求队列，业务收下后按 ReceiptHandle 删除；回执写入结果队列（XML + Base64 JSON）。探测为发结果队列 + 收请求队列（空队列不算失败）。
+- 消息队列环境去掉 `project_id`。打包工程按通知报文的 `customerBranch` 与工程 `repo_branch` 匹配，关联到唯一工作空间后再构建；同空间多工程时优先工程名 `datahub`，否则唯一 `maven`。
+
 ## [2.2.9] - 2026-10-14
 
 ### 新增

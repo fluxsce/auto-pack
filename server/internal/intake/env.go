@@ -9,12 +9,12 @@ import (
 	"auto-pack/server/internal/env"
 )
 
-// Env 是队列和打包工程，来自全局环境里已启用的 mq。
+// Env 是 MNS 队列连接，来自全局环境里已启用的 mq。
+// 打包工程不在此配置：报文 customerBranch 按工程 repo_branch 关联到工作空间。
 type Env struct {
-	Enabled   bool
-	ProjectID string
-	Retries   int
-	Rocket    RocketConfig
+	Enabled bool
+	Retries int
+	MNS     MNSConfig
 }
 
 // Load 读取全局 mq 环境。未配置或字段不齐时不订阅。
@@ -35,21 +35,25 @@ func fromConfig(m map[string]any) Env {
 	if n, ok := configInt(m, "receipt_retries"); ok && n > 0 {
 		retries = n
 	}
-	projectID := configString(m, "project_id")
-	nameServer := configString(m, "name_server")
-	notice := configString(m, "notice_topic")
-	receipt := configString(m, "receipt_topic")
+	batch := 10
+	if n, ok := configInt(m, "batch_size"); ok && n > 0 {
+		batch = n
+	}
+	endpoint := configString(m, "endpoint")
+	requestQ := configString(m, "request_queue")
+	resultQ := configString(m, "result_queue")
+	ak := firstNonEmptyPath(configString(m, "access_key_id"), configString(m, "access_key"))
+	sk := firstNonEmptyPath(configString(m, "access_key_secret"), configString(m, "secret_key"))
 	return Env{
-		Enabled:   projectID != "" && nameServer != "" && notice != "" && receipt != "",
-		ProjectID: projectID,
-		Retries:   retries,
-		Rocket: RocketConfig{
-			NameServer:   nameServer,
-			NoticeTopic:  notice,
-			ReceiptTopic: receipt,
-			Group:        configString(m, "group"),
-			AccessKey:    configString(m, "access_key"),
-			SecretKey:    configString(m, "secret_key"),
+		Enabled: endpoint != "" && requestQ != "" && resultQ != "" && ak != "" && sk != "",
+		Retries: retries,
+		MNS: MNSConfig{
+			Endpoint:        endpoint,
+			RequestQueue:    requestQ,
+			ResultQueue:     resultQ,
+			AccessKeyID:     ak,
+			AccessKeySecret: sk,
+			BatchSize:       batch,
 		},
 	}
 }

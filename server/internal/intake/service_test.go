@@ -221,7 +221,7 @@ func setupIntake(t *testing.T) (*Service, *fakeJobs, *[][]byte, *recMail) {
 	}
 	recipe := `{"command":"mvn -B package","output_dir":"target","artifact_pattern":"*.war"}`
 	q := `INSERT INTO AP_PROJECT (rec_id, workspace_rec_id, project_name, project_type, repo_url, repo_branch, recipe_json, is_enabled)
-		VALUES ('p-dh', 'ws-1', 'datahub', 'maven', 'https://git.example/dh.git', 'main', ?, 1)`
+		VALUES ('p-dh', 'ws-1', 'datahub', 'maven', 'https://git.example/dh.git', 'release/customer', ?, 1)`
 	if _, err := st.SQL().ExecContext(ctx, q, recipe); err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,6 @@ func setupIntake(t *testing.T) (*Service, *fakeJobs, *[][]byte, *recMail) {
 		Store:         st,
 		Projects:      project.NewService(st, nil),
 		Jobs:          jobs,
-		Bindings:      map[string]string{subsystemDataHub: "p-dh"},
 		WorkspaceRoot: root,
 		Retries:       1,
 		Mailer:        mails,
@@ -261,6 +260,46 @@ func setupIntake(t *testing.T) (*Service, *fakeJobs, *[][]byte, *recMail) {
 		},
 	})
 	return svc, jobs, &receipts, mails
+}
+
+func TestPickDataHubProject(t *testing.T) {
+	one := []project.Project{{RecID: "a", ProjectName: "svc", ProjectType: "maven", IsEnabled: 1}}
+	got, err := pickDataHubProject(one)
+	if err != nil || got.RecID != "a" {
+		t.Fatalf("%+v %v", got, err)
+	}
+	many := []project.Project{
+		{RecID: "ui", ProjectName: "ui", ProjectType: "vue", IsEnabled: 1},
+		{RecID: "dh", ProjectName: "datahub", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "lib", ProjectName: "lib", ProjectType: "maven", IsEnabled: 1},
+	}
+	got, err = pickDataHubProject(many)
+	if err != nil || got.RecID != "dh" {
+		t.Fatalf("prefer name datahub: %+v %v", got, err)
+	}
+	amb := []project.Project{
+		{RecID: "a", ProjectName: "a", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "b", ProjectName: "b", ProjectType: "maven", IsEnabled: 1},
+	}
+	if _, err := pickDataHubProject(amb); err != errAmbiguousProject {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestHandleUnknownCustomerBranch(t *testing.T) {
+	svc, jobs, receipts, _ := setupIntake(t)
+	n := sampleNotice()
+	n.CustomerBranch = "release/missing"
+	if err := svc.Handle(context.Background(), mustNotice(n)); err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs.submitted) != 0 {
+		t.Fatal("must not submit")
+	}
+	got := decodeReceipt(t, (*receipts)[0])
+	if got.ResultStatus != resultFailed || !strings.Contains(got.ResultMessage, "customerBranch") {
+		t.Fatalf("%+v", got)
+	}
 }
 
 func jobPayload(t *testing.T, svc *Service, id string) job.Payload {

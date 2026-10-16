@@ -42,6 +42,180 @@ func TestAnalyzeMavenWorkspaceOrder(t *testing.T) {
 	}
 }
 
+func TestAnalyzeMavenWorkspaceImportBOMBuiltFirst(t *testing.T) {
+	dir := t.TempDir()
+	bom := filepath.Join(dir, "bom")
+	app := filepath.Join(dir, "app")
+	_ = os.MkdirAll(bom, 0o755)
+	_ = os.MkdirAll(app, 0o755)
+	if err := os.WriteFile(filepath.Join(bom, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>platform-bom</artifactId><version>1.0-SNAPSHOT</version>
+		<packaging>pom</packaging>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>app</artifactId><version>1.0-SNAPSHOT</version>
+		<dependencyManagement>
+			<dependencies>
+				<dependency>
+					<groupId>g</groupId>
+					<artifactId>platform-bom</artifactId>
+					<version>1.0-SNAPSHOT</version>
+					<type>pom</type>
+					<scope>import</scope>
+				</dependency>
+			</dependencies>
+		</dependencyManagement>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "app", ProjectName: "app", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "bom", ProjectName: "bom", ProjectType: "maven", IsEnabled: 1},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		if p.RecID == "bom" {
+			return bom
+		}
+		return app
+	})
+	if len(out.InternalEdges) != 1 || out.InternalEdges[0].ProviderRecID != "bom" || out.InternalEdges[0].ConsumerRecID != "app" {
+		t.Fatalf("want app→bom import edge, got %+v", out.InternalEdges)
+	}
+	idx := map[string]int{}
+	for i, m := range out.FullBuildOrder {
+		idx[m.ProjectRecID] = i
+	}
+	if idx["bom"] > idx["app"] {
+		t.Fatalf("bom should precede app: %+v", out.FullBuildOrder)
+	}
+}
+
+func TestAnalyzeMavenWorkspacePropertyVersionEdge(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib")
+	app := filepath.Join(dir, "app")
+	_ = os.MkdirAll(lib, 0o755)
+	_ = os.MkdirAll(app, 0o755)
+	if err := os.WriteFile(filepath.Join(lib, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>lib</artifactId><version>${revision}</version>
+		<properties><revision>1.0-SNAPSHOT</revision></properties>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>app</artifactId>
+		<properties><lib.version>1.0-SNAPSHOT</lib.version></properties>
+		<dependencies>
+			<dependency>
+				<groupId>g</groupId>
+				<artifactId>lib</artifactId>
+				<version>${lib.version}</version>
+			</dependency>
+		</dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "app", ProjectName: "app", ProjectType: "maven", IsEnabled: 1},
+		{RecID: "lib", ProjectName: "lib", ProjectType: "maven", IsEnabled: 1},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		if p.RecID == "lib" {
+			return lib
+		}
+		return app
+	})
+	if len(out.InternalEdges) != 1 || out.InternalEdges[0].ProviderRecID != "lib" {
+		t.Fatalf("want property-resolved edge, got %+v unmatched=%+v", out.InternalEdges, out.UnmatchedDeps)
+	}
+	idx := map[string]int{}
+	for i, m := range out.FullBuildOrder {
+		idx[m.ProjectRecID] = i
+	}
+	if idx["lib"] > idx["app"] {
+		t.Fatalf("lib should precede app: %+v", out.FullBuildOrder)
+	}
+}
+
+func TestAnalyzeMavenWorkspaceDisabledUpstreamWarning(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib")
+	app := filepath.Join(dir, "app")
+	_ = os.MkdirAll(lib, 0o755)
+	_ = os.MkdirAll(app, 0o755)
+	if err := os.WriteFile(filepath.Join(lib, "pom.xml"), []byte(`<project><groupId>g</groupId><artifactId>lib</artifactId></project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(app, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>app</artifactId>
+		<dependencies><dependency><groupId>g</groupId><artifactId>lib</artifactId><version>1</version></dependency></dependencies>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "lib", ProjectName: "lib", ProjectType: "maven", IsEnabled: 0},
+		{RecID: "app", ProjectName: "app", ProjectType: "maven", IsEnabled: 1},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		if p.RecID == "lib" {
+			return lib
+		}
+		return app
+	})
+	found := false
+	for _, w := range out.Warnings {
+		if strings.Contains(w, "已停用") && strings.Contains(w, "lib") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("warnings %+v", out.Warnings)
+	}
+}
+
+func TestAnalyzeMavenWorkspaceParentBuiltFirst(t *testing.T) {
+	dir := t.TempDir()
+	parent := filepath.Join(dir, "parent")
+	child := filepath.Join(dir, "child")
+	_ = os.MkdirAll(parent, 0o755)
+	_ = os.MkdirAll(child, 0o755)
+	if err := os.WriteFile(filepath.Join(parent, "pom.xml"), []byte(`<project>
+		<groupId>g</groupId><artifactId>parent-pom</artifactId><version>1.0-SNAPSHOT</version>
+		<packaging>pom</packaging>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(child, "pom.xml"), []byte(`<project>
+		<parent><groupId>g</groupId><artifactId>parent-pom</artifactId><version>1.0-SNAPSHOT</version></parent>
+		<artifactId>child</artifactId>
+	</project>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	list := []project.Project{
+		{RecID: "c", ProjectName: "child", ProjectType: "maven"},
+		{RecID: "p", ProjectName: "parent", ProjectType: "maven"},
+	}
+	out := AnalyzeMavenWorkspace(list, func(p project.Project) string {
+		if p.RecID == "p" {
+			return parent
+		}
+		return child
+	})
+	if len(out.InternalEdges) != 1 || out.InternalEdges[0].ProviderRecID != "p" || out.InternalEdges[0].ConsumerRecID != "c" {
+		t.Fatalf("want child→parent edge, got %+v", out.InternalEdges)
+	}
+	idx := map[string]int{}
+	for i, m := range out.FullBuildOrder {
+		idx[m.ProjectRecID] = i
+	}
+	if idx["p"] > idx["c"] {
+		t.Fatalf("parent should precede child: %+v", out.FullBuildOrder)
+	}
+}
+
 func TestAnalyzeMavenWorkspaceParentGroupAndDepMgmt(t *testing.T) {
 	dir := t.TempDir()
 	core := filepath.Join(dir, "core")

@@ -108,6 +108,30 @@ func (s *Service) ListRaw(ctx context.Context, workspaceID string) ([]Project, e
 	return out, rows.Err()
 }
 
+// ListEnabledByRepoBranch lists enabled projects whose repo_branch matches (intake).
+func (s *Service) ListEnabledByRepoBranch(ctx context.Context, branch string) ([]Project, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return nil, nil
+	}
+	q := s.st.Rebind(`SELECT ` + projectCols + ` FROM AP_PROJECT
+		WHERE repo_branch = ? AND is_enabled = 1 ORDER BY project_name`)
+	rows, err := s.st.SQL().QueryContext(ctx, q, branch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Project
+	for rows.Next() {
+		p, err := scanProject(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // Get loads one project after a read check.
 func (s *Service) Get(ctx context.Context, actor iam.Actor, id string) (Project, error) {
 	p, err := s.GetRaw(ctx, id)

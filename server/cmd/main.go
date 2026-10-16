@@ -99,20 +99,19 @@ func main() {
 			Projects:      projects,
 			Envs:          envs,
 			Jobs:          jobs,
-			Bindings:      map[string]string{"DATAHUB": in.ProjectID},
 			WorkspaceRoot: cfg.WorkspaceRoot,
 			Retries:       in.Retries,
 			Mailer:        eng,
 		})
-		q, err := intake.OpenRocket(in.Rocket)
+		q, err := intake.OpenMNS(in.MNS)
 		if err != nil {
 			log.Fatal(err)
 		}
-		intakeSvc.UseRocket(q)
+		intakeSvc.UseMNS(q)
 		if err := intakeSvc.Start(ctx); err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("intake queue notice=%s receipt=%s project=%s", in.Rocket.NoticeTopic, in.Rocket.ReceiptTopic, in.ProjectID)
+		log.Printf("intake mns request=%s result=%s", in.MNS.RequestQueue, in.MNS.ResultQueue)
 	}
 	sched := job.NewScheduler(jobs, projects)
 	if err := sched.Start(ctx); err != nil {
