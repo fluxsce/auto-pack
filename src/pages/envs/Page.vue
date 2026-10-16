@@ -22,6 +22,7 @@ import {
   type FtpNotifyEmailFields,
 } from '@/pages/workspaces/lib/ftp-notify-email'
 import EnvEditor from './EnvEditor.vue'
+import MqTestDialog from './MqTestDialog.vue'
 import {
   FALLBACK_KINDS,
   canonicalKind,
@@ -47,6 +48,8 @@ const probeResult = ref<{ ok: boolean; message: string } | null>(null)
 const listTestOpen = ref(false)
 const listTestTo = ref('')
 const listTestRow = ref<EnvRow | null>(null)
+const mqTestOpen = ref(false)
+const mqTestRow = ref<EnvRow | null>(null)
 const projectMailOpen = ref(false)
 const projectMailInitial = ref<FtpNotifyEmailFields | null>(null)
 const projectMailSmtpOptions = ref<{ value: string; label: string }[]>([])
@@ -76,7 +79,7 @@ const columns = computed<RsTableColumn<EnvRow>[]>(() => [
   { key: 'env_kind', title: t('envs.kind'), width: 120 },
   { key: 'config_hint', title: t('envs.hintCol'), minWidth: 220 },
   { key: 'is_enabled', title: t('envs.enabled'), width: 96, align: 'center' },
-  { key: 'actions', title: t('common.actions'), width: 300, align: 'right' },
+  { key: 'actions', title: t('common.actions'), width: 400, align: 'right' },
 ])
 
 const emptyTitle = computed(() => (activeKind.value === 'all' ? t('envs.empty') : t('envs.emptyKind')))
@@ -203,6 +206,11 @@ async function probeDraft(testTo = ''): Promise<void> {
   } finally {
     probing.value = false
   }
+}
+
+function openMqTest(row: EnvRow): void {
+  mqTestRow.value = row
+  mqTestOpen.value = true
 }
 
 function startProbeRow(row: EnvRow): void {
@@ -374,6 +382,15 @@ async function remove(row: EnvRow): Promise<void> {
           <template #actions="{ row }">
             <div class="env-list__actions">
               <RsButton size="sm" variant="text" tone="primary" @click="openEdit(row)">{{ t('common.edit') }}</RsButton>
+              <RsButton
+                v-if="canonicalKind(row.env_kind) === 'mq'"
+                size="sm"
+                variant="text"
+                tone="primary"
+                @click="openMqTest(row)"
+              >
+                {{ t('envs.sectionMqTest') }}
+              </RsButton>
               <RsButton size="sm" variant="text" tone="success" :disabled="verifyingId === row.rec_id" @click="startProbeRow(row)">
                 {{ t('envs.verify') }}
               </RsButton>
@@ -408,6 +425,12 @@ async function remove(row: EnvRow): Promise<void> {
         <RsButton @click="confirmListTest">{{ t('envs.verify') }}</RsButton>
       </template>
     </RsDialog>
+
+    <MqTestDialog
+      v-model:open="mqTestOpen"
+      :rec-id="mqTestRow?.rec_id ?? ''"
+      :env-name="mqTestRow?.env_name ?? ''"
+    />
 
     <MailPanel
       v-model:open="projectMailOpen"

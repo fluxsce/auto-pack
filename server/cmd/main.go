@@ -21,6 +21,7 @@ import (
 	"auto-pack/server/internal/job"
 	"auto-pack/server/internal/job/runner"
 	"auto-pack/server/internal/migrate"
+	"auto-pack/server/internal/mqlog"
 	"auto-pack/server/internal/project"
 	"auto-pack/server/internal/release"
 	"auto-pack/server/internal/settings"
@@ -74,6 +75,8 @@ func main() {
 	}
 	projects := project.NewService(st, guard)
 	envs := env.NewService(st, guard, cipher)
+	mqMessages := mqlog.New(st)
+	envs.SetMQLog(mqMessages)
 	appSettings := settings.NewService(st, guard)
 	aud := audit.NewService(st, guard)
 	eng := runner.NewEngine(st, projects, envs, cfg.DataDir(), cfg.WorkspaceRoot, cfg.GitCloneDepth)
@@ -92,26 +95,19 @@ func main() {
 	if err := eng.Start(ctx); err != nil {
 		log.Fatal(err)
 	}
-	var intakeSvc *intake.Service
-	if in := intake.Load(ctx, envs); in.Enabled {
-		intakeSvc = intake.New(intake.Options{
-			Store:         st,
-			Projects:      projects,
-			Envs:          envs,
-			Jobs:          jobs,
-			WorkspaceRoot: cfg.WorkspaceRoot,
-			Retries:       in.Retries,
-			Mailer:        eng,
-		})
-		q, err := intake.OpenMNS(in.MNS)
-		if err != nil {
-			log.Fatal(err)
-		}
-		intakeSvc.UseMNS(q)
-		if err := intakeSvc.Start(ctx); err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("intake mns request=%s result=%s", in.MNS.RequestQueue, in.MNS.ResultQueue)
+	intakeSvc := intake.New(intake.Options{
+		Store:         st,
+		Projects:      projects,
+		Envs:          envs,
+		Jobs:          jobs,
+		WorkspaceRoot: cfg.WorkspaceRoot,
+		Mailer:        eng,
+		Audit:         aud,
+		Builds:        intake.BindWorkspaceBuild(builds),
+		MQLog:         mqMessages,
+	})
+	if err := intakeSvc.Start(ctx); err != nil {
+		log.Fatal(err)
 	}
 	sched := job.NewScheduler(jobs, projects)
 	if err := sched.Start(ctx); err != nil {
@@ -146,9 +142,7 @@ func main() {
 	stop, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	sched.Stop()
-	if intakeSvc != nil {
-		intakeSvc.Stop()
-	}
+	intakeSvc.Stop()
 	eng.Stop()
 	_ = srv.Shutdown(stop)
 }

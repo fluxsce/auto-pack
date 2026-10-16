@@ -108,7 +108,7 @@ func stage(root, archivePath, fileName, sum string) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(extract)
-	if err := extractArchive(archivePath, extract); err != nil {
+	if err := extractArchive(archivePath, extract, fileName); err != nil {
 		return "", err
 	}
 	payload, err := payloadRoot(extract)

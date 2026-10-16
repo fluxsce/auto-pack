@@ -61,6 +61,11 @@ func (s *Service) Start(ctx context.Context, actor iam.Actor, req StartRequest) 
 	if err := s.guard.Allow(ctx, actor, req.WorkspaceRecID, iam.ActionJobSubmit); err != nil {
 		return StartResponse{}, err
 	}
+	return s.start(ctx, actor, req)
+}
+
+// StartSystem starts a workspace auto-build as the workspace owner. Intake uses this when the notice names no project.
+func (s *Service) StartSystem(ctx context.Context, req StartRequest) (StartResponse, error) {
 	body, err := normalizeStart(req)
 	if err != nil {
 		return StartResponse{}, err
@@ -69,6 +74,58 @@ func (s *Service) Start(ctx context.Context, actor iam.Actor, req StartRequest) 
 	if err != nil {
 		return StartResponse{}, err
 	}
+	if strings.TrimSpace(ws.OwnerUserID) == "" {
+		return StartResponse{}, fmt.Errorf("workspace owner is required")
+	}
+	return s.startReady(ctx, iam.Actor{UserID: ws.OwnerUserID, LoginName: "system"}, body, ws)
+}
+
+// ProjectResults returns this run's per-project outcomes while the coordinator still holds them.
+func (s *Service) ProjectResults(workspaceID, buildID string) []record.Result {
+	st := s.coord.Status(workspaceID)
+	if st.BuildRecID != strings.TrimSpace(buildID) {
+		return nil
+	}
+	return st.Results
+}
+
+// Wait blocks until the workspace build row is no longer running.
+func (s *Service) Wait(ctx context.Context, buildID string) (Record, error) {
+	buildID = strings.TrimSpace(buildID)
+	if buildID == "" {
+		return Record{}, ErrNotFound
+	}
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		rec, err := record.Get(ctx, s.st, buildID)
+		if err != nil {
+			return Record{}, err
+		}
+		if rec.Status != RecordRunning {
+			return rec, nil
+		}
+		select {
+		case <-ctx.Done():
+			return rec, ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+func (s *Service) start(ctx context.Context, actor iam.Actor, req StartRequest) (StartResponse, error) {
+	body, err := normalizeStart(req)
+	if err != nil {
+		return StartResponse{}, err
+	}
+	ws, err := s.workspaces.GetRaw(ctx, body.WorkspaceRecID)
+	if err != nil {
+		return StartResponse{}, err
+	}
+	return s.startReady(ctx, actor, body, ws)
+}
+
+func (s *Service) startReady(ctx context.Context, actor iam.Actor, body StartRequest, ws workspace.Workspace) (StartResponse, error) {
 	list, err := s.projects.ListRaw(ctx, body.WorkspaceRecID)
 	if err != nil {
 		return StartResponse{}, err
@@ -282,8 +339,10 @@ func (s *Service) runBatch(ctx context.Context, actor iam.Actor, ws workspace.Wo
 				failed--
 				succeeded++
 				outcomes[prj.RecID] = "ok"
+				s.coord.ReviseResult(job, prj.ProjectName, "ok", "")
 				s.appendLog(logPath, stamp()+" 重试成功："+prj.ProjectName)
 			} else {
+				s.coord.ReviseResult(job, prj.ProjectName, "failed", out.Message)
 				s.appendLog(logPath, stamp()+" 重试失败："+prj.ProjectName+" — "+out.Message)
 			}
 		}

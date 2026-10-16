@@ -36,7 +36,7 @@ func (s *Service) claim(ctx context.Context, n Notice, raw []byte) (bool, error)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	_, err := s.st.SQL().ExecContext(ctx, q,
 		n.TaskID, n.TaskNo, n.PackTaskID, n.SubsystemType, "", "",
-		statusRunning, "", "", firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot), string(raw), "", now, now)
+		statusRunning, "", "", firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot), string(raw), nil, now, now)
 	if err == nil {
 		return true, nil
 	}
@@ -53,7 +53,7 @@ func (s *Service) saveTask(ctx context.Context, row taskRow) error {
 		oss_project_root=?, finished_at=?, updated_at=? WHERE task_id=?`)
 	_, err := s.st.SQL().ExecContext(ctx, q,
 		row.ProjectRecID, row.JobRecID, row.TaskStatus, row.ResultStatus, clipMessage(row.ResultMessage),
-		row.OSSProjectRoot, row.FinishedAt, now, row.TaskID)
+		row.OSSProjectRoot, dbTime(row.FinishedAt), now, row.TaskID)
 	return err
 }
 
@@ -68,6 +68,13 @@ func (s *Service) taskByID(ctx context.Context, taskID string) (taskRow, error) 
 		&row.ProjectRecID, &row.JobRecID, &row.TaskStatus, &row.ResultStatus,
 		&row.ResultMessage, &row.OSSProjectRoot, &row.FinishedAt)
 	return row, err
+}
+
+func dbTime(s string) any {
+	if strings.TrimSpace(s) == "" {
+		return nil
+	}
+	return s
 }
 
 func isUnique(err error) bool {

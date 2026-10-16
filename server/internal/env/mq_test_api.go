@@ -8,6 +8,7 @@ import (
 
 	hostmns "auto-pack/server/internal/host/mns"
 	"auto-pack/server/internal/iam"
+	"auto-pack/server/internal/mqlog"
 )
 
 const mqManualTimeout = 30 * time.Second
@@ -29,6 +30,7 @@ type MQProduceResult struct {
 	OK        bool   `json:"ok"`
 	Message   string `json:"message"`
 	Queue     string `json:"queue,omitempty"`
+	QueueName string `json:"queue_name,omitempty"`
 	MessageID string `json:"message_id,omitempty"`
 }
 
@@ -42,11 +44,12 @@ type MQConsumeMessage struct {
 
 // MQConsumeResult 是消费测试结果。
 type MQConsumeResult struct {
-	OK       bool               `json:"ok"`
-	Message  string             `json:"message"`
-	Queue    string             `json:"queue,omitempty"`
-	Empty    bool               `json:"empty,omitempty"`
-	Messages []MQConsumeMessage `json:"messages,omitempty"`
+	OK        bool               `json:"ok"`
+	Message   string             `json:"message"`
+	Queue     string             `json:"queue,omitempty"`
+	QueueName string             `json:"queue_name,omitempty"`
+	Empty     bool               `json:"empty,omitempty"`
+	Messages  []MQConsumeMessage `json:"messages,omitempty"`
 }
 
 // MQProduce 往请求或结果队列发送一条消息。
@@ -83,12 +86,17 @@ func (s *Service) MQProduce(ctx context.Context, actor iam.Actor, in MQTestIn) (
 	defer cancel()
 	id, err := client.Send(pctx, queueName, []byte(body))
 	if err != nil {
-		return MQProduceResult{OK: false, Message: err.Error(), Queue: label}, nil
+		return MQProduceResult{OK: false, Message: err.Error(), Queue: label, QueueName: queueName}, nil
 	}
+	s.noteMQ(ctx, mqlog.Entry{
+		EnvRecID: in.RecID, Direction: mqlog.DirectionProduce, QueueRole: label, QueueName: queueName,
+		MessageID: id, Body: body, Source: mqlog.SourceManual, ActorUserID: actor.UserID,
+	})
 	return MQProduceResult{
 		OK:        true,
 		Message:   "produced",
 		Queue:     label,
+		QueueName: queueName,
 		MessageID: id,
 	}, nil
 }
@@ -137,10 +145,10 @@ func (s *Service) MQConsume(ctx context.Context, actor iam.Actor, in MQTestIn) (
 		msgs, err = client.Peek(pctx, queueName, batch)
 	}
 	if errors.Is(err, hostmns.ErrMessageNotExist) {
-		return MQConsumeResult{OK: true, Message: emptyQueueMessage(label), Queue: label, Empty: true}, nil
+		return MQConsumeResult{OK: true, Message: emptyQueueMessage(label), Queue: label, QueueName: queueName, Empty: true}, nil
 	}
 	if err != nil {
-		return MQConsumeResult{OK: false, Message: err.Error(), Queue: label}, nil
+		return MQConsumeResult{OK: false, Message: err.Error(), Queue: label, QueueName: queueName}, nil
 	}
 	out := make([]MQConsumeMessage, 0, len(msgs))
 	for _, m := range msgs {
@@ -153,27 +161,49 @@ func (s *Service) MQConsume(ctx context.Context, actor iam.Actor, in MQTestIn) (
 			if delErr := client.Delete(pctx, queueName, m.ReceiptHandle); delErr != nil {
 				item.Deleted = false
 				out = append(out, item)
+				s.noteManualMQ(ctx, in.RecID, actor.UserID, label, queueName, in.Delete, item)
 				return MQConsumeResult{
-					OK:       false,
-					Message:  "received but delete failed: " + delErr.Error(),
-					Queue:    label,
-					Messages: append(out, remainingViews(msgs, len(out))...),
+					OK:        false,
+					Message:   "received but delete failed: " + delErr.Error(),
+					Queue:     label,
+					QueueName: queueName,
+					Messages:  append(out, remainingViews(msgs, len(out))...),
 				}, nil
 			}
 			item.Deleted = true
 		}
 		out = append(out, item)
+		s.noteManualMQ(ctx, in.RecID, actor.UserID, label, queueName, in.Delete, item)
 	}
 	msg := "peeked"
 	if in.Delete {
 		msg = "consumed"
 	}
 	return MQConsumeResult{
-		OK:       true,
-		Message:  msg,
-		Queue:    label,
-		Messages: out,
+		OK:        true,
+		Message:   msg,
+		Queue:     label,
+		QueueName: queueName,
+		Messages:  out,
 	}, nil
+}
+
+func (s *Service) noteManualMQ(ctx context.Context, envID, actorID, label, queueName string, receive bool, item MQConsumeMessage) {
+	direction := mqlog.DirectionPeek
+	if receive {
+		direction = mqlog.DirectionConsume
+	}
+	s.noteMQ(ctx, mqlog.Entry{
+		EnvRecID:    envID,
+		Direction:   direction,
+		QueueRole:   label,
+		QueueName:   queueName,
+		MessageID:   item.MessageID,
+		Body:        item.Body,
+		Source:      mqlog.SourceManual,
+		Deleted:     item.Deleted,
+		ActorUserID: actorID,
+	})
 }
 
 func emptyQueueMessage(label string) string {

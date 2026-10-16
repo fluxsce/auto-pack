@@ -121,6 +121,19 @@ func (c *Controller) MQConsume(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
+// MQMessages 返回该环境最近 300 条队列生产、消费和查看记录。
+func (c *Controller) MQMessages(w http.ResponseWriter, r *http.Request) {
+	if c.envs == nil {
+		httpx.WriteError(w, http.StatusBadRequest, "env service not configured")
+		return
+	}
+	out, err := c.envs.ListMQMessages(r.Context(), middleware.ActorFrom(r), r.PathValue("id"))
+	if httpx.WriteSvcErr(w, err) {
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // SendMail 用已存 SMTP 环境发送一封告知邮件。
 func (c *Controller) SendMail(w http.ResponseWriter, r *http.Request) {
 	var in env.MailIn

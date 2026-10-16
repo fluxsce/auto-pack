@@ -12,21 +12,23 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"auto-pack/server/internal/host/mns"
 )
 
 func TestOpenMNSRequiresQueues(t *testing.T) {
-	_, err := OpenMNS(MNSConfig{Endpoint: "https://123.mns.cn-hangzhou.aliyuncs.com"})
+	_, err := OpenMNS(mns.Config{Endpoint: "https://123.mns.cn-hangzhou.aliyuncs.com"})
 	if err != errNoQueue {
 		t.Fatal(err)
 	}
-	_, err = OpenMNS(MNSConfig{})
+	_, err = OpenMNS(mns.Config{})
 	if err != errNoEndpoint {
 		t.Fatal(err)
 	}
 }
 
-func TestLoadMQConfig(t *testing.T) {
-	got := fromConfig(map[string]any{
+func TestReadMQMap(t *testing.T) {
+	raw := map[string]any{
 		"endpoint":          "https://123.mns.cn-hangzhou.aliyuncs.com",
 		"request_queue":     "BOMS-DEVTSK-PACK-REQ-TEST",
 		"result_queue":      "BOMS-DEVTSK-PACK-RESULT-TEST",
@@ -34,15 +36,16 @@ func TestLoadMQConfig(t *testing.T) {
 		"access_key_secret": "sk",
 		"receipt_retries":   float64(5),
 		"batch_size":        float64(10),
-	})
-	if !got.Enabled || got.MNS.RequestQueue != "BOMS-DEVTSK-PACK-REQ-TEST" || got.Retries != 5 {
-		t.Fatalf("%+v", got)
 	}
-	if fromConfig(map[string]any{"endpoint": "https://x"}).Enabled {
+	cfg, retries, ok := readMQMap(raw)
+	if !ok || cfg.RequestQueue != "BOMS-DEVTSK-PACK-REQ-TEST" || retries != 5 || cfg.BatchSize != 10 {
+		t.Fatalf("%+v retries=%d ok=%v", cfg, retries, ok)
+	}
+	if _, _, ok := readMQMap(map[string]any{"endpoint": "https://x"}); ok {
 		t.Fatal("incomplete")
 	}
-	if Load(context.Background(), nil).Enabled {
-		t.Fatal("nil env")
+	if _, _, ok := readMQMap(nil); ok {
+		t.Fatal("nil")
 	}
 }
 
@@ -57,6 +60,7 @@ type memItem struct {
 	id, handle string
 	body       []byte
 	gone       bool
+	held       bool
 }
 
 func startMemMNS(t *testing.T, reqQ, resQ string) (*memQueue, *httptest.Server) {
@@ -91,7 +95,7 @@ func startMemMNS(t *testing.T, reqQ, resQ string) (*memQueue, *httptest.Server) 
 			q.mu.Lock()
 			var live []memItem
 			for _, it := range q.items {
-				if !it.gone {
+				if !it.gone && !it.held {
 					live = append(live, it)
 				}
 			}
@@ -110,6 +114,20 @@ func startMemMNS(t *testing.T, reqQ, resQ string) (*memQueue, *httptest.Server) 
 			b.WriteString(`</Messages>`)
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, b.String())
+		case http.MethodPut:
+			handle := decodeHandle(r.URL.RawQuery)
+			next := "vis-" + handle
+			q.mu.Lock()
+			for i := range q.items {
+				if q.items[i].handle == handle && !q.items[i].gone {
+					q.items[i].handle = next
+					q.items[i].held = true
+					break
+				}
+			}
+			q.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `<ChangeVisibility><ReceiptHandle>%s</ReceiptHandle><NextVisibleTime>1</NextVisibleTime></ChangeVisibility>`, next)
 		case http.MethodDelete:
 			handle := decodeHandle(r.URL.RawQuery)
 			q.mu.Lock()
@@ -178,7 +196,7 @@ func decodeHandle(rawQuery string) string {
 
 func openTestQueue(t *testing.T, srv *httptest.Server) *MNSQueue {
 	t.Helper()
-	q, err := OpenMNS(MNSConfig{
+	q, err := OpenMNS(mns.Config{
 		Endpoint:        srv.URL,
 		RequestQueue:    "BOMS-DEVTSK-PACK-REQ-TEST",
 		ResultQueue:     "BOMS-DEVTSK-PACK-RESULT-TEST",
@@ -240,6 +258,12 @@ func TestMNSQueueListenConsumeThenDelete(t *testing.T) {
 		n := len(mem.deleted)
 		mem.mu.Unlock()
 		if n == 1 {
+			mem.mu.Lock()
+			gotHandle := mem.deleted[0]
+			mem.mu.Unlock()
+			if !strings.HasPrefix(gotHandle, "vis-") {
+				t.Fatalf("deleted with original handle %s", gotHandle)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -325,4 +349,69 @@ func TestMNSQueueProduceThenConsumeRoundTrip(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("consume ack missing")
+}
+
+func TestRunEnvFollowsEnabledMQ(t *testing.T) {
+	const reqQ = "BOMS-DEVTSK-PACK-REQ-TEST"
+	const resQ = "BOMS-DEVTSK-PACK-RESULT-TEST"
+	mem, srv := startMemMNS(t, reqQ, resQ)
+	cfg := mns.Config{
+		Endpoint:        srv.URL,
+		RequestQueue:    reqQ,
+		ResultQueue:     resQ,
+		AccessKeyID:     "ak",
+		AccessKeySecret: "sk",
+		BatchSize:       10,
+	}
+	var mu sync.Mutex
+	ready := false
+	svc := New(Options{})
+	svc.mqSrc = func(context.Context) (mns.Config, int, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !ready {
+			return mns.Config{}, 1, false
+		}
+		return cfg, 1, true
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := svc.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Stop()
+
+	client, err := mns.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Send(context.Background(), reqQ, []byte(`not-json`)); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	mem.mu.Lock()
+	pending := len(mem.deleted)
+	mem.mu.Unlock()
+	if pending != 0 {
+		t.Fatal("must not consume before mq env is ready")
+	}
+
+	mu.Lock()
+	ready = true
+	mu.Unlock()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		mem.mu.Lock()
+		deleted := len(mem.deleted)
+		posted := len(mem.posted)
+		mem.mu.Unlock()
+		if deleted == 1 && posted >= 2 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mem.mu.Lock()
+	defer mem.mu.Unlock()
+	t.Fatalf("deleted=%d posted=%d", len(mem.deleted), len(mem.posted))
 }

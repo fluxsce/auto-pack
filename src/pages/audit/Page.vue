@@ -65,6 +65,7 @@ const actionI18n: Record<string, string> = {
   'settings.save': 'audit.actions.settingsSave',
   'settings.var.save': 'audit.actions.varSave',
   'settings.var.delete': 'audit.actions.varDelete',
+  'intake.mq': 'audit.actions.intakeMq',
 }
 
 const { t } = useI18n()

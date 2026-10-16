@@ -29,21 +29,21 @@ type Result struct {
 
 // Job tracks one workspace auto-build run.
 type Job struct {
-	BuildRecID     string    `json:"build_rec_id,omitempty"`
-	WorkspaceRecID string    `json:"workspace_rec_id"`
-	WorkspaceName  string    `json:"workspace_name,omitempty"`
-	Status         string    `json:"status"`
-	Scope          string    `json:"scope,omitempty"`
-	StartedAt      time.Time `json:"started_at"`
+	BuildRecID     string     `json:"build_rec_id,omitempty"`
+	WorkspaceRecID string     `json:"workspace_rec_id"`
+	WorkspaceName  string     `json:"workspace_name,omitempty"`
+	Status         string     `json:"status"`
+	Scope          string     `json:"scope,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
 	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	Succeeded      int       `json:"succeeded"`
-	Skipped        int       `json:"skipped"`
-	Failed         int       `json:"failed"`
-	Results        []Result  `json:"results,omitempty"`
-	CurrentProject string    `json:"current_project,omitempty"`
-	DoneCount      int       `json:"done_count"`
-	TotalCount     int       `json:"total_count"`
-	Phase          string    `json:"phase,omitempty"`
+	Succeeded      int        `json:"succeeded"`
+	Skipped        int        `json:"skipped"`
+	Failed         int        `json:"failed"`
+	Results        []Result   `json:"results,omitempty"`
+	CurrentProject string     `json:"current_project,omitempty"`
+	DoneCount      int        `json:"done_count"`
+	TotalCount     int        `json:"total_count"`
+	Phase          string     `json:"phase,omitempty"`
 }
 
 // Status is the API view for poll / dialog open.
@@ -163,6 +163,23 @@ func (c *Coordinator) AppendResult(job *Job, res Result, succeeded, skipped, fai
 	job.Skipped = skipped
 	job.Failed = failed
 	job.DoneCount = len(job.Results)
+}
+
+// ReviseResult updates the latest result for a project, such as a retry.
+func (c *Coordinator) ReviseResult(job *Job, projectName, status, message string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if job == nil {
+		return
+	}
+	for i := len(job.Results) - 1; i >= 0; i-- {
+		if job.Results[i].ProjectName != projectName {
+			continue
+		}
+		job.Results[i].Status = status
+		job.Results[i].Message = message
+		return
+	}
 }
 
 // FinishResult stores aggregate outcome on the running job.

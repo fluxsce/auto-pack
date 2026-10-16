@@ -265,6 +265,30 @@ TABLES: list[dict] = [
             ("IDX_AP_WSBLD_WS", ["workspace_rec_id", "build_num"]),
         ],
     },
+    {
+        "table": "AP_MQ_MESSAGE",
+        "pk": "PK_AP_MQMSG",
+        "pk_cols": ["rec_id"],
+        "comment": "队列生产与消费消息。按环境保留最近 300 条，供回溯。",
+        "cols": [
+            ("rec_id", "id", False, None, "主键 UUID"),
+            ("env_rec_id", "id", False, None, "消息队列环境"),
+            ("seq_num", "int", False, None, "递增序号，用于裁剪"),
+            ("direction", "varchar64", False, None, "produce / consume / peek"),
+            ("queue_role", "varchar64", False, None, "request / result"),
+            ("queue_name", "varchar128", False, None, "队列名"),
+            ("message_id", "varchar128", True, None, "MNS 消息编号"),
+            ("task_id", "varchar64", True, None, "报文 taskId"),
+            ("body", "text", True, None, "消息正文"),
+            ("source", "varchar64", False, None, "intake / manual"),
+            ("deleted_flag", "flag", False, "0", "1 消费后已删除"),
+            ("actor_user_id", "id", False, None, "操作人，接入为 mq"),
+        ],
+        "indexes": [
+            ("UK_AP_MQMSG_SEQ", ["seq_num"], True),
+            ("IDX_AP_MQMSG_ENV", ["env_rec_id", "seq_num"]),
+        ],
+    },
 ]
 
 

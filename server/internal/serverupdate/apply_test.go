@@ -88,7 +88,7 @@ func TestExtractAndPayloadRoot(t *testing.T) {
 		t.Fatal(sum)
 	}
 	extract := t.TempDir()
-	if err := extractArchive(archive, extract); err != nil {
+	if err := extractArchive(archive, extract, filepath.Base(archive)); err != nil {
 		t.Fatal(err)
 	}
 	root, err := payloadRoot(extract)
@@ -100,6 +100,40 @@ func TestExtractAndPayloadRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "web", "index.html")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestExtractArchiveIgnoresTempSuffix(t *testing.T) {
+	dir := t.TempDir()
+	named := filepath.Join(dir, "auto-pack-9.9.9-linux-amd64.tar.gz")
+	if err := writeTestTar(named); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(named)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp, err := os.CreateTemp(dir, "ap-server-pack-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	extract := t.TempDir()
+	if err := extractArchive(tmp.Name(), extract, "auto-pack-9.9.9-linux-amd64.tar.gz"); err != nil {
+		t.Fatal(err)
+	}
+	root, err := payloadRoot(extract)
+	if err != nil || findBinary(root, binBase) == "" {
+		t.Fatalf("payload %s err %v", root, err)
+	}
+	bad := t.TempDir()
+	if err := extractArchive(tmp.Name(), bad, "notes.txt"); err == nil {
+		t.Fatal("want unsupported suffix")
 	}
 }
 

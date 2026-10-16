@@ -2,60 +2,76 @@ package intake
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"strings"
 
-	"auto-pack/server/internal/env"
+	"auto-pack/server/internal/host/mns"
 )
 
-// Env 是 MNS 队列连接，来自全局环境里已启用的 mq。
-// 打包工程不在此配置：报文 customerBranch 按工程 repo_branch 关联到工作空间。
-type Env struct {
-	Enabled bool
-	Retries int
-	MNS     MNSConfig
+// mqSource 读取当前应使用的 mq 连接。测试可替换；正式路径读已启用的环境。
+type mqSource func(context.Context) (mns.Config, int, bool)
+
+// readMQ 读取已启用的 mq 环境。未配置或字段不齐时 ok 为 false，不订阅。
+// 回执重试次数来自该环境的 receipt_retries，缺省 3。连接字段与环境页生产测试同一套 MapConfig。
+func (s *Service) readMQ(ctx context.Context) (mns.Config, int, bool) {
+	if s == nil || s.envs == nil {
+		return mns.Config{}, 3, false
+	}
+	row, cfg, err := s.envs.FindKind(ctx, "", "mq")
+	if err != nil || len(cfg) == 0 {
+		s.mqEnvID = ""
+		return mns.Config{}, 3, false
+	}
+	s.mqEnvID = row.RecID
+	return readMQMap(cfg)
 }
 
-// Load 读取全局 mq 环境。未配置或字段不齐时不订阅。
-func Load(ctx context.Context, envs *env.Service) Env {
-	if envs == nil {
-		return Env{}
+func (s *Service) currentMQ(ctx context.Context) (mns.Config, int, bool) {
+	if s == nil {
+		return mns.Config{}, 3, false
 	}
-	raw := envs.KindConfig(ctx, "", "mq")
-	got := fromConfig(raw)
-	if len(raw) > 0 && !got.Enabled {
-		log.Printf("intake mq env incomplete")
+	if s.mqSrc != nil {
+		return s.mqSrc(ctx)
 	}
-	return got
+	return s.readMQ(ctx)
 }
 
-func fromConfig(m map[string]any) Env {
-	retries := 3
+func readMQMap(m map[string]any) (mns.Config, int, bool) {
+	cfg := mns.MapConfig(m)
+	return cfg, receiptRetries(m), mqReady(cfg)
+}
+
+func mqReady(cfg mns.Config) bool {
+	return strings.TrimSpace(cfg.Endpoint) != "" &&
+		strings.TrimSpace(cfg.RequestQueue) != "" &&
+		strings.TrimSpace(cfg.ResultQueue) != "" &&
+		strings.TrimSpace(cfg.AccessKeyID) != "" &&
+		strings.TrimSpace(cfg.AccessKeySecret) != ""
+}
+
+func mqPartial(cfg mns.Config) bool {
+	return strings.TrimSpace(cfg.Endpoint) != "" ||
+		strings.TrimSpace(cfg.RequestQueue) != "" ||
+		strings.TrimSpace(cfg.ResultQueue) != "" ||
+		strings.TrimSpace(cfg.AccessKeyID) != "" ||
+		strings.TrimSpace(cfg.AccessKeySecret) != ""
+}
+
+func mqFingerprint(cfg mns.Config) string {
+	return strings.Join([]string{
+		strings.TrimSpace(cfg.Endpoint),
+		strings.TrimSpace(cfg.RequestQueue),
+		strings.TrimSpace(cfg.ResultQueue),
+		strings.TrimSpace(cfg.AccessKeyID),
+		strings.TrimSpace(cfg.AccessKeySecret),
+	}, "\n")
+}
+
+func receiptRetries(m map[string]any) int {
 	if n, ok := configInt(m, "receipt_retries"); ok && n > 0 {
-		retries = n
+		return n
 	}
-	batch := 10
-	if n, ok := configInt(m, "batch_size"); ok && n > 0 {
-		batch = n
-	}
-	endpoint := configString(m, "endpoint")
-	requestQ := configString(m, "request_queue")
-	resultQ := configString(m, "result_queue")
-	ak := firstNonEmptyPath(configString(m, "access_key_id"), configString(m, "access_key"))
-	sk := firstNonEmptyPath(configString(m, "access_key_secret"), configString(m, "secret_key"))
-	return Env{
-		Enabled: endpoint != "" && requestQ != "" && resultQ != "" && ak != "" && sk != "",
-		Retries: retries,
-		MNS: MNSConfig{
-			Endpoint:        endpoint,
-			RequestQueue:    requestQ,
-			ResultQueue:     resultQ,
-			AccessKeyID:     ak,
-			AccessKeySecret: sk,
-			BatchSize:       batch,
-		},
-	}
+	return 3
 }
 
 func configString(m map[string]any, key string) string {

@@ -3,9 +3,11 @@ package intake
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,11 +22,28 @@ var (
 	errNoWar   = errors.New("war not found")
 )
 
-func (s *Service) pushWar(ctx context.Context, prj project.Project, work string, n Notice) (local, remote, signed, until string, err error) {
-	local, err = findWar(work, project.ParseRecipe(prj.RecipeJSON))
+// pushProjectWars 上传一个工程目录里的全部 war。返回最后一份的远程路径和签名，供结果邮件使用。
+func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n Notice) (local, remote, signed, until string, err error) {
+	work, err := s.projectWork(ctx, prj)
 	if err != nil {
 		return "", "", "", "", err
 	}
+	wars, err := findWars(work)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	for _, file := range wars {
+		local, remote, signed, until, err = s.pushWarFile(ctx, prj, file, n)
+		if err != nil {
+			return local, remote, signed, until, err
+		}
+	}
+	return local, remote, signed, until, nil
+}
+
+func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local string, n Notice) (string, string, string, string, error) {
+	var remote, signed, until string
+	var err error
 	name := filepath.Base(local)
 	if root := strings.TrimSpace(n.OSSProjectRoot); root != "" {
 		remote = remoteWar(root, name)
@@ -68,6 +87,38 @@ func (s *Service) pushWar(ctx context.Context, prj project.Project, work string,
 	return local, remote, signed, until, nil
 }
 
+func findWars(work string) ([]string, error) {
+	work = strings.TrimSpace(work)
+	st, err := os.Stat(work)
+	if err != nil || !st.IsDir() {
+		return nil, errNoWar
+	}
+	var wars []string
+	err = filepath.WalkDir(work, func(name string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() {
+			if name != work && (d.Name() == ".git" || strings.HasPrefix(d.Name(), ".")) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ".war") {
+			wars = append(wars, name)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(wars) == 0 {
+		return nil, errNoWar
+	}
+	sort.Strings(wars)
+	return wars, nil
+}
+
 func (s *Service) putOSS(ctx context.Context, prj project.Project, local, key string) error {
 	cfg, err := s.ossConfig(ctx, prj)
 	if err != nil {
@@ -84,12 +135,12 @@ func (s *Service) signOSS(ctx context.Context, prj project.Project, key string, 
 	return hostoss.SignGet(cfg, key, expire)
 }
 
+// ossConfig 读取已启用的 oss 环境，与环境页探测同一套 MapConfig。报文只提供对象路径。
 func (s *Service) ossConfig(ctx context.Context, prj project.Project) (hostoss.Config, error) {
 	if s.envs == nil {
 		return hostoss.Config{}, errors.New("oss env is not configured")
 	}
-	raw := s.envs.KindConfig(ctx, prj.WorkspaceRecID, "oss")
-	cfg := hostoss.MapConfig(raw)
+	cfg := hostoss.MapConfig(s.envs.KindConfig(ctx, prj.WorkspaceRecID, "oss"))
 	if cfg.Endpoint == "" || cfg.Bucket == "" || cfg.AccessKeyID == "" || cfg.AccessKeySecret == "" {
 		return hostoss.Config{}, errors.New("oss env is not configured")
 	}
@@ -159,44 +210,6 @@ func uploadEnv(recipe project.Recipe) (envID, kind string) {
 
 func objectKey(root, name string) string {
 	return strings.TrimLeft(remoteWar(root, name), "/")
-}
-
-func findWar(work string, recipe project.Recipe) (string, error) {
-	look := recipe
-	look.ArtifactPattern = "*.war"
-	if strings.TrimSpace(look.OutputDir) == "" {
-		look.OutputDir = "target"
-	}
-	files, err := project.CollectArtifacts(work, look, "")
-	if err != nil {
-		return "", err
-	}
-	var wars []string
-	for _, f := range files {
-		if strings.EqualFold(filepath.Ext(f), ".war") {
-			wars = append(wars, f)
-		}
-	}
-	if len(wars) == 0 {
-		return "", errNoWar
-	}
-	best := wars[0]
-	bestTime := fileTime(best)
-	for _, f := range wars[1:] {
-		if t := fileTime(f); t.After(bestTime) {
-			best = f
-			bestTime = t
-		}
-	}
-	return best, nil
-}
-
-func fileTime(name string) time.Time {
-	st, err := os.Stat(name)
-	if err != nil {
-		return time.Time{}
-	}
-	return st.ModTime()
 }
 
 func remoteWar(root, name string) string {

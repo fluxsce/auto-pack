@@ -70,3 +70,25 @@ CREATE TABLE IF NOT EXISTS "AP_INTAKE_TASK" (
   "updated_at" TEXT NOT NULL DEFAULT (datetime('now')),
   CONSTRAINT PK_AP_INTAKE PRIMARY KEY ("task_id")
 );
+
+CREATE TABLE IF NOT EXISTS "AP_MQ_MESSAGE" (
+  "rec_id" TEXT NOT NULL,
+  "env_rec_id" TEXT NOT NULL,
+  "seq_num" INTEGER NOT NULL,
+  "direction" TEXT NOT NULL,
+  "queue_role" TEXT NOT NULL,
+  "queue_name" TEXT NOT NULL,
+  "message_id" TEXT,
+  "task_id" TEXT,
+  "body" TEXT,
+  "source" TEXT NOT NULL,
+  "deleted_flag" INTEGER NOT NULL DEFAULT 0,
+  "actor_user_id" TEXT NOT NULL,
+  "created_at" TEXT NOT NULL DEFAULT (datetime('now')),
+  "updated_at" TEXT NOT NULL DEFAULT (datetime('now')),
+  CONSTRAINT PK_AP_MQMSG PRIMARY KEY ("rec_id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "UK_AP_MQMSG_SEQ" ON "AP_MQ_MESSAGE" ("seq_num");
+ALTER TABLE "AP_MQ_MESSAGE" ADD COLUMN "env_rec_id" TEXT;
+CREATE INDEX IF NOT EXISTS "IDX_AP_MQMSG_ENV" ON "AP_MQ_MESSAGE" ("env_rec_id", "seq_num");

@@ -224,6 +224,28 @@ CREATE TABLE IF NOT EXISTS "AP_WORKSPACE_BUILD" (
 
 CREATE INDEX IF NOT EXISTS "IDX_AP_WSBLD_WS" ON "AP_WORKSPACE_BUILD" ("workspace_rec_id", "build_num");
 
+-- 队列生产与消费消息。只保留最近 300 条，供回溯。
+CREATE TABLE IF NOT EXISTS "AP_MQ_MESSAGE" (
+  "rec_id" TEXT NOT NULL,
+  "env_rec_id" TEXT NOT NULL,
+  "seq_num" INTEGER NOT NULL,
+  "direction" TEXT NOT NULL,
+  "queue_role" TEXT NOT NULL,
+  "queue_name" TEXT NOT NULL,
+  "message_id" TEXT,
+  "task_id" TEXT,
+  "body" TEXT,
+  "source" TEXT NOT NULL,
+  "deleted_flag" INTEGER NOT NULL DEFAULT 0,
+  "actor_user_id" TEXT NOT NULL,
+  "created_at" TEXT NOT NULL DEFAULT (datetime('now')),
+  "updated_at" TEXT NOT NULL DEFAULT (datetime('now')),
+  CONSTRAINT PK_AP_MQMSG PRIMARY KEY ("rec_id")
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "UK_AP_MQMSG_SEQ" ON "AP_MQ_MESSAGE" ("seq_num");
+CREATE INDEX IF NOT EXISTS "IDX_AP_MQMSG_ENV" ON "AP_MQ_MESSAGE" ("env_rec_id", "seq_num");
+
 -- 预置角色动作。用户由应用层 seed。
 INSERT OR IGNORE INTO "AP_ROLE_ACTION" ("rec_id", "role_code", "action_code", "created_at", "updated_at") VALUES
     ('ra-owner-js', 'owner', 'job.submit', datetime('now'), datetime('now')),

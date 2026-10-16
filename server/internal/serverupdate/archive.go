@@ -11,12 +11,16 @@ import (
 	"strings"
 )
 
-func extractArchive(src, dest string) error {
-	lower := strings.ToLower(src)
+// extractArchive 按原始文件名识别格式。上传落盘是无后缀临时文件，不能看 src 的扩展名。
+func extractArchive(src, dest, fileName string) error {
+	name := strings.ToLower(filepath.Base(strings.TrimSpace(fileName)))
+	if name == "" || name == "." {
+		name = strings.ToLower(filepath.Base(src))
+	}
 	switch {
-	case strings.HasSuffix(lower, ".zip"):
+	case strings.HasSuffix(name, ".zip"):
 		return unzip(src, dest)
-	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
+	case strings.HasSuffix(name, ".tar.gz"), strings.HasSuffix(name, ".tgz"):
 		return untarGzip(src, dest)
 	default:
 		return fmt.Errorf("仅支持 .tar.gz / .zip 发行包")

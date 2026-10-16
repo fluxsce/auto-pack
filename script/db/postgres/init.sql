@@ -298,6 +298,30 @@ COMMENT ON COLUMN "AP_GLOBAL_VAR"."updated_at" IS '最后修改时间';
 
 CREATE UNIQUE INDEX IF NOT EXISTS "UK_AP_GVAR_KEY" ON "AP_GLOBAL_VAR" ("var_key");
 
+-- 队列生产与消费消息。只保留最近 300 条，供回溯。
+CREATE TABLE IF NOT EXISTS "AP_MQ_MESSAGE" (
+  "rec_id" VARCHAR(36) NOT NULL,
+  "env_rec_id" VARCHAR(36) NOT NULL,
+  "seq_num" INTEGER NOT NULL,
+  "direction" VARCHAR(64) NOT NULL,
+  "queue_role" VARCHAR(64) NOT NULL,
+  "queue_name" VARCHAR(128) NOT NULL,
+  "message_id" VARCHAR(128),
+  "task_id" VARCHAR(64),
+  "body" TEXT,
+  "source" VARCHAR(64) NOT NULL,
+  "deleted_flag" SMALLINT NOT NULL DEFAULT 0,
+  "actor_user_id" VARCHAR(36) NOT NULL,
+  "created_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT PK_AP_MQMSG PRIMARY KEY ("rec_id")
+);
+
+COMMENT ON TABLE "AP_MQ_MESSAGE" IS '队列生产与消费消息。按环境保留最近 300 条，供回溯。';
+
+CREATE UNIQUE INDEX IF NOT EXISTS "UK_AP_MQMSG_SEQ" ON "AP_MQ_MESSAGE" ("seq_num");
+CREATE INDEX IF NOT EXISTS "IDX_AP_MQMSG_ENV" ON "AP_MQ_MESSAGE" ("env_rec_id", "seq_num");
+
 -- 预置角色动作。用户由应用层 seed。
 INSERT INTO "AP_ROLE_ACTION" ("rec_id", "role_code", "action_code", "created_at", "updated_at") VALUES
     ('ra-owner-js', 'owner', 'job.submit', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),

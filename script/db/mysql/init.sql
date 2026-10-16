@@ -182,6 +182,28 @@ CREATE TABLE IF NOT EXISTS `AP_GLOBAL_VAR` (
 ) ENGINE=InnoDB COMMENT='全局环境变量。构建进程可叠加；禁止覆盖 PATH 等保留键。';
 
 
+-- 队列生产与消费消息。只保留最近 300 条，供回溯。
+CREATE TABLE IF NOT EXISTS `AP_MQ_MESSAGE` (
+  `rec_id` VARCHAR(36) NOT NULL COMMENT '主键 UUID',
+  `env_rec_id` VARCHAR(36) NOT NULL COMMENT '消息队列环境',
+  `seq_num` INT NOT NULL COMMENT '递增序号，用于裁剪',
+  `direction` VARCHAR(64) NOT NULL COMMENT 'produce / consume / peek',
+  `queue_role` VARCHAR(64) NOT NULL COMMENT 'request / result',
+  `queue_name` VARCHAR(128) NOT NULL COMMENT '队列名',
+  `message_id` VARCHAR(128) COMMENT 'MNS 消息编号',
+  `task_id` VARCHAR(64) COMMENT '报文 taskId',
+  `body` LONGTEXT COMMENT '消息正文',
+  `source` VARCHAR(64) NOT NULL COMMENT 'intake / manual',
+  `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '1 消费后已删除',
+  `actor_user_id` VARCHAR(36) NOT NULL COMMENT '操作人，接入为 mq',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '最后修改时间',
+  CONSTRAINT PK_AP_MQMSG PRIMARY KEY (`rec_id`),
+  UNIQUE KEY `UK_AP_MQMSG_SEQ` (`seq_num`),
+  KEY `IDX_AP_MQMSG_ENV` (`env_rec_id`, `seq_num`)
+) ENGINE=InnoDB COMMENT='队列生产与消费消息。按环境保留最近 300 条，供回溯。';
+
+
 -- 预置角色动作。用户由应用层 seed。
 INSERT IGNORE INTO `AP_ROLE_ACTION` (`rec_id`, `role_code`, `action_code`, `created_at`, `updated_at`) VALUES
     ('ra-owner-js', 'owner', 'job.submit', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),

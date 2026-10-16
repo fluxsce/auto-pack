@@ -29,6 +29,7 @@ type Notice struct {
 	CustomerCode       string
 	Version            string
 	CustomerBranch     string
+	ProjectName        string
 	BaseRef            string
 	BaseRefType        string
 	SYSVAL             string
@@ -67,6 +68,7 @@ func parseNotice(raw []byte) (Notice, error) {
 	n.CustomerCode = jsonString(fields["customerCode"])
 	n.Version = jsonString(fields["version"])
 	n.CustomerBranch = jsonString(fields["customerBranch"])
+	n.ProjectName = firstJSON(fields, "projectName", "project", "project_name")
 	n.BaseRef = jsonString(fields["baseRef"])
 	n.BaseRefType = jsonString(fields["baseRefType"])
 	n.SYSVAL = jsonString(fields["SYSVAL"])

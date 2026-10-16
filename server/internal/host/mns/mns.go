@@ -168,6 +168,40 @@ func (c *Client) getMessages(ctx context.Context, path string) ([]Message, error
 	return parseReceive(body)
 }
 
+// ChangeVisibility 延长这条消息的不可见时间，并返回新的 ReceiptHandle。旧句柄随之失效。
+// MNS 单次最长 43200 秒。构建耗时超过队列默认隐藏时间时，不延长就会被再次领取。
+func (c *Client) ChangeVisibility(ctx context.Context, queue, receiptHandle string, timeoutSeconds int) (string, error) {
+	queue = strings.TrimSpace(queue)
+	handle := strings.TrimSpace(receiptHandle)
+	if queue == "" || handle == "" {
+		return "", fmt.Errorf("queue and ReceiptHandle required")
+	}
+	if timeoutSeconds < 1 {
+		timeoutSeconds = 1
+	}
+	if timeoutSeconds > 43200 {
+		timeoutSeconds = 43200
+	}
+	path := fmt.Sprintf("/queues/%s/messages?ReceiptHandle=%s&VisibilityTimeout=%d", queue, javaURLEncode(handle), timeoutSeconds)
+	resp, body, err := c.do(ctx, http.MethodPut, path, nil, "")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return "", apiError(resp.StatusCode, body)
+	}
+	var out changeVisibilityResponse
+	if err := xml.Unmarshal(body, &out); err != nil {
+		return "", err
+	}
+	next := strings.TrimSpace(out.ReceiptHandle)
+	if next == "" {
+		return "", fmt.Errorf("mns visibility: empty ReceiptHandle")
+	}
+	return next, nil
+}
+
 // Delete 删除已收下的消息。
 func (c *Client) Delete(ctx context.Context, queue, receiptHandle string) error {
 	queue = strings.TrimSpace(queue)
@@ -303,6 +337,10 @@ func javaURLEncode(s string) string {
 		}
 	}
 	return b.String()
+}
+
+type changeVisibilityResponse struct {
+	ReceiptHandle string `xml:"ReceiptHandle"`
 }
 
 type sendResponse struct {

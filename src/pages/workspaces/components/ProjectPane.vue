@@ -5,6 +5,7 @@ import { RsButton, RsCard, RsIcon, RsInput, RsSelect, RsTable, RsTag } from '@/u
 import AutoBuildDialog from '../auto-build/Dialog.vue'
 import AutoPushDialog from '../auto-push/Dialog.vue'
 import AutoReleaseDialog from '../auto-release/Dialog.vue'
+import MqIntakePane from './MqIntakePane.vue'
 import ProjectEnvVarsDialog from './ProjectEnvVarsDialog.vue'
 import type { Project } from '../api'
 import {
@@ -19,6 +20,7 @@ import {
 
 const { t } = useI18n()
 const envVarsOpen = ref(false)
+const mqPane = ref<{ reload: () => Promise<void> } | null>(null)
 const {
   current,
   projects,
@@ -59,6 +61,11 @@ function statusLabel(code?: string): string {
 
 function rowTime(row: { last_job_at?: string; updated_at?: string; created_at?: string }): string {
   return formatStamp(row.last_job_at || row.updated_at || row.created_at, t('common.dash'))
+}
+
+function refresh(): void {
+  void load()
+  void mqPane.value?.reload()
 }
 
 function repoCell(row: Project) {
@@ -111,9 +118,10 @@ function repoCell(row: Project) {
           {{ t('workspaces.autoRelease') }}
         </RsButton>
         <RsButton size="sm" variant="ghost" tone="warning" :disabled="!current" @click="openAutoPush">{{ t('workspaces.autoPush') }}</RsButton>
-        <RsButton size="sm" variant="ghost" tone="primary" :loading="loading" @click="load">{{ t('common.refresh') }}</RsButton>
+        <RsButton size="sm" variant="ghost" tone="primary" :loading="loading" @click="refresh">{{ t('common.refresh') }}</RsButton>
         <RsButton size="sm" :disabled="!current" @click="create">{{ t('workspaces.newProject') }}</RsButton>
       </template>
+      <MqIntakePane ref="mqPane" :workspace-id="current?.rec_id ?? ''" />
       <div class="ws-toolbar">
         <RsSelect
           class="ws-toolbar__type"

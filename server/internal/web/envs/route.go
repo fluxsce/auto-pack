@@ -20,6 +20,7 @@ func Init(d mod.Deps) {
 	d.Mux.Handle("POST "+mod.Path("envs", "probe"), d.Authz(http.HandlerFunc(c.Probe)))
 	d.Mux.Handle("POST "+mod.Path("envs", "mq-produce"), d.Authz(http.HandlerFunc(c.MQProduce)))
 	d.Mux.Handle("POST "+mod.Path("envs", "mq-consume"), d.Authz(http.HandlerFunc(c.MQConsume)))
+	d.Mux.Handle("GET "+mod.Path("envs", "{id}", "mq-messages"), d.Authz(http.HandlerFunc(c.MQMessages)))
 	d.Mux.Handle("GET "+mod.Path("envs", "{id}"), d.Authz(http.HandlerFunc(c.Get)))
 	d.Mux.Handle("POST "+mod.Path("envs", "{id}", "mail"), d.Authz(http.HandlerFunc(c.SendMail)))
 	d.Mux.Handle("POST "+mod.Path("envs"), d.Authz(http.HandlerFunc(c.Save)))

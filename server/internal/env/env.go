@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"strings"
 
 	"auto-pack/server/internal/access"
 	"auto-pack/server/internal/crypt"
 	"auto-pack/server/internal/iam"
+	"auto-pack/server/internal/mqlog"
 	"auto-pack/server/internal/store"
 )
 
@@ -28,9 +30,38 @@ type Env struct {
 
 // Service manages env vault rows.
 type Service struct {
-	st     *store.Store
-	guard  *iam.Guard
-	cipher *crypt.Cipher
+	st       *store.Store
+	guard    *iam.Guard
+	cipher   *crypt.Cipher
+	messages *mqlog.Log
+}
+
+// SetMQLog 记录手工生产、消费和查看。未设置时不落库。
+func (s *Service) SetMQLog(log *mqlog.Log) {
+	if s == nil {
+		return
+	}
+	s.messages = log
+}
+
+// ListMQMessages 返回该环境最近 300 条队列收发记录。
+func (s *Service) ListMQMessages(ctx context.Context, actor iam.Actor, envRecID string) ([]mqlog.Row, error) {
+	if err := s.authorizeRead(ctx, actor, ""); err != nil {
+		return nil, err
+	}
+	if s.messages == nil {
+		return []mqlog.Row{}, nil
+	}
+	return s.messages.List(ctx, envRecID)
+}
+
+func (s *Service) noteMQ(ctx context.Context, in mqlog.Entry) {
+	if s == nil || s.messages == nil {
+		return
+	}
+	if err := s.messages.Append(ctx, in); err != nil {
+		log.Printf("env mqlog: %v", err)
+	}
 }
 
 // NewService returns an env Service.
