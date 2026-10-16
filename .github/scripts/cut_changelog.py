@@ -141,6 +141,12 @@ def main() -> int:
     parser.add_argument("--published", default="")
     parser.add_argument("--version", default="")
     parser.add_argument("--date", required=True)
+    # CI 只生成 Release 正文，不回写 CHANGELOG，避免与本地提交抢 master。
+    parser.add_argument(
+        "--notes-only",
+        action="store_true",
+        help="write release-notes.md only; do not modify CHANGELOG.md",
+    )
     args = parser.parse_args()
 
     path = Path(args.changelog)
@@ -164,7 +170,7 @@ def main() -> int:
 
     updated = promote(sections, version, args.date.strip())
     Path(args.notes).write_text(notes_for(updated, version), encoding="utf-8", newline="\n")
-    if args.command == "apply":
+    if args.command == "apply" and not args.notes_only:
         path.write_text(render(preamble, updated), encoding="utf-8", newline="\n")
     print(version)
     return 0

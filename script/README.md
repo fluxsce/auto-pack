@@ -42,7 +42,7 @@ bash script/build/linux.sh --os windows --arch amd64
 
 也可用 `pnpm package:windows` / `pnpm package:linux`。
 
-GitHub Actions：发版时跑 [`.github/workflows/pack.yml`](../.github/workflows/pack.yml)。推 `master` 且 `package.json` 与 CHANGELOG 对齐未发版时自动打包发 Release；也可推 `v*` 标签或手动 Run（手动只出 Artifact）。Linux 与 Windows 各出一份发行包。
+GitHub Actions：发版时跑 [`.github/workflows/pack.yml`](../.github/workflows/pack.yml)。推 `master` 且 `package.json` 与 CHANGELOG 对齐未发版时，按触发提交 SHA 打包并发 Release（不回写 master / CHANGELOG）；也可推 `v*` 标签或手动 Run（手动只出 Artifact）。Linux 与 Windows 各出一份发行包。
 
 ## 发行目录
 

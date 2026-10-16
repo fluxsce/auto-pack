@@ -15,6 +15,11 @@
 - Maven 构建排序把 POM 的 `<parent>` 也当作工作空间内依赖边：parent 工程会排到引用它的工程之前（此前只继承 groupId/version，不提前构建 parent）。
 - 构建排序补齐 `dependencyManagement` 中 `scope=import` + `type=pom` 的 BOM 边；本 POM `<properties>` 字面量解析 `${revision}` 等；上游工程停用时告警并跳过下游；同坐标多工程时告警。
 
+### 变更
+
+- Pack 流水线不再回写 `master` / `CHANGELOG`：Release 正文用临时 notes，tag 钉触发提交 SHA，避免与本地发版提交抢分支冲突。
+
+
 ### 新增
 
 - 设置页「界面升级」：owner（`settings.write`）可上传 `auto-pack-版本-系统-架构.tar.gz/.zip` 与 SHA256，校验后替换 `bin`/`web`/`script` 并由 start/restart 拉起；保留 `configs/*.yaml`、`data`、`logs`。开发态 `go run` 不可用。

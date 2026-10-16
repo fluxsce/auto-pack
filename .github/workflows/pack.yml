@@ -4,6 +4,10 @@
 #    （Unreleased 或同号章节）有说明 → 自动打包、打 tag、发 GitHub Release
 #   - 推 v* 标签：校验与 package.json 一致后打包并发 Release（已有 Release 资产则跳过）
 #   - 手动 Run workflow：只打 Artifact，不发版
+# 约定：
+#   - 全程钉死触发提交 SHA，不回写 master / 不改 CHANGELOG（避免与本地抢分支）
+#   - Release 正文由 cut_changelog.py --notes-only 临时生成
+#   - 建议发版提交里已把 Unreleased 收成 ## [x.y.z] - 日期（也可仍留在 Unreleased）
 # 私人仓库只留最近一次构建 Artifact（保留 1 天，成功后删掉旧包）。
 # ensis-ui 从 npm 拉取，不 checkout 兄弟仓。
 name: Pack
@@ -22,6 +26,7 @@ on:
         default: 'latest'
 
 concurrency:
+  # 同一分支/标签只跑最新一次；用 ref 分组，取消过期运行，避免并行发同版本。
   group: pack-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
@@ -44,11 +49,13 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
       mode: ${{ steps.plan.outputs.mode }}
+      commit: ${{ steps.plan.outputs.commit }}
       niuma_ui_version: ${{ steps.plan.outputs.niuma_ui_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Plan
@@ -59,14 +66,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
           ui="${{ github.event.inputs.niuma_ui_version }}"
           if [ -z "${ui}" ]; then
             ui="${{ vars.NIUMA_UI_VERSION || 'latest' }}"
           fi
           echo "niuma_ui_version=${ui}" >> "$GITHUB_OUTPUT"
 
+          # 兼容历史：旧流水线曾回写 [release notes] 提交；现已不再产生。
           if git log -1 --format=%s | grep -F '[release notes]' >/dev/null; then
-            echo "release-notes commit; skip"
+            echo "legacy release-notes commit; skip"
             echo "pack=false" >> "$GITHUB_OUTPUT"
             echo "publish=false" >> "$GITHUB_OUTPUT"
             echo "version=" >> "$GITHUB_OUTPUT"
@@ -157,7 +167,7 @@ jobs:
             exit 0
           fi
 
-          echo "auto-release v${VERSION}"
+          echo "auto-release v${VERSION} @ ${GITHUB_SHA}"
           echo "pack=true" >> "$GITHUB_OUTPUT"
           echo "publish=true" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -181,6 +191,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.commit }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -221,6 +233,7 @@ jobs:
             echo "Planned version ($WANT) != package.json version ($PKG)" >&2
             exit 1
           fi
+          echo "packing ${WANT} @ $(git rev-parse --short HEAD)"
 
       - name: Pack Linux
         if: matrix.target == 'linux'
@@ -234,7 +247,7 @@ jobs:
       - name: Upload pack artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: auto-pack-${{ matrix.target }}-amd64
+          name: auto-pack-${{ needs.decide.outputs.version }}-${{ matrix.target }}-amd64
           path: |
             build/dist/*.tar.gz
             build/dist/*.zip
@@ -281,12 +294,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.decide.outputs.commit }}
           fetch-depth: 0
 
       - name: Download pack artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: auto-pack-*-amd64
+          pattern: auto-pack-${{ needs.decide.outputs.version }}-*-amd64
           merge-multiple: true
           path: release-files
 
@@ -298,35 +312,25 @@ jobs:
           ls -l
           cat SHA256SUMS.txt
 
-      - name: Cut changelog and publish
+      - name: Publish release notes only (no master push)
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.decide.outputs.version }}
           TAG: ${{ needs.decide.outputs.tag }}
           MODE: ${{ needs.decide.outputs.mode }}
+          COMMIT: ${{ needs.decide.outputs.commit }}
         shell: bash
         run: |
           set -euo pipefail
           DATE="$(date -u +%Y-%m-%d)"
+          # 只写临时 release-notes.md，不改 CHANGELOG、不 push master。
           python3 .github/scripts/cut_changelog.py apply \
             --version "${VERSION}" \
             --date "${DATE}" \
-            --notes release-notes.md
+            --notes release-notes.md \
+            --notes-only
 
-          if [ "${MODE}" = "auto" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add CHANGELOG.md
-            if git diff --cached --quiet; then
-              echo "changelog already records v${VERSION}"
-            else
-              git commit -m "docs: 记录 v${VERSION} 版本说明 [release notes]"
-              git push origin HEAD:master
-            fi
-          fi
-
-          # 先发 Release（gh 会按 --target 建 tag），再让 tag 推送进来的二次
-          # 工作流看到已有 Release 后跳过，避免重复打包。
+          # 先发 Release（--target 钉死打包 SHA），tag 事件进来时若已有 Release 则跳过。
           if gh release view "${TAG}" >/dev/null 2>&1; then
             gh release upload "${TAG}" \
               release-files/*.tar.gz \
@@ -336,7 +340,7 @@ jobs:
             gh release edit "${TAG}" --notes-file release-notes.md
           elif [ "${MODE}" = "auto" ]; then
             gh release create "${TAG}" \
-              --target master \
+              --target "${COMMIT}" \
               --title "auto-pack ${TAG}" \
               --notes-file release-notes.md \
               release-files/*.tar.gz \
@@ -344,6 +348,7 @@ jobs:
               release-files/SHA256SUMS.txt
           else
             gh release create "${TAG}" \
+              --target "${COMMIT}" \
               --title "auto-pack ${TAG}" \
               --notes-file release-notes.md \
               release-files/*.tar.gz \
