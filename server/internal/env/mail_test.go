@@ -94,7 +94,7 @@ func TestComposeMqMailOSSUpdateShowsBackup(t *testing.T) {
 	if got.Subject != "【零食有鸣】申请更新TSK-0001, OSS已更新" || got.FromName != "DATAHUB 更新通知" {
 		t.Fatalf("%+v", got)
 	}
-	for _, part := range []string{"更新内容：【零食有鸣】申请更新TSK-0001", "任务编号：TSK-0001", "OSS访问路径：https://oss.example/app.war", "更新war包：app.war, config.zip", "更新范围：DATAHUB服务", "备份：/开发/S01/BAK/20261017004900123/app.war", "有效期至 2026-10-17 23:00:00"} {
+	for _, part := range []string{"更新内容：【零食有鸣】申请更新TSK-0001", "任务编号：TSK-0001", "OSS访问路径：/开发/S01/app.war", "https://oss.example/app.war", "更新war包：app.war, config.zip", "更新范围：DATAHUB服务", "备份：/开发/S01/BAK/20261017004900123/app.war", "有效期至 2026-10-17 23:00:00"} {
 		if !strings.Contains(got.Text, part) {
 			t.Fatalf("missing %q in %s", part, got.Text)
 		}

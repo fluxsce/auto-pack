@@ -163,7 +163,7 @@ func TestDuplicateAfterFinishStatesReason(t *testing.T) {
 		t.Fatalf("calls=%d", len(aud.calls))
 	}
 	got := aud.calls[2].summary
-	if !aud.calls[2].ok || !strings.Contains(got, "不重复打包") || !strings.Contains(got, "原因：1. 打包") || !strings.Contains(got, msgSuccess) || !strings.Contains(got, "2. 推送") || !strings.Contains(got, "3. 邮件") || !strings.Contains(got, "build=build-1") {
+	if !aud.calls[2].ok || !strings.Contains(got, "不重复打包") || !strings.Contains(got, "原因：打包成功，推送成功，邮件未发送") || !strings.Contains(got, "build=build-1") {
 		t.Fatalf("%s", got)
 	}
 }
@@ -609,6 +609,19 @@ func TestReceiptSteps(t *testing.T) {
 			t.Fatalf("missing %q in %s", part, got)
 		}
 	}
+	if strings.Contains(got, "备份路径") {
+		t.Fatalf("empty backup must stay out of the receipt: %s", got)
+	}
+	withBackup, backupMeta := receiptSteps(resultSuccess, msgSuccess, n, mailDraft{
+		remote: "/开发/S01/app.war",
+		backup: "/开发/S01/BAK/20261017004900123/app.war",
+	}, "已发送 收件人 a@b.c，模板 OSS 已更新", stepClock{})
+	if !strings.Contains(withBackup, "2. 推送：成功，OSS 路径 /开发/S01/app.war，备份路径 /开发/S01/BAK/20261017004900123/app.war") {
+		t.Fatalf("%s", withBackup)
+	}
+	if len(backupMeta) != 3 || backupMeta[1].Message != "OSS 路径 /开发/S01/app.war，备份路径 /开发/S01/BAK/20261017004900123/app.war" {
+		t.Fatalf("%+v", backupMeta)
+	}
 	ftp := n
 	ftp.OSSProjectRoot = ""
 	ftp.FTPProjectRoot = "/ftp/app"
@@ -618,6 +631,10 @@ func TestReceiptSteps(t *testing.T) {
 	}
 	if !strings.Contains(pushed, "1. 打包：成功") || !strings.Contains(pushed, "2. 推送：失败。oss copy 403: AccessDenied") || strings.Contains(pushed, "自动打包失败") || !strings.Contains(pushed, "3. 邮件：未发送：打包或推送未成功") {
 		t.Fatalf("%s", pushed)
+	}
+	failedBackup, failedMeta := receiptSteps(resultFailed, "推送失败：OSS put 500", n, mailDraft{backup: "/开发/S01/BAK/20261017004900123/app.war"}, "未发送：打包或推送未成功", stepClock{})
+	if !strings.Contains(failedBackup, "2. 推送：失败。OSS put 500，备份路径 /开发/S01/BAK/20261017004900123/app.war") || failedMeta[1].Message != "OSS put 500，备份路径 /开发/S01/BAK/20261017004900123/app.war" {
+		t.Fatalf("%s %+v", failedBackup, failedMeta)
 	}
 	early, _ := receiptSteps(resultFailed, msgBuild, n, mailDraft{}, "", stepClock{})
 	if !strings.Contains(early, "1. 打包：失败。"+msgBuild) || !strings.Contains(early, "2. 推送：未执行") || !strings.Contains(early, "3. 邮件：未发送") {
@@ -642,12 +659,16 @@ func TestReceiptMetadataTimes(t *testing.T) {
 	if meta[0].StartedAt != "2026-07-03 18:05:37" || meta[0].FinishedAt != "2026-07-03 18:06:20" || meta[2].Status != "已发送" {
 		t.Fatalf("%+v", meta)
 	}
-	body, err := json.Marshal(dataHubReceipt(sampleNotice(), resultSuccess, text, start, meta))
+	brief := receiptBrief(meta)
+	if brief != "打包成功，推送成功，邮件已发送" || strings.Contains(brief, "OSS 路径") || strings.Contains(brief, "耗时") {
+		t.Fatalf("brief %q", brief)
+	}
+	body, err := json.Marshal(dataHubReceipt(sampleNotice(), resultSuccess, brief, start, meta))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := decodeReceipt(t, body)
-	if len(got.Metadata) != 3 || got.Metadata[1].Name != "推送" || got.Metadata[1].StartedAt != "2026-07-03 18:06:20" {
+	if got.ResultMessage != brief || len(got.Metadata) != 3 || got.Metadata[1].Name != "推送" || got.Metadata[1].Message != "OSS 路径 /开发/S01/app.war" || got.Metadata[1].StartedAt != "2026-07-03 18:06:20" {
 		t.Fatalf("%s", body)
 	}
 }

@@ -263,7 +263,7 @@ func ComposePackMail(fields PackMailFields) (ComposedMail, error) {
 }
 
 // ComposeMqMail renders the queue push notice. template is ftp_update or oss_update.
-// OSS uses 「OSS访问路径」 and 「OSS已更新」; FTP uses 「FTP版本来源」 and 「FTP已更新」. Backup is the BAK path.
+// OSS访问路径先写对象路径，再写临时地址。备份栏写 BAK 路径。FTP 用「FTP版本来源」和「FTP已更新」。
 func ComposeMqMail(template string, fields MqMailFields) (ComposedMail, error) {
 	content := strings.TrimSpace(fields.TaskNo)
 	if content != "" && !strings.HasPrefix(content, "申请更新") {
@@ -276,7 +276,11 @@ func ComposeMqMail(template string, fields MqMailFields) (ComposedMail, error) {
 		kind = MailTemplateOSSUpdate
 		sourceLabel = "OSS访问路径"
 		if url := strings.TrimSpace(fields.URL); url != "" {
-			source = url
+			if source != "" {
+				source = source + "\n" + url
+			} else {
+				source = url
+			}
 		}
 	}
 	other := ""

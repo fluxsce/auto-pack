@@ -219,6 +219,7 @@ func (s *Service) buildOne(ctx context.Context, n Notice, prj project.Project) e
 	_, remote, signed, until, backup, err := s.pushProjectWars(ctx, prj, n)
 	if err != nil {
 		log.Printf("intake upload %s: %v", n.TaskID, err)
+		s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
 		if !s.mqMailReady(ctx) {
 			s.deliverMail(ctx, done.RecID, false, pushFailText(err), "", "", "")
 		}
@@ -270,6 +271,7 @@ func (s *Service) buildWorkspace(ctx context.Context, n Notice, workspaceID stri
 	s.steps.push.end = time.Now()
 	if err != nil {
 		log.Printf("intake upload %s: %v", n.TaskID, err)
+		s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
 		return s.finish(ctx, n, anchor, ref, resultFailed, pushFailText(err))
 	}
 	s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
@@ -544,11 +546,17 @@ func pickNamedProject(list []project.Project, name string) (project.Project, err
 }
 
 func (s *Service) finishWithoutTask(ctx context.Context, n Notice, message string) error {
+	published := message
 	var meta []ReceiptMeta
 	if s.fromMQ {
-		message, meta = receiptSteps(resultFailed, message, n, mailDraft{}, "未发送", s.steps)
+		detail, steps := receiptSteps(resultFailed, message, n, mailDraft{}, "未发送", s.steps)
+		meta = steps
+		message = detail
+		if brief := receiptBrief(steps); brief != "" {
+			published = brief
+		}
 	}
-	err := s.writeReceipt(ctx, n, resultFailed, message, meta)
+	err := s.writeReceipt(ctx, n, resultFailed, published, meta)
 	text := message
 	if err != nil {
 		text += "；回执未写入"
@@ -565,13 +573,19 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 	draft := s.pendingMail
 	s.pendingMail = mailDraft{}
 	text := message
+	published := message
 	var meta []ReceiptMeta
 	if s.fromMQ {
 		mailNote := s.notifyLinked(ctx, n, prj, jobID, result == resultSuccess, message, draft.remote, draft.signed, draft.until, draft.backup)
-		text, meta = receiptSteps(result, message, n, draft, mailNote, s.steps)
-		s.appendReceiptLog(ctx, text)
+		detail, steps := receiptSteps(result, message, n, draft, mailNote, s.steps)
+		meta = steps
+		text = detail
+		s.appendReceiptLog(ctx, detail)
+		if brief := receiptBrief(steps); brief != "" {
+			published = brief
+		}
 	}
-	pubErr := s.writeReceipt(ctx, n, result, text, meta)
+	pubErr := s.writeReceipt(ctx, n, result, published, meta)
 	if pubErr != nil {
 		rowStatus = statusReceiptFailed
 		log.Printf("intake receipt %s: %v", n.TaskID, pubErr)
@@ -588,7 +602,7 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 		JobRecID:       storeID,
 		TaskStatus:     rowStatus,
 		ResultStatus:   result,
-		ResultMessage:  text,
+		ResultMessage:  published,
 		OSSProjectRoot: firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot),
 		FinishedAt:     finished,
 	})

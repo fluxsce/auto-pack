@@ -226,7 +226,7 @@ func mailTemplateLabel(tpl string) string {
 	}
 }
 
-// receiptSteps 是回执队列里的三步结果，以及同内容的 metadata。构建日志另记一份同样的步骤。
+// receiptSteps 写出三步明细，供 metadata 和构建日志使用。回执 resultMessage 用 receiptBrief，不重复这段说明。
 func receiptSteps(result, message string, n Notice, draft mailDraft, mailNote string, clock stepClock) (string, []ReceiptMeta) {
 	pack, push := splitPackPush(result, message, n, draft)
 	if strings.TrimSpace(mailNote) == "" {
@@ -262,6 +262,20 @@ func receiptSteps(result, message string, n Notice, draft mailDraft, mailNote st
 		})
 	}
 	return strings.Join(lines, "\n"), meta
+}
+
+// receiptBrief 是回执 resultMessage。只保留每步结论，路径、备份、耗时和收件人在 metadata 里。
+func receiptBrief(meta []ReceiptMeta) string {
+	parts := make([]string, 0, len(meta))
+	for _, row := range meta {
+		name := strings.TrimSpace(row.Name)
+		status := strings.TrimSpace(row.Status)
+		if name == "" && status == "" {
+			continue
+		}
+		parts = append(parts, name+status)
+	}
+	return strings.Join(parts, "，")
 }
 
 func splitStepStatus(body string) (string, string) {
@@ -322,7 +336,7 @@ func splitPackPush(result, message string, n Notice, draft mailDraft) (string, s
 		if reason == "" {
 			reason = "原因未知"
 		}
-		return "成功", "失败。" + reason
+		return "成功", appendBackupPath("失败。"+reason, draft.backup)
 	}
 	if result == resultSuccess {
 		pack := "成功"
@@ -337,12 +351,20 @@ func splitPackPush(result, message string, n Notice, draft mailDraft) (string, s
 		if files := strings.Join(n.ResourceFiles, ", "); files != "" {
 			push += "，资源 " + files
 		}
-		return pack, push
+		return pack, appendBackupPath(push, draft.backup)
 	}
 	if msg == "" {
 		msg = "失败"
 	}
 	return "失败。" + msg, "未执行"
+}
+
+func appendBackupPath(text, backup string) string {
+	backup = strings.TrimSpace(backup)
+	if backup == "" {
+		return text
+	}
+	return text + "，备份路径 " + backup
 }
 
 func pushVia(n Notice) string {

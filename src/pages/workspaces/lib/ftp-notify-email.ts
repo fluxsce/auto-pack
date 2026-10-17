@@ -309,9 +309,16 @@ export function buildMergedFtpNotifyFields(
   }
 }
 
-/** OSS 告知与消息队列「OSS 已更新」一致：访问路径用临时地址，其他栏写有效期，更新范围固定 DATAHUB服务。 */
-export function applyOssNotifyFields(fields: FtpNotifyEmailFields, urls: string[], until: string): FtpNotifyEmailFields {
-  const source = urls.map((item) => item.trim()).filter(Boolean).join('\n')
+/** OSS 告知与消息队列「OSS 已更新」一致：访问路径先写对象路径，再写临时地址。备份路径留在备份栏。其他栏写有效期，更新范围固定 DATAHUB服务。 */
+export function applyOssNotifyFields(
+  fields: FtpNotifyEmailFields,
+  urls: string[],
+  until: string,
+  paths: string[] = [],
+): FtpNotifyEmailFields {
+  const pathText = paths.map((item) => item.trim()).filter(Boolean).join('\n')
+  const urlText = urls.map((item) => item.trim()).filter(Boolean).join('\n')
+  const source = [pathText, urlText].filter(Boolean).join('\n')
   return {
     ...fields,
     sourceLabel: 'OSS访问路径',

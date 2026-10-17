@@ -380,7 +380,7 @@ async function openNotify(): Promise<void> {
   if (notifyTemplate.value === 'oss_update') {
     try {
       const signed = await signOssPush(form.value.envRecId, successItems.value.map((item) => item.updatePath))
-      Object.assign(fields, applyOssNotifyFields(fields, signed.urls, signed.until))
+      Object.assign(fields, applyOssNotifyFields(fields, signed.urls, signed.until, successItems.value.map((item) => item.updatePath)))
     } catch (e) {
       toast.error(errText(e))
       return

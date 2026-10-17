@@ -44,7 +44,13 @@ func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n No
 		var oneBackup string
 		local, remote, signed, until, oneBackup, err = s.pushWarFile(ctx, prj, file, n, at)
 		if err != nil {
-			return local, remote, signed, until, backup, err
+			if remote != "" {
+				remotes = append(remotes, remote)
+			}
+			if oneBackup != "" {
+				backups = append(backups, oneBackup)
+			}
+			return local, strings.Join(remotes, "\n"), strings.Join(urls, "\n"), until, strings.Join(backups, "；"), err
 		}
 		if remote != "" {
 			remotes = append(remotes, remote)
