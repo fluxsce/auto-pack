@@ -52,6 +52,7 @@ export function toUpdateMailFieldsPayload(fields: FtpNotifyEmailFields) {
     war_package: fields.warPackage,
     other: fields.other,
     backup: fields.backup,
+    source_label: fields.sourceLabel ?? '',
   }
 }
 
@@ -182,7 +183,7 @@ function renderRows(rows: Array<[string, string]>): string {
       const border = highlight ? '1px solid #c5d8eb' : '1px solid #e6ebf2'
       return `<tr>
   <td style="padding:10px 14px;border-bottom:${border};color:${labelColor};font-size:13px;font-weight:${labelWeight};width:128px;vertical-align:top;background:${bg};">${escapeHtml(label)}</td>
-  <td style="padding:10px 14px;border-bottom:${border};color:#1f2937;font-size:13px;line-height:1.55;word-break:break-all;background:${bg};">${renderRowValue(label, value, highlight)}</td>
+  <td style="padding:10px 14px;border-bottom:${border};color:#1f2937;font-size:13px;line-height:1.55;word-break:break-all;white-space:pre-line;background:${bg};">${renderRowValue(label, value, highlight)}</td>
 </tr>`
     })
     .join('')
@@ -305,6 +306,18 @@ export function buildMergedFtpNotifyFields(
     warPackage: warPackages.join('、'),
     other: '',
     backup: backups.join('；'),
+  }
+}
+
+/** OSS 告知与消息队列「OSS 已更新」一致：访问路径用临时地址，其他栏写有效期，更新范围固定 DATAHUB服务。 */
+export function applyOssNotifyFields(fields: FtpNotifyEmailFields, urls: string[], until: string): FtpNotifyEmailFields {
+  const source = urls.map((item) => item.trim()).filter(Boolean).join('\n')
+  return {
+    ...fields,
+    sourceLabel: 'OSS访问路径',
+    ftpVersionSource: source || fields.ftpVersionSource,
+    updateScope: 'DATAHUB服务',
+    other: until.trim() ? `有效期至 ${until.trim()}` : fields.other,
   }
 }
 

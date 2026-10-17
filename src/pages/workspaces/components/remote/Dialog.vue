@@ -11,6 +11,7 @@ import {
   getJob,
   getJobLog,
   getWorkspaceEnv,
+  signOssObject,
   listWorkspaceEnvs,
   submitJob,
   type ProjectFileEntry,
@@ -23,7 +24,7 @@ import {
   resolvePushLayout,
   uploadFileName,
 } from '../../lib/workspace-ftp'
-import { buildMergedFtpNotifyFields, type FtpNotifyEmailFields, type NotifyMailTemplate } from '../../lib/ftp-notify-email'
+import { applyOssNotifyFields, buildMergedFtpNotifyFields, type FtpNotifyEmailFields, type NotifyMailTemplate } from '../../lib/ftp-notify-email'
 import { statusVariant } from '../../composables/use-project-list'
 import MailPanel from './MailPanel.vue'
 import PushPanel from './PushPanel.vue'
@@ -276,10 +277,30 @@ async function openNotify(): Promise<void> {
     toast.warning(t('workspaces.remote.notify.empty'))
     return
   }
-  if (notifyTemplate.value === 'oss_update') fields.sourceLabel = 'OSS访问路径'
+  if (notifyTemplate.value === 'oss_update') {
+    try {
+      const signed = await signOssPush(form.value.envRecId, successItems.value.map((item) => item.updatePath))
+      Object.assign(fields, applyOssNotifyFields(fields, signed.urls, signed.until))
+    } catch (e) {
+      toast.error(errText(e))
+      return
+    }
+  }
   notifyInitial.value = fields
   await nextTick()
   notifyOpen.value = true
+}
+
+async function signOssPush(envId: string, paths: string[]): Promise<{ urls: string[]; until: string }> {
+  const keys = [...new Set(paths.map((item) => item.trim()).filter(Boolean))]
+  const urls: string[] = []
+  let until = ''
+  for (const key of keys) {
+    const one = await signOssObject(envId, key)
+    urls.push(one.url)
+    until = one.expiresAt || until
+  }
+  return { urls, until }
 }
 
 function scheduleRemoteNote(): void {

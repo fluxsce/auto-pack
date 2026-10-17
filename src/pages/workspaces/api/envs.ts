@@ -9,6 +9,24 @@ export function listWorkspaceEnvs(_workspaceId?: string): Promise<EnvRow[]> {
   }).then((rows) => rows ?? [])
 }
 
+export type OSSSignResult = {
+  ok?: boolean
+  message?: string
+  url?: string
+  expires_at?: string
+}
+
+export function signOssObject(envId: string, key: string): Promise<{ url: string; expiresAt: string }> {
+  return request<OSSSignResult>({
+    method: 'POST',
+    url: apiPath('envs', envId, 'oss-sign'),
+    data: { key, mode: 'link' },
+  }).then((out) => {
+    if (!out?.ok || !out.url) throw new Error(out?.message || 'oss sign failed')
+    return { url: out.url, expiresAt: out.expires_at || '' }
+  })
+}
+
 export function getWorkspaceEnv(id: string): Promise<EnvRow> {
   return request<EnvRow>({ method: 'GET', url: apiPath('envs', id) })
 }

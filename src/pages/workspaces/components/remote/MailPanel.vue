@@ -41,8 +41,10 @@ const fields = ref<FtpNotifyEmailFields>(emptyFields())
 
 const isProjectUpdate = computed(() => props.template === 'project_update')
 const mailTemplate = computed<NotifyMailTemplate>(() => props.template || 'ftp_update')
-const defaultFromName = computed(() =>
-  isProjectUpdate.value ? notifyTemplateMeta('project_update').fromName : FTP_NOTIFY_FROM_NAME,
+const isOssUpdate = computed(() => mailTemplate.value === 'oss_update')
+const defaultFromName = computed(() => notifyTemplateMeta(mailTemplate.value).fromName)
+const sourceFieldLabel = computed(() =>
+  fields.value.sourceLabel?.trim() || (isOssUpdate.value ? t('workspaces.remote.notify.ossSource') : t('workspaces.remote.notify.ftpSource')),
 )
 const dialogTitle = computed(() =>
   isProjectUpdate.value ? t('workspaces.remote.notify.projectTitle') : t('workspaces.remote.notify.title'),
@@ -102,7 +104,7 @@ function applyInitial(): void {
 async function loadSmtpDefaults(id: string): Promise<void> {
   try {
     const row = await getWorkspaceEnv(id)
-    if (!fromNameManual.value) {
+    if (!fromNameManual.value && !isOssUpdate.value) {
       const name = smtpFromNameFromConfig(row.config)
       fromName.value = !name || name === 'Auto Pack' ? defaultFromName.value : name
     }
@@ -145,12 +147,12 @@ async function submit(): Promise<void> {
   try {
     // 推送告知：仍只发 subject/body/html（原逻辑）。
     // 人为改动：带 template=project_update，由服务端按模板渲染。
-    if (isProjectUpdate.value) {
+    if (isProjectUpdate.value || isOssUpdate.value) {
       await sendEnvMail(smtpEnvRecId.value, {
         recipients: recipients.value.trim(),
         subject: subject.value.trim(),
         from_name: fromName.value.trim() || defaultFromName.value,
-        template: 'project_update',
+        template: mailTemplate.value,
         fields: toUpdateMailFieldsPayload(fields.value),
       })
     } else {
@@ -248,8 +250,9 @@ async function submit(): Promise<void> {
               <RsFormItem class="span2" :label="t('workspaces.remote.notify.warPackage')">
                 <RsInput v-model="fields.warPackage" />
               </RsFormItem>
-              <RsFormItem class="span2" :label="t('workspaces.remote.notify.ftpSource')">
-                <RsInput v-model="fields.ftpVersionSource" />
+              <RsFormItem class="span2" :label="sourceFieldLabel">
+                <RsTextarea v-if="isOssUpdate" v-model="fields.ftpVersionSource" :rows="4" />
+                <RsInput v-else v-model="fields.ftpVersionSource" />
               </RsFormItem>
               <RsFormItem class="span2" :label="t('workspaces.remote.notify.backup')">
                 <RsTextarea v-model="fields.backup" :rows="2" />

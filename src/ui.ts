@@ -34,6 +34,7 @@ export {
   RsIcon,
   rsConfirm,
   useRsToast,
+  copyTextToClipboard,
 } from '@niuma/ui'
 
 export type {

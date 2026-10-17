@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsButton, RsDialog, RsTable, useRsToast, type RsTableColumn } from '@/ui'
+import { RsButton, RsDialog, RsTable, copyTextToClipboard, useRsToast, type RsTableColumn } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
 
@@ -147,13 +147,11 @@ async function sign(row: OSSItem, mode: 'view' | 'download' | 'link'): Promise<v
 }
 
 async function copyURL(): Promise<void> {
-  if (!signedURL.value) return
-  try {
-    await navigator.clipboard.writeText(signedURL.value)
-    toast.success(t('envs.ossCopied'))
-  } catch (e) {
-    toast.error(e instanceof Error ? e.message : String(e))
-  }
+  const text = signedURL.value
+  if (!text) return
+  const ok = await copyTextToClipboard(text)
+  if (ok) toast.success(t('envs.ossCopied'))
+  else toast.error(t('envs.ossCopyFail'))
 }
 
 watch(
