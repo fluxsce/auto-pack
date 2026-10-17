@@ -24,14 +24,26 @@ var (
 	errNoWar   = errors.New("war not found")
 )
 
-// pushProjectWars 上传工程产物。报文写了 resourceFiles 时只推这些文件，否则上传目录里的全部 war。
+// pushProjectWars 上传工程产物。
+// 报文写了 resourceFiles 时只推这些文件。OSS 且 resourceFiles 空白时不过滤：工程目录下每个文件原样上传，每个目录先打成同名 zip。
+// 两个及以上 sce 开头的前端目录（含 sce-vdatahub）打成一个包，只有一个时压缩该目录本身。
+// FTP 未写 resourceFiles 时只上传目录里的 war。
 // 多份文件的远程路径和临时地址用换行拼在一起，供回执和邮件使用。
 func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n Notice) (local, remote, signed, until, backup string, err error) {
 	work, err := s.projectWork(ctx, prj)
 	if err != nil {
 		return "", "", "", "", "", err
 	}
-	files, err := selectPushFiles(work, n.ResourceFiles)
+	var files []string
+	var cleanup func()
+	if strings.TrimSpace(n.OSSProjectRoot) != "" && len(cleanResourceNames(n.ResourceFiles)) == 0 {
+		files, cleanup, err = collectOSSPushFiles(work)
+	} else {
+		files, err = selectPushFiles(work, n.ResourceFiles)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 	if err != nil {
 		if errors.Is(err, errNoWar) {
 			return "", "", "", "", "", fmt.Errorf("%w：%s", errNoWar, work)
@@ -151,6 +163,41 @@ func ossBackupKey(objectKey string, at time.Time) string {
 	}
 	folder := utils.DefaultBackupDir("/"+dir, at)
 	return strings.TrimLeft(utils.RemoteJoin(folder, name), "/")
+}
+
+// collectOSSPushFiles 收集工程目录的直接子项。文件原样加入，目录按自动推送的规则压缩。
+func collectOSSPushFiles(work string) (files []string, cleanup func(), err error) {
+	rels, err := listProjectEntries(work)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return project.CollectPushPaths(work, rels)
+}
+
+// listProjectEntries 列出工程目录下要推送的名称，跳过点目录和点文件。
+func listProjectEntries(work string) ([]string, error) {
+	work = strings.TrimSpace(work)
+	st, err := os.Stat(work)
+	if err != nil || !st.IsDir() {
+		return nil, errNoWar
+	}
+	entries, err := os.ReadDir(work)
+	if err != nil {
+		return nil, err
+	}
+	rels := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") {
+			continue
+		}
+		rels = append(rels, name)
+	}
+	if len(rels) == 0 {
+		return nil, errNoWar
+	}
+	sort.Strings(rels)
+	return rels, nil
 }
 
 func findWars(work string) ([]string, error) {

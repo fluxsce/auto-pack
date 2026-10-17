@@ -1,10 +1,13 @@
 package intake
 
 import (
+	"archive/zip"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +38,156 @@ func TestSelectPushFiles(t *testing.T) {
 	if _, err := selectPushFiles(work, []string{"missing.jar"}); err == nil {
 		t.Fatal("missing file must fail")
 	}
+}
+
+func TestCollectOSSPushFilesZipsDirsAndMergesSce(t *testing.T) {
+	work := t.TempDir()
+	shared := filepath.Join(work, "shared-datahub")
+	a := filepath.Join(work, "sce-vdatahub-d12-web")
+	b := filepath.Join(work, "sce-vdatahub-d13-web")
+	if err := os.MkdirAll(filepath.Join(shared, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(a, "js"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(b, "css"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(work, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		filepath.Join(work, "datahub01web.war"),
+		filepath.Join(shared, "lib", "a.jar"),
+		filepath.Join(a, "js", "a.js"),
+		filepath.Join(b, "css", "b.css"),
+		filepath.Join(work, ".git", "config"),
+	} {
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	files, cleanup, err := collectOSSPushFiles(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	names := map[string]string{}
+	for _, file := range files {
+		names[filepath.Base(file)] = file
+	}
+	if _, ok := names["datahub01web.war"]; !ok {
+		t.Fatalf("war missing: %v", files)
+	}
+	if _, ok := names["shared-datahub.zip"]; !ok {
+		t.Fatalf("folder should be zipped: %v", files)
+	}
+	if _, ok := names["sce-vdatahub.zip"]; !ok {
+		t.Fatalf("sce dirs should merge: %v", files)
+	}
+	if _, ok := names["sce-vdatahub-d12-web.zip"]; ok {
+		t.Fatal("multiple sce dirs must not stay separate")
+	}
+	if _, ok := names[".git"]; ok {
+		t.Fatal("hidden dir must be skipped")
+	}
+	inZip := zipNames(t, names["sce-vdatahub.zip"])
+	if !inZip["sce-vdatahub-d12-web/js/a.js"] || !inZip["sce-vdatahub-d13-web/css/b.css"] {
+		t.Fatalf("merged entries %v", inZip)
+	}
+
+	if err := os.RemoveAll(b); err != nil {
+		t.Fatal(err)
+	}
+	single, singleCleanup, err := collectOSSPushFiles(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer singleCleanup()
+	var singleNames []string
+	for _, file := range single {
+		singleNames = append(singleNames, filepath.Base(file))
+	}
+	sort.Strings(singleNames)
+	want := []string{"datahub01web.war", "sce-vdatahub-d12-web.zip", "shared-datahub.zip"}
+	if len(singleNames) != len(want) {
+		t.Fatalf("single sce got %v", singleNames)
+	}
+	for i, name := range want {
+		if singleNames[i] != name {
+			t.Fatalf("single sce got %v", singleNames)
+		}
+	}
+}
+
+func TestOSSPushUsesResourceFilesWhenSet(t *testing.T) {
+	svc, _, _, _ := setupIntake(t)
+	ctx := context.Background()
+	prj, err := svc.projects.GetRaw(ctx, "p-code")
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := svc.projectWork(ctx, prj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(work, "shared-datahub")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "readme.txt"), []byte("lib"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "extra.txt"), []byte("e"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	svc.upload = func(_ context.Context, _ project.Project, local, _ string) error {
+		got = append(got, filepath.Base(local))
+		return nil
+	}
+	svc.sign = func(key string, _ time.Duration) (string, error) {
+		return "https://signed.example/" + key, nil
+	}
+	n := sampleNotice()
+	n.ResourceFiles = []string{"app.war"}
+	_, remote, _, _, _, err := svc.pushProjectWars(ctx, prj, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "app.war" || remote != "/开发/S01/app.war" {
+		t.Fatalf("filtered uploaded %v remote %s", got, remote)
+	}
+
+	got = nil
+	n.ResourceFiles = nil
+	_, remote, _, _, _, err = svc.pushProjectWars(ctx, prj, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(got)
+	if len(got) != 3 || got[0] != "app.war" || got[1] != "extra.txt" || got[2] != "shared-datahub.zip" {
+		t.Fatalf("blank resourceFiles uploaded %v remote %s", got, remote)
+	}
+	if !strings.Contains(remote, "/开发/S01/app.war") || !strings.Contains(remote, "/开发/S01/shared-datahub.zip") || !strings.Contains(remote, "/开发/S01/extra.txt") {
+		t.Fatalf("remote %s", remote)
+	}
+}
+
+func zipNames(t *testing.T, path string) map[string]bool {
+	t.Helper()
+	zr, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	names := map[string]bool{}
+	for _, file := range zr.File {
+		names[file.Name] = true
+	}
+	return names
 }
 
 func TestPushFollowsOnePath(t *testing.T) {

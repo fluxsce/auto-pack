@@ -313,11 +313,11 @@ func setupIntake(t *testing.T) (*Service, *fakeJobs, *[][]byte, *recMail) {
 	if _, err := st.SQL().ExecContext(ctx, codeQ, recipe); err != nil {
 		t.Fatal(err)
 	}
-	codeWar := filepath.Join(workspace.ProjectDir(root, "dh", "ws-1", "dh"), "target")
-	if err := os.MkdirAll(codeWar, 0o755); err != nil {
+	codeDir := workspace.ProjectDir(root, "dh", "ws-1", "dh")
+	if err := os.MkdirAll(codeDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(codeWar, "app.war"), []byte("pack"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(codeDir, "app.war"), []byte("pack"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	svc := New(Options{
@@ -446,7 +446,7 @@ func TestPushReadsFinalProjectLocalDir(t *testing.T) {
 	if _, err := svc.st.SQL().ExecContext(context.Background(), `UPDATE AP_PROJECT SET recipe_json = ? WHERE rec_id = 'p-code'`, recipe); err != nil {
 		t.Fatal(err)
 	}
-	checkout := filepath.Join(workspace.ProjectDir(svc.wsRoot, "dh", "ws-1", "dh"), "target", "app.war")
+	checkout := filepath.Join(workspace.ProjectDir(svc.wsRoot, "dh", "ws-1", "dh"), "app.war")
 	if err := os.Remove(checkout); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}

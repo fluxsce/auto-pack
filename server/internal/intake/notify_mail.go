@@ -154,6 +154,9 @@ func noticeMailTemplate(n Notice) string {
 
 func resourceLabel(n Notice) string {
 	if len(n.ResourceFiles) == 0 {
+		if strings.TrimSpace(n.OSSProjectRoot) != "" {
+			return "工程目录"
+		}
 		return "全部 war"
 	}
 	return strings.Join(n.ResourceFiles, ", ")
