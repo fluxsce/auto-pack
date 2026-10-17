@@ -33,6 +33,9 @@ func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n No
 	}
 	files, err := selectPushFiles(work, n.ResourceFiles)
 	if err != nil {
+		if errors.Is(err, errNoWar) {
+			return "", "", "", "", "", fmt.Errorf("%w：%s", errNoWar, work)
+		}
 		return "", "", "", "", "", err
 	}
 	at := time.Now()

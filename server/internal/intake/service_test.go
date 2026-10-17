@@ -436,6 +436,34 @@ func TestHandleUnnamedStartsWorkspaceBuild(t *testing.T) {
 	}
 }
 
+func TestPushReadsFinalProjectLocalDir(t *testing.T) {
+	svc, _, receipts, _ := setupIntake(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "app.war"), []byte("pack"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	recipe := `{"scm_mode":"local","local_source_path":"` + filepath.ToSlash(dir) + `"}`
+	if _, err := svc.st.SQL().ExecContext(context.Background(), `UPDATE AP_PROJECT SET recipe_json = ? WHERE rec_id = 'p-code'`, recipe); err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Join(workspace.ProjectDir(svc.wsRoot, "dh", "ws-1", "dh"), "target", "app.war")
+	if err := os.Remove(checkout); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	var locals []string
+	svc.upload = func(_ context.Context, _ project.Project, local, _ string) error {
+		locals = append(locals, local)
+		return nil
+	}
+	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
+		t.Fatal(err)
+	}
+	got := decodeReceipt(t, (*receipts)[0])
+	if got.ResultStatus != resultSuccess || len(locals) != 1 || filepath.Base(locals[0]) != "app.war" || !strings.HasPrefix(filepath.ToSlash(locals[0]), filepath.ToSlash(dir)) {
+		t.Fatalf("local=%v %+v", locals, got)
+	}
+}
+
 func TestHandleUnnamedRequiresCodeProject(t *testing.T) {
 	svc, jobs, receipts, _ := setupIntake(t)
 	if _, err := svc.st.SQL().ExecContext(context.Background(), `DELETE FROM AP_PROJECT WHERE rec_id = 'p-code'`); err != nil {

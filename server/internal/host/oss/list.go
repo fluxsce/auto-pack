@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -63,23 +62,17 @@ func newList(cfg Config, prefix, marker string, now time.Time) (*http.Request, e
 	if err != nil {
 		return nil, err
 	}
-	pairs := [][2]string{{"delimiter", "/"}, {"max-keys", strconv.Itoa(listMaxKeys)}}
+	q := url.Values{}
+	q.Set("delimiter", "/")
+	q.Set("max-keys", strconv.Itoa(listMaxKeys))
 	if marker != "" {
-		pairs = append(pairs, [2]string{"marker", marker})
+		q.Set("marker", marker)
 	}
 	if prefix != "" {
-		pairs = append(pairs, [2]string{"prefix", prefix})
+		q.Set("prefix", prefix)
 	}
-	sort.Slice(pairs, func(i, j int) bool { return pairs[i][0] < pairs[j][0] })
-	canon := "/" + cfg.Bucket + "/?"
-	q := url.Values{}
-	for i, pair := range pairs {
-		if i > 0 {
-			canon += "&"
-		}
-		canon += pair[0] + "=" + pair[1]
-		q.Set(pair[0], pair[1])
-	}
+	// prefix、delimiter、marker、max-keys 会放在 URL 上，但不属于签名子资源。
+	canon := "/" + cfg.Bucket + "/"
 	scheme := "https"
 	if !https {
 		scheme = "http"

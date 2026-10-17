@@ -139,7 +139,7 @@ flowchart TD
 
 ### mq 环境（阿里云 MNS）
 
-不配打包工程。`customerBranch` 与工程 `repo_branch` 匹配后关联到唯一工作空间，然后做该工作空间的自动构建，结束后从与工作空间编码同名的工程推送。空间侧用「批量改 Git 分支」把 `repo_branch` 设成与 BOMS 报文一致即可。OSS 项目传 `ossProjectRoot`，FTP 项目传 `ftpProjectRoot`。
+不配打包工程。`customerBranch` 与工程 `repo_branch` 匹配后关联到唯一工作空间，然后做该工作空间的自动构建，结束后从与工作空间编码同名的最终工程推送。该工程若配置了本机源码目录（例如空间编码 `V9.0.0-P08`，工程名也是 `V9.0.0-P08`，目录 `/home/appinstall/V9.0.0-P08`），包从该目录读取；其它工程构建后把 war 汇总到这里。未配置本机目录时，仍从该工程在工作空间下的检出目录读取。空间侧用「批量改 Git 分支」把 `repo_branch` 设成与 BOMS 报文一致即可。OSS 项目传 `ossProjectRoot`，FTP 项目传 `ftpProjectRoot`。
 
 | 字段 | 作用 |
 |------|------|

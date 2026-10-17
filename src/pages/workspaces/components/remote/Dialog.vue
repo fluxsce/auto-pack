@@ -23,7 +23,7 @@ import {
   resolvePushLayout,
   uploadFileName,
 } from '../../lib/workspace-ftp'
-import { buildMergedFtpNotifyFields, type FtpNotifyEmailFields } from '../../lib/ftp-notify-email'
+import { buildMergedFtpNotifyFields, type FtpNotifyEmailFields, type NotifyMailTemplate } from '../../lib/ftp-notify-email'
 import { statusVariant } from '../../composables/use-project-list'
 import MailPanel from './MailPanel.vue'
 import PushPanel from './PushPanel.vue'
@@ -51,6 +51,7 @@ const toast = useRsToast()
 const auth = useAuthStore()
 const ws = useWorkspaceStore()
 const envOptions = ref<{ value: string; label: string }[]>([])
+const envKinds = ref<Record<string, string>>({})
 const smtpOptions = ref<{ value: string; label: string }[]>([])
 const logText = ref('')
 const jobStatus = ref('')
@@ -73,6 +74,7 @@ const previewFileName = computed(() => {
   const first = previewEntries.value[0]
   return first ? uploadFileName(first.name, first.is_dir) : 'package'
 })
+const notifyTemplate = computed<NotifyMailTemplate>(() => (envKinds.value[form.value.envRecId] === 'oss' ? 'oss_update' : 'ftp_update'))
 const canSubmit = computed(() => {
   if (running.value) return false
   return Boolean(
@@ -127,7 +129,7 @@ function collectSuccess(): SuccessItem[] {
 
 function prefill(): void {
   const recipe = props.recipe ?? parseRecipe('')
-  const upload = (recipe.post_actions ?? []).find((act) => ['ftp', 'sftp', 'ssh'].includes(act.kind) && act.env_rec_id)
+  const upload = (recipe.post_actions ?? []).find((act) => ['ftp', 'sftp', 'ssh', 'oss'].includes(act.kind) && act.env_rec_id)
   form.value.envRecId = upload?.env_rec_id || recipe.ftp_env_rec_id || ''
   form.value.pushPath = (upload?.remote_path || recipe.remote_path || '').trim()
   form.value.pusher = defaultPusher()
@@ -162,8 +164,9 @@ async function onOpen(): Promise<void> {
   if (!props.workspaceId) return
   try {
     const envs = await listWorkspaceEnvs(props.workspaceId)
+    envKinds.value = Object.fromEntries(envs.map((e) => [e.rec_id, e.env_kind]))
     envOptions.value = envs
-      .filter((e) => e.is_enabled !== 0 && (e.env_kind === 'ftp' || e.env_kind === 'sftp' || e.env_kind === 'ssh'))
+      .filter((e) => e.is_enabled !== 0 && (e.env_kind === 'ftp' || e.env_kind === 'sftp' || e.env_kind === 'ssh' || e.env_kind === 'oss'))
       .map((e) => {
         const kindLabel = t(`envs.kinds.${e.env_kind}`)
         return { value: e.rec_id, label: `${e.env_name} (${kindLabel})` }
@@ -273,6 +276,7 @@ async function openNotify(): Promise<void> {
     toast.warning(t('workspaces.remote.notify.empty'))
     return
   }
+  if (notifyTemplate.value === 'oss_update') fields.sourceLabel = 'OSS访问路径'
   notifyInitial.value = fields
   await nextTick()
   notifyOpen.value = true
@@ -397,7 +401,7 @@ watch(
       <RsButton :loading="running" :disabled="!canSubmit" @click="submit">{{ t('workspaces.remote.execute') }}</RsButton>
     </template>
   </RsDialog>
-  <MailPanel v-model:open="notifyOpen" :initial="notifyInitial" :smtp-options="smtpOptions" />
+  <MailPanel v-model:open="notifyOpen" :initial="notifyInitial" :smtp-options="smtpOptions" :template="notifyTemplate" />
 </template>
 
 <style scoped src="./dialog.css"></style>

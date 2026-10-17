@@ -434,12 +434,29 @@ func (s *Service) projectWork(ctx context.Context, prj project.Project) (string,
 	if strings.TrimSpace(s.wsRoot) == "" {
 		return "", errTaskDir
 	}
-	code := s.workspaceCode(ctx, prj.WorkspaceRecID)
+	code, name := s.workspaceIdentity(ctx, prj.WorkspaceRecID)
+	recipe := project.ParseRecipe(prj.RecipeJSON)
+	wsPath := workspace.Dir(s.wsRoot, code, prj.WorkspaceRecID)
+	srcCtx := project.SourceContextFrom(prj, prj.WorkspaceRecID, code, name, wsPath)
+	if abs := project.AbsLocalSourceCtx(recipe, srcCtx); abs != "" {
+		return abs, nil
+	}
 	rel := strings.TrimSpace(prj.WorkRelPath)
 	if rel == "" {
-		rel = project.WorkRel(prj.ProjectName, project.ParseRecipe(prj.RecipeJSON))
+		rel = project.WorkRelCtx(prj.ProjectName, recipe, srcCtx)
 	}
 	return workspace.ProjectDir(s.wsRoot, code, prj.WorkspaceRecID, rel), nil
+}
+
+func (s *Service) workspaceIdentity(ctx context.Context, id string) (code, name string) {
+	if s.st == nil || strings.TrimSpace(id) == "" {
+		return "", ""
+	}
+	q := s.st.Rebind(`SELECT workspace_code, workspace_name FROM AP_WORKSPACE WHERE rec_id = ?`)
+	if err := s.st.SQL().QueryRowContext(ctx, q, id).Scan(&code, &name); err != nil {
+		return "", ""
+	}
+	return strings.TrimSpace(code), strings.TrimSpace(name)
 }
 
 func (s *Service) workspaceCode(ctx context.Context, id string) string {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"auto-pack/server/internal/host/ftp"
+	hostoss "auto-pack/server/internal/host/oss"
 	hostssh "auto-pack/server/internal/host/ssh"
 	"auto-pack/server/internal/host/utils"
 	"auto-pack/server/internal/job"
@@ -103,6 +104,8 @@ func openRemote(kind string, cfg map[string]any) (remoteStore, error) {
 	switch kind {
 	case "sftp", "ssh":
 		return hostssh.DialSession(hostssh.MapConfig(cfg))
+	case "oss":
+		return hostoss.Open(hostoss.MapConfig(cfg))
 	default:
 		return ftp.Dial(ftp.MapConfig(cfg))
 	}

@@ -40,7 +40,7 @@ import {
   sceMergeZipName,
   uploadFileName,
 } from '../lib/workspace-ftp'
-import { buildMergedFtpNotifyFields, type FtpNotifyEmailFields } from '../lib/ftp-notify-email'
+import { buildMergedFtpNotifyFields, type FtpNotifyEmailFields, type NotifyMailTemplate } from '../lib/ftp-notify-email'
 import { parseRecipe } from '../lib/project-defaults'
 import MailPanel from '../components/remote/MailPanel.vue'
 import PushPanel from '../components/remote/PushPanel.vue'
@@ -66,6 +66,7 @@ const projects = ref<Project[]>([])
 const selectedIds = ref<string[]>([])
 const projectPaths = ref<Record<string, string[]>>({})
 const envOptions = ref<{ value: string; label: string }[]>([])
+const envKinds = ref<Record<string, string>>({})
 const smtpOptions = ref<{ value: string; label: string }[]>([])
 const form = ref(emptyForm())
 const backupManual = ref(false)
@@ -118,6 +119,7 @@ const previewFileName = computed(() => {
   return first ? uploadFileName(first.name, first.is_dir) : 'package'
 })
 const noteProjectId = computed(() => (queue.value[0] ? String(queue.value[0].rec_id) : ''))
+const notifyTemplate = computed<NotifyMailTemplate>(() => (envKinds.value[form.value.envRecId] === 'oss' ? 'oss_update' : 'ftp_update'))
 const canSubmit = computed(() => {
   if (running.value) return false
   if (!form.value.envRecId || !form.value.pushPath.trim() || !form.value.pusher.trim() || !form.value.taskRef.trim()) {
@@ -171,7 +173,7 @@ function removeProject(id: string): void {
 
 function recipeUpload(row: Project): { envId: string; remote: string } {
   const recipe = parseRecipe(row.recipe_json, row.project_type)
-  const upload = (recipe.post_actions ?? []).find((act) => ['ftp', 'sftp', 'ssh'].includes(act.kind) && act.env_rec_id)
+  const upload = (recipe.post_actions ?? []).find((act) => ['ftp', 'sftp', 'ssh', 'oss'].includes(act.kind) && act.env_rec_id)
   return {
     envId: upload?.env_rec_id || recipe.ftp_env_rec_id || '',
     remote: (upload?.remote_path || recipe.remote_path || '').trim(),
@@ -296,8 +298,9 @@ async function onOpen(): Promise<void> {
     projects.value = await listProjects(id)
     const enabled = projects.value.filter((p) => p.is_enabled !== 0)
     const envs = await listWorkspaceEnvs(id)
+    envKinds.value = Object.fromEntries(envs.map((e) => [e.rec_id, e.env_kind]))
     envOptions.value = envs
-      .filter((e) => e.is_enabled !== 0 && (e.env_kind === 'ftp' || e.env_kind === 'sftp' || e.env_kind === 'ssh'))
+      .filter((e) => e.is_enabled !== 0 && (e.env_kind === 'ftp' || e.env_kind === 'sftp' || e.env_kind === 'ssh' || e.env_kind === 'oss'))
       .map((e) => {
         const kindLabel = t(`envs.kinds.${e.env_kind}`)
         return { value: e.rec_id, label: `${e.env_name} (${kindLabel})` }
@@ -373,6 +376,7 @@ async function openNotify(): Promise<void> {
     toast.warning(t('workspaces.remote.notify.empty'))
     return
   }
+  if (notifyTemplate.value === 'oss_update') fields.sourceLabel = 'OSS访问路径'
   notifyInitial.value = fields
   await nextTick()
   notifyOpen.value = true
@@ -609,7 +613,7 @@ onUnmounted(() => {
       <RsButton :loading="running" :disabled="!canSubmit" @click="submit">{{ t('workspaces.autoPushExecute') }}</RsButton>
     </template>
   </RsDialog>
-  <MailPanel v-model:open="notifyOpen" :initial="notifyInitial" :smtp-options="smtpOptions" />
+  <MailPanel v-model:open="notifyOpen" :initial="notifyInitial" :smtp-options="smtpOptions" :template="notifyTemplate" />
 </template>
 
 <style scoped src="../components/remote/dialog.css"></style>

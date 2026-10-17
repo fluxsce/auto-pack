@@ -510,7 +510,7 @@ async function onOpen(): Promise<void> {
     cur.projects = await listProjects(id)
     const envs = await listWorkspaceEnvs(id)
     cur.envOptions = envs
-      .filter((e) => e.is_enabled !== 0 && (e.env_kind === 'ftp' || e.env_kind === 'sftp' || e.env_kind === 'ssh'))
+      .filter((e) => e.is_enabled !== 0 && (e.env_kind === 'ftp' || e.env_kind === 'sftp' || e.env_kind === 'ssh' || e.env_kind === 'oss'))
       .map((e) => ({ value: e.rec_id, label: `${e.env_name} (${t(`envs.kinds.${e.env_kind}`)})` }))
     const defaults = await autoReleaseDefaults(id)
     cur.releaseBranch = defaults.release_branch

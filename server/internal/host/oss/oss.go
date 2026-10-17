@@ -2,6 +2,7 @@
 package oss
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1"
@@ -113,6 +114,51 @@ func copyWithClient(client *http.Client, cfg Config, srcKey, destKey string) err
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	return fmt.Errorf("oss copy %s: %s", resp.Status, strings.TrimSpace(string(body)))
+}
+
+// Get 读取对象内容。对象不存在时返回错误。
+func Get(cfg Config, objectKey string) ([]byte, error) {
+	objectKey = strings.TrimLeft(strings.ReplaceAll(objectKey, "\\", "/"), "/")
+	req, err := newGet(cfg, objectKey, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 30 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("oss get 404: %s", strings.TrimSpace(string(body)))
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("oss get %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return body, nil
+}
+
+// PutBytes 把内存内容上传到 objectKey。
+func PutBytes(cfg Config, objectKey string, data []byte) error {
+	req, err := newPut(cfg, strings.TrimLeft(strings.ReplaceAll(objectKey, "\\", "/"), "/"), bytes.NewReader(data), int64(len(data)), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 30 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("oss put %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	return nil
 }
 
 // PutFile 把本地文件上传到 objectKey。
@@ -298,6 +344,34 @@ func newCopy(cfg Config, srcKey, destKey string, now time.Time) (*http.Request, 
 		canon += "x-oss-security-token:" + token + "\n"
 	}
 	stringToSign := "PUT\n\n\n" + date + "\n" + canon + resource
+	req.Header.Set("Authorization", "OSS "+cfg.AccessKeyID+":"+sign(cfg.AccessKeySecret, stringToSign))
+	return req, nil
+}
+
+func newGet(cfg Config, objectKey string, now time.Time) (*http.Request, error) {
+	objectKey = strings.TrimLeft(strings.ReplaceAll(objectKey, "\\", "/"), "/")
+	host, https, err := endpointHost(cfg)
+	if err != nil {
+		return nil, err
+	}
+	scheme := "https"
+	if !https {
+		scheme = "http"
+	}
+	raw := scheme + "://" + cfg.Bucket + "." + host + "/" + escapeKey(objectKey)
+	req, err := http.NewRequest(http.MethodGet, raw, nil)
+	if err != nil {
+		return nil, err
+	}
+	date := now.Format(http.TimeFormat)
+	req.Header.Set("Date", date)
+	resource := "/" + cfg.Bucket + "/" + objectKey
+	canon := ""
+	if token := strings.TrimSpace(cfg.SecurityToken); token != "" {
+		req.Header.Set("x-oss-security-token", token)
+		canon = "x-oss-security-token:" + token + "\n"
+	}
+	stringToSign := "GET\n\n\n" + date + "\n" + canon + resource
 	req.Header.Set("Authorization", "OSS "+cfg.AccessKeyID+":"+sign(cfg.AccessKeySecret, stringToSign))
 	return req, nil
 }

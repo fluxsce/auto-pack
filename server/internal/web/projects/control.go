@@ -15,6 +15,7 @@ import (
 	"auto-pack/server/internal/env"
 	"auto-pack/server/internal/host/ftp"
 	"auto-pack/server/internal/host/maven"
+	hostoss "auto-pack/server/internal/host/oss"
 	hostssh "auto-pack/server/internal/host/ssh"
 	"auto-pack/server/internal/host/utils"
 	"auto-pack/server/internal/project"
@@ -30,7 +31,7 @@ type Controller struct {
 	workspaces *workspace.Service
 	envs       *env.Service
 	settings   *settings.Service
-	audit    *audit.Service
+	audit      *audit.Service
 }
 
 // New 构造工程控制器。
@@ -73,7 +74,7 @@ func (c *Controller) UpdateGitBranches(w http.ResponseWriter, r *http.Request) {
 // UpdateCommands 按类型批量改工程构建命令（token 替换或整条覆盖）。
 func (c *Controller) UpdateCommands(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		WorkspaceRecID string              `json:"workspace_rec_id"`
+		WorkspaceRecID string               `json:"workspace_rec_id"`
 		Patch          project.CommandPatch `json:"patch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -501,6 +502,18 @@ func readRemoteNote(kind string, cfg map[string]any, pushPath, fileName string) 
 	case "sftp", "ssh":
 		exists, raw, err := hostssh.ReadRemote(hostssh.MapConfig(cfg), infoPath)
 		return exists, string(raw), infoPath, err
+	case "oss":
+		sess, err := hostoss.Open(hostoss.MapConfig(cfg))
+		if err != nil {
+			return false, "", infoPath, err
+		}
+		defer sess.Close()
+		exists, err = sess.Exists(infoPath)
+		if err != nil || !exists {
+			return exists, "", infoPath, err
+		}
+		raw, err := sess.Download(infoPath)
+		return true, string(raw), infoPath, err
 	default:
 		exists, raw, err := ftp.ReadRemote(ftp.MapConfig(cfg), infoPath)
 		return exists, string(raw), infoPath, err

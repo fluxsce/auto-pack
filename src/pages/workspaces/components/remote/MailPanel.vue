@@ -40,6 +40,7 @@ const saving = ref(false)
 const fields = ref<FtpNotifyEmailFields>(emptyFields())
 
 const isProjectUpdate = computed(() => props.template === 'project_update')
+const mailTemplate = computed<NotifyMailTemplate>(() => props.template || 'ftp_update')
 const defaultFromName = computed(() =>
   isProjectUpdate.value ? notifyTemplateMeta('project_update').fromName : FTP_NOTIFY_FROM_NAME,
 )
@@ -56,16 +57,8 @@ const yesSkip = [
   { value: '不', label: t('workspaces.remote.notify.skip') },
 ]
 const scopeOptions = FTP_NOTIFY_SCOPE_OPTIONS.map((value) => ({ value, label: value }))
-const htmlBody = computed(() =>
-  isProjectUpdate.value
-    ? buildFtpNotifyEmailHTML(fields.value, new Date(), 'project_update')
-    : buildFtpNotifyEmailHTML(fields.value),
-)
-const textBody = computed(() =>
-  isProjectUpdate.value
-    ? buildFtpNotifyEmailBody(fields.value, new Date(), 'project_update')
-    : buildFtpNotifyEmailBody(fields.value),
-)
+const htmlBody = computed(() => buildFtpNotifyEmailHTML(fields.value, new Date(), mailTemplate.value))
+const textBody = computed(() => buildFtpNotifyEmailBody(fields.value, new Date(), mailTemplate.value))
 const canSubmit = computed(() => Boolean(smtpEnvRecId.value && recipients.value.trim() && subject.value.trim() && !saving.value))
 
 function emptyFields(): FtpNotifyEmailFields {
@@ -102,9 +95,7 @@ function applyInitial(): void {
   smtpEnvRecId.value = props.smtpOptions[0]?.value || ''
   fromName.value = defaultFromName.value
   recipients.value = ''
-  subject.value = isProjectUpdate.value
-    ? buildFtpNotifyEmailSubject(fields.value, 'project_update')
-    : buildFtpNotifyEmailSubject(fields.value)
+  subject.value = buildFtpNotifyEmailSubject(fields.value, mailTemplate.value)
   if (smtpEnvRecId.value) void loadSmtpDefaults(smtpEnvRecId.value)
 }
 
@@ -129,9 +120,7 @@ watch(open, (visible) => {
 watch(
   fields,
   () => {
-    subject.value = isProjectUpdate.value
-      ? buildFtpNotifyEmailSubject(fields.value, 'project_update')
-      : buildFtpNotifyEmailSubject(fields.value)
+    subject.value = buildFtpNotifyEmailSubject(fields.value, mailTemplate.value)
   },
   { deep: true },
 )

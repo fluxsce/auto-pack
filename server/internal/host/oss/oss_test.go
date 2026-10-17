@@ -206,7 +206,7 @@ func TestListSignsPrefix(t *testing.T) {
 		t.Fatalf("%s", req.URL)
 	}
 	date := now.Format(http.TimeFormat)
-	want := "OSS ak:" + sign("sk", "GET\n\n\n"+date+"\n/datahub/?delimiter=/&max-keys=100&prefix=开发/")
+	want := "OSS ak:" + sign("sk", "GET\n\n\n"+date+"\n/datahub/")
 	if req.Header.Get("Authorization") != want {
 		t.Fatal(req.Header.Get("Authorization"))
 	}
