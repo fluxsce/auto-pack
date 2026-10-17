@@ -3,6 +3,7 @@ package intake
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -55,16 +56,15 @@ func (s *Service) pushProjectWars(ctx context.Context, prj project.Project, n No
 	return local, strings.Join(remotes, "\n"), strings.Join(urls, "\n"), until, strings.Join(backups, "；"), nil
 }
 
+// pushWarFile 按报文路径只走一条通道。有 ossProjectRoot 只推 OSS，只有 ftpProjectRoot 才推 FTP。
 func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local string, n Notice, at time.Time) (string, string, string, string, string, error) {
-	var remote, signed, until, backup string
-	var err error
 	name := filepath.Base(local)
 	if root := strings.TrimSpace(n.OSSProjectRoot); root != "" {
-		remote = remoteWar(root, name)
+		remote := remoteWar(root, name)
 		key := objectKey(root, name)
-		backup, err = s.backupOSS(ctx, prj, key, at)
+		backup, err := s.backupOSS(ctx, prj, key, at)
 		if err != nil {
-			return local, remote, "", "", "", err
+			return local, remote, "", "", "", labelPushErr("OSS", err)
 		}
 		if s.upload != nil {
 			err = s.upload(ctx, prj, local, remote)
@@ -72,37 +72,42 @@ func (s *Service) pushWarFile(ctx context.Context, prj project.Project, local st
 			err = s.putOSS(ctx, prj, local, key)
 		}
 		if err != nil {
-			return local, remote, "", "", backup, err
+			return local, remote, "", "", backup, labelPushErr("OSS", err)
 		}
 		expire := s.ossExpire(ctx, prj)
+		var signed string
 		if s.sign != nil {
 			signed, err = s.sign(key, expire)
 		} else {
 			signed, err = s.signOSS(ctx, prj, key, expire)
 		}
 		if err != nil {
-			return local, remote, "", "", backup, err
+			return local, remote, "", "", backup, labelPushErr("OSS", err)
 		}
-		until = time.Now().Add(expire).In(receiptTZ).Format("2006-01-02 15:04:05")
+		until := time.Now().Add(expire).In(receiptTZ).Format("2006-01-02 15:04:05")
+		return local, remote, signed, until, backup, nil
 	}
 	if root := strings.TrimSpace(n.FTPProjectRoot); root != "" {
 		dest := remoteWar(root, name)
-		if remote == "" {
-			remote = dest
-		}
+		var err error
 		if s.upload != nil {
 			err = s.upload(ctx, prj, local, dest)
 		} else {
 			err = s.putFTP(ctx, prj, local, dest)
 		}
 		if err != nil {
-			return local, remote, "", "", backup, err
+			return local, dest, "", "", "", labelPushErr("FTP", err)
 		}
+		return local, dest, "", "", "", nil
 	}
-	if remote == "" {
-		return local, "", "", "", "", errors.New("missing transfer path")
+	return local, "", "", "", "", errors.New("missing transfer path")
+}
+
+func labelPushErr(via string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return local, remote, signed, until, backup, nil
+	return fmt.Errorf("%s %w", via, err)
 }
 
 // backupOSS 在覆盖前把已有对象复制到同目录 BAK/{时间戳}/，规则与 FTP 推送一致。对象不存在时返回空路径。

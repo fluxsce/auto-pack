@@ -205,6 +205,10 @@ export default {
       result: '结果',
       time: '时间',
       note: '说明',
+      filterPlaceholder: '任务、分支或说明',
+      filterResult: '按结果筛选',
+      filterAll: '全部结果',
+      filterNoMatch: '没有符合条件的记录',
     },
     envVars: {
       title: '工程环境变量',

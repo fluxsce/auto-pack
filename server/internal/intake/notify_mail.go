@@ -72,8 +72,15 @@ func (s *Service) linkedOSSRaw(ctx context.Context) (map[string]any, bool, error
 
 // notifyLinked 按关联的 SMTP 和模板发信。推送通知沿用 FTP 已更新版式。构建日志留在平台。
 func (s *Service) notifyLinked(ctx context.Context, n Notice, prj project.Project, ref string, ok bool, message, remote, signed, until, backup string) string {
+	if s != nil {
+		s.steps.mail.start = time.Now()
+		defer func() { s.steps.mail.end = time.Now() }()
+	}
 	if s == nil || !s.fromMQ || s.envs == nil {
 		return ""
+	}
+	if !ok {
+		return "未发送：打包或推送未成功"
 	}
 	raw := s.mqConfig(ctx)
 	smtpID := configString(raw, "smtp_env_rec_id")
@@ -86,6 +93,7 @@ func (s *Service) notifyLinked(ctx context.Context, n Notice, prj project.Projec
 	}
 	switch tpl {
 	case env.MailTemplateFTPUpdate, env.MailTemplateOSSUpdate, env.MailTemplateProjectUpdate, env.MailTemplateMqNotify:
+		tpl = noticeMailTemplate(n)
 	default:
 		return "未发送：请选择 FTP 已更新、OSS 已更新、项目已更新或推送通知"
 	}
@@ -106,6 +114,8 @@ func (s *Service) notifyLinked(ctx context.Context, n Notice, prj project.Projec
 		return "未发送：未配置收件人"
 	}
 	sc.To = to
+	sc.From = datahubMailFrom
+	sc.FromName = datahubMailFromName
 	path := firstNonEmptyPath(remote, n.OSSProjectRoot, n.FTPProjectRoot)
 	composed, err := composeLinkedMail(tpl, resourceLabel(n), n.CustomerShortName, backup, env.PackMailFields{
 		OK:       ok,
@@ -123,13 +133,23 @@ func (s *Service) notifyLinked(ctx context.Context, n Notice, prj project.Projec
 	if err != nil {
 		return "未发送：" + err.Error()
 	}
-	if sc.FromName == "" {
-		sc.FromName = composed.FromName
-	}
 	if err := hostsmtp.SendMIME(sc, composed.Subject, composed.Text, composed.HTML); err != nil {
 		return "未发送：" + err.Error()
 	}
 	return "已发送 收件人 " + to + "，模板 " + mailTemplateLabel(tpl)
+}
+
+const (
+	datahubMailFromName = "DATAHUB 更新通知"
+	datahubMailFrom     = "fluxdatahub@flux.com.cn"
+)
+
+// noticeMailTemplate 按报文路径选模板。写出 ossProjectRoot 用 OSS 已更新，只有 ftpProjectRoot 用 FTP 已更新。
+func noticeMailTemplate(n Notice) string {
+	if strings.TrimSpace(n.OSSProjectRoot) != "" {
+		return env.MailTemplateOSSUpdate
+	}
+	return env.MailTemplateFTPUpdate
 }
 
 func resourceLabel(n Notice) string {
@@ -142,14 +162,13 @@ func resourceLabel(n Notice) string {
 func composeLinkedMail(tpl, resources, projectTitle, backup string, fields env.PackMailFields) (env.ComposedMail, error) {
 	switch tpl {
 	case env.MailTemplateMqNotify, env.MailTemplateFTPUpdate, env.MailTemplateOSSUpdate:
-		resolved := tpl
 		if tpl == env.MailTemplateMqNotify {
-			resolved = env.MailTemplateFTPUpdate
+			tpl = env.MailTemplateFTPUpdate
 			if strings.TrimSpace(fields.URL) != "" {
-				resolved = env.MailTemplateOSSUpdate
+				tpl = env.MailTemplateOSSUpdate
 			}
 		}
-		return env.ComposeMqMail(resolved, env.MqMailFields{
+		return env.ComposeMqMail(tpl, env.MqMailFields{
 			Project:   projectTitle,
 			TaskNo:    fields.TaskNo,
 			Resources: resources,
@@ -207,19 +226,103 @@ func mailTemplateLabel(tpl string) string {
 	}
 }
 
-// receiptSteps 是回执队列里的三步结果。构建日志留在平台，不写进回执。
-func receiptSteps(result, message string, n Notice, draft mailDraft, mailNote string) string {
+// receiptSteps 是回执队列里的三步结果，以及同内容的 metadata。构建日志另记一份同样的步骤。
+func receiptSteps(result, message string, n Notice, draft mailDraft, mailNote string, clock stepClock) (string, []ReceiptMeta) {
 	pack, push := splitPackPush(result, message, n, draft)
 	if strings.TrimSpace(mailNote) == "" {
 		mailNote = "未发送"
 	}
-	return "1. 打包：" + pack + "\n2. 推送：" + push + "\n3. 邮件：" + mailNote
+	rows := []struct {
+		name string
+		body string
+		span stepSpan
+	}{
+		{"打包", pack, clock.pack},
+		{"推送", push, clock.push},
+		{"邮件", mailNote, clock.mail},
+	}
+	lines := make([]string, 0, len(rows))
+	meta := make([]ReceiptMeta, 0, len(rows))
+	for i, row := range rows {
+		status, detail := splitStepStatus(row.body)
+		started, finished, elapsed := formatSpan(row.span)
+		line := fmt.Sprintf("%d. %s：%s", i+1, row.name, row.body)
+		if elapsed != "" {
+			line += "，耗时 " + elapsed
+		}
+		lines = append(lines, line)
+		meta = append(meta, ReceiptMeta{
+			Step:       i + 1,
+			Name:       row.name,
+			Status:     status,
+			Message:    detail,
+			StartedAt:  started,
+			FinishedAt: finished,
+			Elapsed:    elapsed,
+		})
+	}
+	return strings.Join(lines, "\n"), meta
+}
+
+func splitStepStatus(body string) (string, string) {
+	body = strings.TrimSpace(body)
+	for _, status := range []string{"成功", "失败", "未执行", "未发送", "已发送"} {
+		if body == status || strings.HasPrefix(body, status+"。") || strings.HasPrefix(body, status+"：") || strings.HasPrefix(body, status+"，") || strings.HasPrefix(body, status+" ") {
+			rest := strings.TrimPrefix(body, status)
+			rest = strings.TrimLeft(rest, "。：， ")
+			return status, rest
+		}
+	}
+	return body, ""
+}
+
+func formatSpan(span stepSpan) (started, finished, elapsed string) {
+	if span.start.IsZero() {
+		return "", "", ""
+	}
+	end := span.end
+	if end.IsZero() || end.Before(span.start) {
+		end = span.start
+	}
+	return span.start.In(receiptTZ).Format("2006-01-02 15:04:05"), end.In(receiptTZ).Format("2006-01-02 15:04:05"), formatElapsed(end.Sub(span.start))
+}
+
+func formatElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	d = d.Round(time.Second)
+	sec := int(d / time.Second)
+	if sec < 60 {
+		return fmt.Sprintf("%d秒", sec)
+	}
+	min := sec / 60
+	sec = sec % 60
+	if min < 60 {
+		if sec == 0 {
+			return fmt.Sprintf("%d分", min)
+		}
+		return fmt.Sprintf("%d分%d秒", min, sec)
+	}
+	hour := min / 60
+	min = min % 60
+	if min == 0 && sec == 0 {
+		return fmt.Sprintf("%d小时", hour)
+	}
+	if sec == 0 {
+		return fmt.Sprintf("%d小时%d分", hour, min)
+	}
+	return fmt.Sprintf("%d小时%d分%d秒", hour, min, sec)
 }
 
 func splitPackPush(result, message string, n Notice, draft mailDraft) (string, string) {
 	msg := strings.TrimSpace(message)
-	if msg == msgUpload {
-		return "成功", "失败。" + msg
+	if reason, found := strings.CutPrefix(msg, "推送失败："); found || msg == msgUpload {
+		reason = strings.TrimSpace(reason)
+		if reason == "" {
+			reason = "原因未知"
+		}
+		return "成功", "失败。" + reason
 	}
 	if result == resultSuccess {
 		pack := "成功"
@@ -243,14 +346,11 @@ func splitPackPush(result, message string, n Notice, draft mailDraft) (string, s
 }
 
 func pushVia(n Notice) string {
-	oss := strings.TrimSpace(n.OSSProjectRoot) != ""
-	ftp := strings.TrimSpace(n.FTPProjectRoot) != ""
-	switch {
-	case oss && ftp:
-		return "OSS、FTP"
-	case ftp:
-		return "FTP"
-	default:
+	if strings.TrimSpace(n.OSSProjectRoot) != "" {
 		return "OSS"
 	}
+	if strings.TrimSpace(n.FTPProjectRoot) != "" {
+		return "FTP"
+	}
+	return "OSS"
 }

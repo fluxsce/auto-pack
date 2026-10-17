@@ -205,6 +205,10 @@ export default {
       result: 'Result',
       time: 'Time',
       note: 'Note',
+      filterPlaceholder: 'Task, branch, or note',
+      filterResult: 'Filter by result',
+      filterAll: 'All results',
+      filterNoMatch: 'No matching records',
     },
     envVars: {
       title: 'Project environment variables',

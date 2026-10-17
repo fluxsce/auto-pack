@@ -3,9 +3,11 @@ package intake
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"auto-pack/server/internal/batchlock"
 	"auto-pack/server/internal/build"
+	"auto-pack/server/internal/build/record"
 )
 
 type workspaceBuilder struct {
@@ -51,4 +53,18 @@ func (b workspaceBuilder) WaitWorkspace(ctx context.Context, buildID string) (Bu
 		out.Projects = append(out.Projects, BuildProject{Name: row.ProjectName, Status: row.Status})
 	}
 	return out, nil
+}
+
+// AppendLog 把回执三步写进这次工作空间构建日志的末尾。
+func (b workspaceBuilder) AppendLog(ctx context.Context, buildID, text string) error {
+	if b.svc == nil || strings.TrimSpace(text) == "" {
+		return nil
+	}
+	rec, err := b.svc.Wait(ctx, buildID)
+	if err != nil {
+		return err
+	}
+	lines := []string{"", "—— 回执 ——"}
+	lines = append(lines, strings.Split(text, "\n")...)
+	return record.AppendLog(rec.LogPath, lines...)
 }

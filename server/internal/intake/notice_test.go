@@ -103,6 +103,19 @@ func TestRemoteWarUsesMessageRoot(t *testing.T) {
 	}
 }
 
+func TestNoticeMailTemplateFollowsPath(t *testing.T) {
+	oss := sampleNotice()
+	if noticeMailTemplate(oss) != "oss_update" {
+		t.Fatal(noticeMailTemplate(oss))
+	}
+	ftp := oss
+	ftp.OSSProjectRoot = ""
+	ftp.FTPProjectRoot = "/ftp/S01/"
+	if noticeMailTemplate(ftp) != "ftp_update" {
+		t.Fatal(noticeMailTemplate(ftp))
+	}
+}
+
 func sampleNotice() Notice {
 	return Notice{
 		TaskID:             "TSKIDS-1",

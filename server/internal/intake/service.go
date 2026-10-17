@@ -78,6 +78,7 @@ type BuildOutcome struct {
 type WorkspaceBuild interface {
 	StartWorkspace(ctx context.Context, workspaceID string) (string, error)
 	WaitWorkspace(ctx context.Context, buildID string) (BuildOutcome, error)
+	AppendLog(ctx context.Context, buildID, text string) error
 }
 
 // Service 处理一笔打包通知。
@@ -103,7 +104,18 @@ type Service struct {
 	mqlog       *mqlog.Log
 	mqEnvID     string
 	pendingMail mailDraft
+	steps       stepClock
 	stop        context.CancelFunc
+}
+
+// stepClock 记下打包、推送、邮件各自的起止时间，供回执 metadata 与构建日志使用。
+type stepClock struct {
+	pack, push, mail stepSpan
+	buildID          string
+}
+
+type stepSpan struct {
+	start, end time.Time
 }
 
 type mailDraft struct {
@@ -146,6 +158,7 @@ func New(opt Options) *Service {
 // Handle 处理一笔通知。同一 taskId 已有记录时不重复打包：已结束的按原结果再写回执并注明原因，尚未结束的只记下原因。
 // 校验失败不入队。作业成败仍由现有 runner 决定，上传失败不改作业状态。
 func (s *Service) Handle(ctx context.Context, raw []byte) error {
+	s.steps = stepClock{}
 	n, err := parseNotice(raw)
 	if err != nil {
 		return s.finishWithoutTask(ctx, Notice{}, "报文校验失败：报文无法解析")
@@ -207,9 +220,9 @@ func (s *Service) buildOne(ctx context.Context, n Notice, prj project.Project) e
 	if err != nil {
 		log.Printf("intake upload %s: %v", n.TaskID, err)
 		if !s.mqMailReady(ctx) {
-			s.deliverMail(ctx, done.RecID, false, msgUpload, "", "", "")
+			s.deliverMail(ctx, done.RecID, false, pushFailText(err), "", "", "")
 		}
-		return s.finish(ctx, n, prj, done.RecID, resultFailed, msgUpload)
+		return s.finish(ctx, n, prj, done.RecID, resultFailed, pushFailText(err))
 	}
 	if s.mqMailReady(ctx) {
 		s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
@@ -229,8 +242,10 @@ func (s *Service) buildWorkspace(ctx context.Context, n Notice, workspaceID stri
 	if s.builds == nil {
 		return s.finish(ctx, n, anchor, "", resultFailed, errNoWorkspaceBuild.Error())
 	}
+	s.steps.pack.start = time.Now()
 	id, err := s.builds.StartWorkspace(ctx, workspaceID)
 	if err != nil {
+		s.steps.pack.end = time.Now()
 		log.Printf("intake workspace build %s: %v", n.TaskID, err)
 		msg := msgBuild
 		if errors.Is(err, errBuildBusy) {
@@ -238,9 +253,11 @@ func (s *Service) buildWorkspace(ctx context.Context, n Notice, workspaceID stri
 		}
 		return s.finish(ctx, n, anchor, "", resultFailed, msg)
 	}
+	s.steps.buildID = id
 	ref := "build:" + id
 	s.rememberRun(ctx, n, anchor, ref)
 	out, err := s.builds.WaitWorkspace(ctx, id)
+	s.steps.pack.end = time.Now()
 	if err != nil {
 		return s.finish(ctx, n, anchor, ref, resultFailed, msgBuild)
 	}
@@ -248,13 +265,26 @@ func (s *Service) buildWorkspace(ctx context.Context, n Notice, workspaceID stri
 	if !ok {
 		return s.finish(ctx, n, anchor, ref, resultFailed, message)
 	}
+	s.steps.push.start = time.Now()
 	_, remote, signed, until, backup, err := s.pushProjectWars(ctx, pack, n)
+	s.steps.push.end = time.Now()
 	if err != nil {
 		log.Printf("intake upload %s: %v", n.TaskID, err)
-		return s.finish(ctx, n, anchor, ref, resultFailed, msgUpload)
+		return s.finish(ctx, n, anchor, ref, resultFailed, pushFailText(err))
 	}
 	s.pendingMail = mailDraft{remote: remote, signed: signed, until: until, backup: backup}
 	return s.finish(ctx, n, anchor, ref, resultSuccess, message)
+}
+
+func pushFailText(err error) string {
+	reason := ""
+	if err != nil {
+		reason = strings.TrimSpace(err.Error())
+	}
+	if reason == "" {
+		reason = "原因未知"
+	}
+	return "推送失败：" + reason
 }
 
 // finalBuildResult 只看与工作空间编码同名的最终工程。中间工程失败不改变消息队列结果。
@@ -321,7 +351,7 @@ func (s *Service) receiptExisting(ctx context.Context, n Notice) error {
 			message = "该 taskId 已处理"
 		}
 	}
-	pubErr := s.writeReceipt(ctx, n, status, message)
+	pubErr := s.writeReceipt(ctx, n, status, message, nil)
 	text := "同一 taskId 不重复打包。原因：" + message
 	if pubErr != nil {
 		text += "；回执未写入"
@@ -497,10 +527,11 @@ func pickNamedProject(list []project.Project, name string) (project.Project, err
 }
 
 func (s *Service) finishWithoutTask(ctx context.Context, n Notice, message string) error {
+	var meta []ReceiptMeta
 	if s.fromMQ {
-		message = receiptSteps(resultFailed, message, n, mailDraft{}, "未发送")
+		message, meta = receiptSteps(resultFailed, message, n, mailDraft{}, "未发送", s.steps)
 	}
-	err := s.writeReceipt(ctx, n, resultFailed, message)
+	err := s.writeReceipt(ctx, n, resultFailed, message, meta)
 	text := message
 	if err != nil {
 		text += "；回执未写入"
@@ -517,11 +548,13 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 	draft := s.pendingMail
 	s.pendingMail = mailDraft{}
 	text := message
+	var meta []ReceiptMeta
 	if s.fromMQ {
 		mailNote := s.notifyLinked(ctx, n, prj, jobID, result == resultSuccess, message, draft.remote, draft.signed, draft.until, draft.backup)
-		text = receiptSteps(result, message, n, draft, mailNote)
+		text, meta = receiptSteps(result, message, n, draft, mailNote, s.steps)
+		s.appendReceiptLog(ctx, text)
 	}
-	pubErr := s.writeReceipt(ctx, n, result, text)
+	pubErr := s.writeReceipt(ctx, n, result, text, meta)
 	if pubErr != nil {
 		rowStatus = statusReceiptFailed
 		log.Printf("intake receipt %s: %v", n.TaskID, pubErr)
@@ -549,8 +582,17 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 	return err
 }
 
-func (s *Service) writeReceipt(ctx context.Context, n Notice, result, message string) error {
-	body, err := json.Marshal(dataHubReceipt(n, result, message, time.Now()))
+func (s *Service) appendReceiptLog(ctx context.Context, text string) {
+	if s == nil || s.builds == nil || strings.TrimSpace(s.steps.buildID) == "" || strings.TrimSpace(text) == "" {
+		return
+	}
+	if err := s.builds.AppendLog(ctx, s.steps.buildID, text); err != nil {
+		log.Printf("intake receipt log %s: %v", s.steps.buildID, err)
+	}
+}
+
+func (s *Service) writeReceipt(ctx context.Context, n Notice, result, message string, meta []ReceiptMeta) error {
+	body, err := json.Marshal(dataHubReceipt(n, result, message, time.Now(), meta))
 	if err != nil {
 		return err
 	}

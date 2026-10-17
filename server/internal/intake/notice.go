@@ -13,8 +13,8 @@ const (
 	resultFailed     = "FAILED"
 
 	msgSuccess = "自动打包完成，war 已推送到项目路径"
-	msgBuild   = "自动打包失败：war 构建未完成，未推送 OSS"
-	msgUpload  = "自动打包失败：war 已构建，未推送完成"
+	msgBuild   = "自动打包失败：war 构建未完成，未推送"
+	msgUpload  = "推送失败：原因未知"
 )
 
 // Notice 是一笔外部打包通知。仓库地址不从报文读取。
@@ -41,16 +41,28 @@ type Notice struct {
 
 // Receipt 写回执队列的报文。
 type Receipt struct {
-	TaskID             string `json:"taskId"`
-	TaskNo             string `json:"taskNo"`
-	PackTaskID         string `json:"packTaskId"`
-	SubsystemType      string `json:"subsystemType"`
-	PackagingMode      string `json:"packagingMode"`
-	DeploymentStrategy string `json:"deploymentStrategy"`
-	OSSProjectRoot     string `json:"ossProjectRoot"`
-	ResultStatus       string `json:"resultStatus"`
-	ResultMessage      string `json:"resultMessage"`
-	FinishedAt         string `json:"finishedAt"`
+	TaskID             string        `json:"taskId"`
+	TaskNo             string        `json:"taskNo"`
+	PackTaskID         string        `json:"packTaskId"`
+	SubsystemType      string        `json:"subsystemType"`
+	PackagingMode      string        `json:"packagingMode"`
+	DeploymentStrategy string        `json:"deploymentStrategy"`
+	OSSProjectRoot     string        `json:"ossProjectRoot"`
+	ResultStatus       string        `json:"resultStatus"`
+	ResultMessage      string        `json:"resultMessage"`
+	FinishedAt         string        `json:"finishedAt"`
+	Metadata           []ReceiptMeta `json:"metadata,omitempty"`
+}
+
+// ReceiptMeta 是回执里一步的执行记录。
+type ReceiptMeta struct {
+	Step       int    `json:"step"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
+	StartedAt  string `json:"startedAt,omitempty"`
+	FinishedAt string `json:"finishedAt,omitempty"`
+	Elapsed    string `json:"elapsed,omitempty"`
 }
 
 func parseNotice(raw []byte) (Notice, error) {
@@ -214,7 +226,7 @@ func validateDataHub(n Notice) string {
 	return ""
 }
 
-func dataHubReceipt(n Notice, status, message string, at time.Time) Receipt {
+func dataHubReceipt(n Notice, status, message string, at time.Time, meta []ReceiptMeta) Receipt {
 	return Receipt{
 		TaskID:             n.TaskID,
 		TaskNo:             n.TaskNo,
@@ -226,6 +238,7 @@ func dataHubReceipt(n Notice, status, message string, at time.Time) Receipt {
 		ResultStatus:       status,
 		ResultMessage:      clipMessage(message),
 		FinishedAt:         at.In(receiptTZ).Format("2006-01-02 15:04:05"),
+		Metadata:           meta,
 	}
 }
 

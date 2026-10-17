@@ -182,7 +182,7 @@ MNS `MessageBody` 解 Base64 后为下列 JSON（样例对齐 BOMS → DataHub�
 }
 ```
 
-FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。两条路径都写出时，OSS 和 FTP 都会推送。
+FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。有 `ossProjectRoot` 只推 OSS；只有 `ftpProjectRoot` 才推 FTP。两条都写出时只走 OSS。
 
 | 字段 | 说明 |
 |------|------|
@@ -207,11 +207,11 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
 
 仓库 URL 不读报文。缺必填字段或不在允许范围时：不打包、不上传，直接写失败回执。`taskTitle`、`passedAt`、`publishedAt` 可以出现，本服务不使用。
 
-关联了 SMTP 和邮件模板后，处理结束发信。模板「OSS 已更新」与「FTP 已更新」同一版式：OSS 的主题是 OSS已更新，来源栏是 OSS 访问路径；FTP 的主题是 FTP已更新，来源栏是 FTP版本来源。OSS 覆盖前若对象已存在，先复制到同目录 `BAK/{时间戳}/`，邮件「备份」栏写该路径。不附构建日志。构建日志留在平台，回执按 1 打包、2 推送、3 邮件 三步写结果。
+关联了 SMTP 和邮件模板后，打包和推送都成功才发信。报文有 `ossProjectRoot` 用「OSS 已更新」，只有 `ftpProjectRoot` 用「FTP 已更新」。发件人是 DATAHUB 更新通知 \<fluxdatahub@flux.com.cn\>，更新范围固定为 DATAHUB服务。两套模板版式相同。OSS 覆盖前若对象已存在，先复制到同目录 `BAK/{时间戳}/`，邮件「备份」栏写该路径。不附构建日志。构建日志留在平台，末尾追加与回执相同的三步。回执按 1 打包、2 推送、3 邮件 写结果，每步带耗时，并另给 `metadata` 数组。
 
 ### 回执报文（生产）
 
-写入 `result_queue`（MNS 发送）。`resultMessage` 最长 500 字；`finishedAt` 为 `yyyy-MM-dd HH:mm:ss`（东八区）。
+写入 `result_queue`（MNS 发送）。`resultMessage` 最长 500 字；`finishedAt` 与各步时间为 `yyyy-MM-dd HH:mm:ss`（东八区）。`metadata` 与三步正文一致，时间放在数组里，不受 `resultMessage` 截断影响。
 
 成功：
 
@@ -225,8 +225,13 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
   "deploymentStrategy": "war",
   "ossProjectRoot": "/开发/S01/",
   "resultStatus": "SUCCESS",
-  "resultMessage": "1. 打包：成功。自动打包完成，war 已推送到项目路径\n2. 推送：成功，OSS 路径 /开发/S01/app.war，资源 app.war,config.zip\n3. 邮件：已发送 收件人 a@example.com,b@example.com，模板 推送通知",
-  "finishedAt": "2026-07-03 18:06:20"
+  "resultMessage": "1. 打包：成功。自动打包完成，war 已推送到项目路径，耗时 43秒\n2. 推送：成功，OSS 路径 /开发/S01/app.war，资源 app.war,config.zip，耗时 2秒\n3. 邮件：已发送 收件人 a@example.com,b@example.com，模板 OSS 已更新，耗时 1秒",
+  "finishedAt": "2026-07-03 18:06:21",
+  "metadata": [
+    {"step": 1, "name": "打包", "status": "成功", "message": "自动打包完成，war 已推送到项目路径", "startedAt": "2026-07-03 18:05:37", "finishedAt": "2026-07-03 18:06:20", "elapsed": "43秒"},
+    {"step": 2, "name": "推送", "status": "成功", "message": "OSS 路径 /开发/S01/app.war，资源 app.war,config.zip", "startedAt": "2026-07-03 18:06:20", "finishedAt": "2026-07-03 18:06:22", "elapsed": "2秒"},
+    {"step": 3, "name": "邮件", "status": "已发送", "message": "收件人 a@example.com,b@example.com，模板 OSS 已更新", "startedAt": "2026-07-03 18:06:22", "finishedAt": "2026-07-03 18:06:23", "elapsed": "1秒"}
+  ]
 }
 ```
 

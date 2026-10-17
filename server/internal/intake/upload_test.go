@@ -1,10 +1,14 @@
 package intake
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"auto-pack/server/internal/project"
 )
 
 func TestSelectPushFiles(t *testing.T) {
@@ -30,6 +34,35 @@ func TestSelectPushFiles(t *testing.T) {
 	}
 	if _, err := selectPushFiles(work, []string{"missing.jar"}); err == nil {
 		t.Fatal("missing file must fail")
+	}
+}
+
+func TestPushFollowsOnePath(t *testing.T) {
+	var dests []string
+	svc := &Service{
+		upload: func(_ context.Context, _ project.Project, _, dest string) error {
+			dests = append(dests, dest)
+			return nil
+		},
+		sign: func(string, time.Duration) (string, error) { return "https://signed.example/app.war", nil },
+	}
+	n := sampleNotice()
+	n.FTPProjectRoot = "/ftp/S01/"
+	_, remote, _, _, _, err := svc.pushWarFile(context.Background(), project.Project{}, "app.war", n, time.Now())
+	if err != nil || remote != "/开发/S01/app.war" || len(dests) != 1 || dests[0] != "/开发/S01/app.war" {
+		t.Fatalf("remote=%s dests=%v err=%v", remote, dests, err)
+	}
+	n.OSSProjectRoot = ""
+	dests = nil
+	_, remote, _, _, _, err = svc.pushWarFile(context.Background(), project.Project{}, "app.war", n, time.Now())
+	if err != nil || remote != "/ftp/S01/app.war" || len(dests) != 1 || dests[0] != "/ftp/S01/app.war" {
+		t.Fatalf("remote=%s dests=%v err=%v", remote, dests, err)
+	}
+	boom := errors.New("550 denied")
+	svc.upload = func(context.Context, project.Project, string, string) error { return boom }
+	_, _, _, _, _, err = svc.pushWarFile(context.Background(), project.Project{}, "app.war", n, time.Now())
+	if err == nil || err.Error() != "FTP 550 denied" {
+		t.Fatal(err)
 	}
 }
 

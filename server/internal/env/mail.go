@@ -289,7 +289,7 @@ func ComposeMqMail(template string, fields MqMailFields) (ComposedMail, error) {
 		TaskNo:           fields.TaskNo,
 		FTPVersionSource: source,
 		SourceLabel:      sourceLabel,
-		UpdateScope:      fields.Branch,
+		UpdateScope:      "DATAHUB服务",
 		WarPackage:       fields.Resources,
 		Other:            other,
 		Backup:           fields.Backup,

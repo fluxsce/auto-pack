@@ -39,6 +39,7 @@ type fakeBuild struct {
 	startErr error
 	failed   int
 	projects []BuildProject
+	logged   string
 }
 
 func (f *fakeBuild) StartWorkspace(context.Context, string) (string, error) {
@@ -47,6 +48,11 @@ func (f *fakeBuild) StartWorkspace(context.Context, string) (string, error) {
 		return "", f.startErr
 	}
 	return "build-1", nil
+}
+
+func (f *fakeBuild) AppendLog(_ context.Context, id, text string) error {
+	f.logged = id + "\n" + text
+	return nil
 }
 
 func (f *fakeBuild) WaitWorkspace(context.Context, string) (BuildOutcome, error) {
@@ -197,7 +203,7 @@ func TestHandleUploadFailureKeepsBuildResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := decodeReceipt(t, (*receipts)[0])
-	if got.ResultStatus != resultFailed || got.OSSProjectRoot != "/开发/S01/" || !strings.Contains(got.ResultMessage, msgUpload) {
+	if got.ResultStatus != resultFailed || got.OSSProjectRoot != "/开发/S01/" || !strings.Contains(got.ResultMessage, "推送失败：OSS "+errNoWar.Error()) {
 		t.Fatalf("%+v", got)
 	}
 	row, err := svc.taskByID(context.Background(), sampleNotice().TaskID)
@@ -548,6 +554,10 @@ func TestHandleFromMQWritesAudit(t *testing.T) {
 	if !strings.Contains(got.summary, "消息队列") || !strings.Contains(got.summary, "release/customer") || !strings.Contains(got.summary, msgSuccess) || !strings.Contains(got.summary, "build=build-1") || !strings.Contains(got.summary, "1. 打包") || !strings.Contains(got.summary, "2. 推送") || !strings.Contains(got.summary, "3. 邮件") {
 		t.Fatalf("%s", got.summary)
 	}
+	logged := svc.builds.(*fakeBuild).logged
+	if !strings.Contains(logged, "build-1") || !strings.Contains(logged, "1. 打包") || !strings.Contains(logged, "耗时") || !strings.Contains(logged, "2. 推送") || !strings.Contains(logged, "3. 邮件") {
+		t.Fatalf("%s", logged)
+	}
 	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +568,10 @@ func TestHandleFromMQWritesAudit(t *testing.T) {
 
 func TestReceiptSteps(t *testing.T) {
 	n := sampleNotice()
-	got := receiptSteps(resultSuccess, msgSuccess, n, mailDraft{remote: "/开发/S01/app.war"}, "已发送 收件人 a@b.c，模板 FTP 已更新")
+	got, meta := receiptSteps(resultSuccess, msgSuccess, n, mailDraft{remote: "/开发/S01/app.war"}, "已发送 收件人 a@b.c，模板 FTP 已更新", stepClock{})
+	if len(meta) != 3 || meta[0].Name != "打包" || meta[0].Status != "成功" || meta[2].Status != "已发送" {
+		t.Fatalf("%+v", meta)
+	}
 	for _, part := range []string{
 		"1. 打包：成功。" + msgSuccess,
 		"2. 推送：成功，OSS 路径 /开发/S01/app.war",
@@ -571,13 +584,43 @@ func TestReceiptSteps(t *testing.T) {
 	ftp := n
 	ftp.OSSProjectRoot = ""
 	ftp.FTPProjectRoot = "/ftp/app"
-	pushed := receiptSteps(resultFailed, msgUpload, ftp, mailDraft{}, "未发送：未配置收件人")
-	if !strings.Contains(pushed, "1. 打包：成功") || !strings.Contains(pushed, "2. 推送：失败。"+msgUpload) || !strings.Contains(pushed, "3. 邮件：未发送：未配置收件人") {
+	pushed, pushedMeta := receiptSteps(resultFailed, "推送失败：oss copy 403: AccessDenied", ftp, mailDraft{}, "未发送：打包或推送未成功", stepClock{})
+	if len(pushedMeta) != 3 || pushedMeta[1].Status != "失败" || pushedMeta[1].Message != "oss copy 403: AccessDenied" {
+		t.Fatalf("%+v", pushedMeta)
+	}
+	if !strings.Contains(pushed, "1. 打包：成功") || !strings.Contains(pushed, "2. 推送：失败。oss copy 403: AccessDenied") || strings.Contains(pushed, "自动打包失败") || !strings.Contains(pushed, "3. 邮件：未发送：打包或推送未成功") {
 		t.Fatalf("%s", pushed)
 	}
-	early := receiptSteps(resultFailed, msgBuild, n, mailDraft{}, "")
+	early, _ := receiptSteps(resultFailed, msgBuild, n, mailDraft{}, "", stepClock{})
 	if !strings.Contains(early, "1. 打包：失败。"+msgBuild) || !strings.Contains(early, "2. 推送：未执行") || !strings.Contains(early, "3. 邮件：未发送") {
 		t.Fatalf("%s", early)
+	}
+}
+
+func TestReceiptMetadataTimes(t *testing.T) {
+	start := time.Date(2026, 7, 3, 10, 5, 37, 0, time.UTC)
+	clock := stepClock{
+		pack: stepSpan{start: start, end: start.Add(43 * time.Second)},
+		push: stepSpan{start: start.Add(43 * time.Second), end: start.Add(45 * time.Second)},
+		mail: stepSpan{start: start.Add(45 * time.Second), end: start.Add(46 * time.Second)},
+	}
+	text, meta := receiptSteps(resultSuccess, msgSuccess, sampleNotice(), mailDraft{remote: "/开发/S01/app.war"}, "已发送 收件人 a@b.c，模板 OSS 已更新", clock)
+	if !strings.Contains(text, "1. 打包：成功。"+msgSuccess+"，耗时 43秒") || !strings.Contains(text, "耗时 2秒") || !strings.Contains(text, "耗时 1秒") {
+		t.Fatalf("%s", text)
+	}
+	if len(meta) != 3 || meta[0].Elapsed != "43秒" || meta[1].Elapsed != "2秒" || meta[2].Elapsed != "1秒" {
+		t.Fatalf("%+v", meta)
+	}
+	if meta[0].StartedAt != "2026-07-03 18:05:37" || meta[0].FinishedAt != "2026-07-03 18:06:20" || meta[2].Status != "已发送" {
+		t.Fatalf("%+v", meta)
+	}
+	body, err := json.Marshal(dataHubReceipt(sampleNotice(), resultSuccess, text, start, meta))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decodeReceipt(t, body)
+	if len(got.Metadata) != 3 || got.Metadata[1].Name != "推送" || got.Metadata[1].StartedAt != "2026-07-03 18:06:20" {
+		t.Fatalf("%s", body)
 	}
 }
 

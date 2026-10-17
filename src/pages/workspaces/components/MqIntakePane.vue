@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RsDialog, RsLog, RsTag } from '@/ui'
+import { RsDialog, RsInput, RsLog, RsSelect, RsTag, type RsSelectModelValue } from '@/ui'
 import { apiPath } from '@/api/prefix'
 import { request } from '@/api/http'
 import { formatStamp } from '../composables/use-project-list'
@@ -43,6 +43,28 @@ const logLoading = ref(false)
 const open = ref(false)
 const latest = computed(() => items.value[0])
 const selected = computed(() => items.value.find((item) => item.rec_id === selectedId.value))
+const listQuery = ref('')
+const listPhase = ref('')
+const phaseOptions = computed(() => [
+  { value: '', label: t('workspaces.mqLog.filterAll') },
+  { value: 'run', label: t('workspaces.mqLog.running') },
+  { value: 'ok', label: t('audit.ok') },
+  { value: 'fail', label: t('audit.fail') },
+])
+const visibleItems = computed(() => {
+  const keyword = listQuery.value.trim().toLowerCase()
+  return items.value.filter((item) => {
+    if (listPhase.value && phaseOf(item) !== listPhase.value) return false
+    if (!keyword) return true
+    return `${item.title}\n${item.branch}\n${item.message}`.toLowerCase().includes(keyword)
+  })
+})
+
+function asString(value: RsSelectModelValue): string {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (raw == null) return ''
+  return String(typeof raw === 'object' ? raw.value : raw)
+}
 let listSeq = 0
 let logSeq = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -200,7 +222,8 @@ async function fillLog(item: MqItem, seq: number, first: boolean): Promise<void>
     if (buildId) {
       const view = await autoBuildLog(props.workspaceId, buildId)
       if (seq !== logSeq) return
-      detail.value = head + (view.content.trim() || t('workspaces.mqLog.noJobLog'))
+      const log = view.content.trim()
+      detail.value = (log.includes('—— 回执 ——') ? '' : head) + (log || t('workspaces.mqLog.noJobLog'))
       return
     }
     if (item.jobId) {
@@ -282,6 +305,8 @@ watch(
   () => props.workspaceId,
   () => {
     stopPoll()
+    listQuery.value = ''
+    listPhase.value = ''
     void reload()
   },
   { immediate: true },
@@ -338,8 +363,25 @@ defineExpose({ reload })
       <template #body>
         <div class="mq-dialog">
           <aside class="mq-dialog__side">
-            <ul class="mq__list">
-              <li v-for="item in items" :key="item.rec_id">
+            <div class="mq-filters">
+              <RsInput
+                v-model="listQuery"
+                clearable
+                :placeholder="t('workspaces.mqLog.filterPlaceholder')"
+                :aria-label="t('workspaces.mqLog.filterPlaceholder')"
+              />
+              <RsSelect
+                :model-value="listPhase"
+                :options="phaseOptions"
+                :aria-label="t('workspaces.mqLog.filterResult')"
+                @update:model-value="(v: RsSelectModelValue) => (listPhase = asString(v))"
+              />
+            </div>
+            <p v-if="items.length && !visibleItems.length" class="mq-filter-empty">
+              {{ t('workspaces.mqLog.filterNoMatch') }}
+            </p>
+            <ul v-else class="mq__list">
+              <li v-for="item in visibleItems" :key="item.rec_id">
                 <button
                   type="button"
                   class="mq__item"
@@ -473,6 +515,21 @@ defineExpose({ reload })
   gap: 0.65rem;
   min-width: 0;
   min-height: 0;
+}
+
+.mq-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.mq-filter-empty {
+  flex: 1;
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--shell-muted);
 }
 
 .mq-detail {

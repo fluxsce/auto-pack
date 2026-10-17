@@ -80,7 +80,7 @@ const mailPreviewFields = computed<FtpNotifyEmailFields>(() => {
       needRestart: '是',
       browserCacheRefresh: '是',
       impactScope: '全局',
-      updateScope: 'release/customer',
+      updateScope: 'DATAHUB服务',
       affectsApi: '是',
       warPackage: 'app.war、config.zip',
       other: '有效期至 2026-10-17 23:00:00',
@@ -96,7 +96,7 @@ const mailPreviewFields = computed<FtpNotifyEmailFields>(() => {
     needRestart: '是',
     browserCacheRefresh: '是',
     impactScope: '全局',
-    updateScope: 'release/customer',
+    updateScope: 'DATAHUB服务',
     affectsApi: '是',
     warPackage: 'app.war',
     other: 'https://oss.example.com/开发/S01/app.war',
@@ -439,6 +439,7 @@ function showGroup(index: number): string {
     <template #body>
       <div class="env-editor__mail-preview">
         <p class="env-editor__mail-subject">{{ t('envs.mailPreviewSubject') }}：{{ mailPreviewSubject }}</p>
+        <p v-if="mailPreviewTemplate !== 'project_update'" class="env-editor__mail-hint">发件人：DATAHUB 更新通知 &lt;fluxdatahub@flux.com.cn&gt;</p>
         <p class="env-editor__mail-hint">{{ t('envs.mailPreviewHint') }}</p>
         <iframe
           v-if="mailPreviewOpen"
