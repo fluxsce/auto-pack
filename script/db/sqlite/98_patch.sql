@@ -52,11 +52,12 @@ CREATE INDEX IF NOT EXISTS "IDX_AP_WSBLD_WS" ON "AP_WORKSPACE_BUILD" ("workspace
 
 UPDATE "AP_ENV" SET "workspace_rec_id" = '' WHERE "workspace_rec_id" <> '';
 
--- 外部平台打包通知。按 task_id 去重，不参与作业步骤。
+-- 外部平台打包通知。每条消息一行，主键是 rec_id。是否重复打包只看 pack_task_id，该列允许历史重复。不参与作业步骤。
 CREATE TABLE IF NOT EXISTS "AP_INTAKE_TASK" (
+  "rec_id" TEXT NOT NULL,
   "task_id" TEXT NOT NULL,
   "task_no" TEXT,
-  "pack_task_id" TEXT,
+  "pack_task_id" TEXT NOT NULL,
   "subsystem_type" TEXT,
   "project_rec_id" TEXT,
   "job_rec_id" TEXT,
@@ -68,8 +69,10 @@ CREATE TABLE IF NOT EXISTS "AP_INTAKE_TASK" (
   "finished_at" TEXT,
   "created_at" TEXT NOT NULL DEFAULT (datetime('now')),
   "updated_at" TEXT NOT NULL DEFAULT (datetime('now')),
-  CONSTRAINT PK_AP_INTAKE PRIMARY KEY ("task_id")
+  CONSTRAINT PK_AP_INTAKE PRIMARY KEY ("rec_id")
 );
+CREATE INDEX IF NOT EXISTS "IDX_AP_INTAKE_TASK" ON "AP_INTAKE_TASK" ("task_id");
+CREATE INDEX IF NOT EXISTS "IDX_AP_INTAKE_PACK" ON "AP_INTAKE_TASK" ("pack_task_id");
 
 CREATE TABLE IF NOT EXISTS "AP_MQ_MESSAGE" (
   "rec_id" TEXT NOT NULL,

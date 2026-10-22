@@ -26,6 +26,9 @@ func Apply(ctx context.Context, st *store.Store, driver string) (string, error) 
 			return patch, err
 		}
 	}
+	if err := retargetIntakeKey(ctx, st); err != nil {
+		return path, err
+	}
 	return path, nil
 }
 

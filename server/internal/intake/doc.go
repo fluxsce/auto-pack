@@ -6,6 +6,6 @@
 // resourceFiles 为逗号分隔的资源文件名。写出时只推这些文件。OSS 且 resourceFiles 空白时不过滤：工程目录下的文件原样上传，目录打成同名 zip；两个及以上 sce 开头的前端目录（含 sce-vdatahub）打成一个压缩包，只有一个时压缩该目录本身。FTP 未写 resourceFiles 时推送该工程下全部 war。
 // 收件人字段是 mailTo，多个用逗号分隔。没有写 @ 域名的账号在处理时补成 @flux.com.cn。有 ossProjectRoot 只推 OSS，只有 ftpProjectRoot 才推 FTP。连接优先用该 mq 环境关联的 OSS 或 FTP / SFTP / SSH。
 // 该 mq 环境关联了 SMTP 与邮件模板时，打包和推送都成功才发信。报文有 ossProjectRoot 用「OSS 已更新」，只有 ftpProjectRoot 用「FTP 已更新」。发件人是 DATAHUB 更新通知 <fluxdatahub@flux.com.cn>，更新范围固定为 DATAHUB服务。推送失败时回执写具体原因。OSS 覆盖前把已有对象复制到 BAK/{时间戳}/，邮件备份栏和回执推送步骤都写该路径；没有备份时不写。不附构建日志。构建日志留在平台。
-// 回执写入结果队列。resultMessage 只写三步结论，例如「打包成功，推送成功，邮件已发送」。路径、备份、耗时和收件人在 metadata 数组里。同样的三步明细追加到这次工作空间构建日志末尾。同一 taskId 再次到达时不重复打包：已结束的按原结果再写回执并注明原因，尚未结束的不另开构建、也不把进行中误报为失败。
+// 回执写入结果队列。resultMessage 只写三步结论，例如「打包成功，推送成功，邮件已发送」。路径、备份、耗时和收件人在 metadata 数组里。同样的三步明细追加到这次工作空间构建日志末尾。每条消息都消费。记录主键是独立的 rec_id。同一 packTaskId 再次到达时不重复打包：已结束的按原结果再写回执并注明原因，尚未结束的不另开构建、也不把进行中误报为失败。taskId 可以重复，每次打包使用新的 packTaskId。
 // 请求队列：收下后把不可见时间延到 MNS 上限，避免构建未完成时同一条被再次领取；业务 Handle 成功后再 Delete。空队列 MessageNotExist 属正常。
 package intake

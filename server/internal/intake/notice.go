@@ -37,6 +37,7 @@ type Notice struct {
 	ResourceFiles      []string
 	FTPProjectRoot     string
 	Legacy             bool
+	rowID              string // 本行 rec_id，领取时生成，不来自报文
 }
 
 // Receipt 写回执队列的报文。

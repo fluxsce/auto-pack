@@ -200,6 +200,7 @@ export default {
       loading: '正在读取日志…',
       running: '进行中',
       detail: '本次详情',
+      pack: '打包任务',
       task: '任务',
       branch: '分支',
       result: '结果',

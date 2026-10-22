@@ -22,6 +22,8 @@ type AuditPage = {
 type MqItem = {
   rec_id: string
   title: string
+  packTaskId: string
+  taskId: string
   branch: string
   message: string
   jobId: string
@@ -56,7 +58,7 @@ const visibleItems = computed(() => {
   return items.value.filter((item) => {
     if (listPhase.value && phaseOf(item) !== listPhase.value) return false
     if (!keyword) return true
-    return `${item.title}\n${item.branch}\n${item.message}`.toLowerCase().includes(keyword)
+    return `${item.title}\n${item.packTaskId}\n${item.taskId}\n${item.branch}\n${item.message}`.toLowerCase().includes(keyword)
   })
 })
 
@@ -76,7 +78,7 @@ function stopPoll(): void {
   }
 }
 
-function parseSummary(summary: string): { taskId: string; branch: string; message: string; jobId: string; buildId: string } {
+function parseSummary(summary: string): { packTaskId: string; taskId: string; branch: string; message: string; jobId: string; buildId: string } {
   let rest = summary.trim()
   let jobId = ''
   let buildId = ''
@@ -99,9 +101,17 @@ function parseSummary(summary: string): { taskId: string; branch: string; messag
     title = rest.slice(0, colon).trim()
     message = rest.slice(colon + 1).trim()
   }
+  let taskId = ''
+  const marked = title.match(/(?:^|\s)task=(\S+)/)
+  if (marked) {
+    taskId = marked[1]
+    title = title.replace(/(?:^|\s)task=\S+/, ' ').replace(/\s+/g, ' ').trim()
+  }
   const parts = title.split(/\s+/).filter(Boolean)
+  const head = parts[0] || ''
   return {
-    taskId: parts[0] || '',
+    packTaskId: marked ? head : '',
+    taskId: marked ? taskId : head,
     branch: parts.slice(1).join(' '),
     message: message || summary.trim(),
     jobId,
@@ -144,7 +154,9 @@ function toItem(row: AuditEntry): MqItem {
   const parsed = parseSummary(row.summary || '')
   return {
     rec_id: row.rec_id,
-    title: parsed.taskId || row.target_id || t('workspaces.mqLog.title'),
+    title: parsed.packTaskId || parsed.taskId || row.target_id || t('workspaces.mqLog.title'),
+    packTaskId: parsed.packTaskId,
+    taskId: parsed.taskId,
     branch: parsed.branch,
     message: parsed.message,
     jobId: parsed.jobId,
@@ -394,6 +406,7 @@ defineExpose({ reload })
                       {{ phaseLabel(item) }}
                     </RsTag>
                   </span>
+                  <span v-if="item.taskId && item.taskId !== item.title" class="mq__branch">{{ item.taskId }}</span>
                   <span v-if="item.branch" class="mq__branch">{{ item.branch }}</span>
                   <span class="mq__time">{{ item.time }}</span>
                 </button>
@@ -402,9 +415,13 @@ defineExpose({ reload })
             <section v-if="selected" class="mq-detail">
               <h4>{{ t('workspaces.mqLog.detail') }}</h4>
               <dl>
+                <div v-if="selected.packTaskId">
+                  <dt>{{ t('workspaces.mqLog.pack') }}</dt>
+                  <dd>{{ selected.packTaskId }}</dd>
+                </div>
                 <div>
                   <dt>{{ t('workspaces.mqLog.task') }}</dt>
-                  <dd>{{ selected.title }}</dd>
+                  <dd>{{ selected.taskId || selected.title }}</dd>
                 </div>
                 <div>
                   <dt>{{ t('workspaces.mqLog.branch') }}</dt>

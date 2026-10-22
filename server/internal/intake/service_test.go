@@ -88,6 +88,21 @@ func TestHandleValidationDoesNotSubmit(t *testing.T) {
 	}
 }
 
+func TestHandleSameTaskNewPackStarts(t *testing.T) {
+	svc, _, _, _ := setupIntake(t)
+	n := sampleNotice()
+	if err := svc.Handle(context.Background(), mustNotice(n)); err != nil {
+		t.Fatal(err)
+	}
+	n.PackTaskID = "PACK-2"
+	if err := svc.Handle(context.Background(), mustNotice(n)); err != nil {
+		t.Fatal(err)
+	}
+	if svc.builds.(*fakeBuild).starts != 2 {
+		t.Fatalf("starts=%d", svc.builds.(*fakeBuild).starts)
+	}
+}
+
 func TestHandleDuplicateIgnored(t *testing.T) {
 	svc, jobs, receipts, _ := setupIntake(t)
 	jobs.status = job.StatusSucceeded
@@ -118,10 +133,10 @@ func TestDuplicateWhileRunningKeepsReason(t *testing.T) {
 	}
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	if _, err := svc.st.SQL().ExecContext(ctx, `INSERT INTO AP_INTAKE_TASK (
-		task_id, task_no, pack_task_id, subsystem_type, project_rec_id, job_rec_id,
+		rec_id, task_id, task_no, pack_task_id, subsystem_type, project_rec_id, job_rec_id,
 		task_status, result_status, result_message, oss_project_root, notice_json, finished_at, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		n.TaskID, n.TaskNo, n.PackTaskID, n.SubsystemType, "p-code", "build-1",
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"intake-row-1", n.TaskID, n.TaskNo, n.PackTaskID, n.SubsystemType, "p-code", "build-1",
 		statusRunning, "", "", n.OSSProjectRoot, "{}", nil, now, now); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +200,7 @@ func TestHandleBuildFailureSkipsUpload(t *testing.T) {
 	if decodeReceipt(t, (*receipts)[0]).ResultStatus != resultFailed {
 		t.Fatal(string((*receipts)[0]))
 	}
-	row, err := svc.taskByID(context.Background(), sampleNotice().TaskID)
+	row, err := svc.taskByPack(context.Background(), sampleNotice().PackTaskID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +221,7 @@ func TestHandleUploadFailureKeepsBuildResult(t *testing.T) {
 	if got.ResultStatus != resultFailed || got.OSSProjectRoot != "/开发/S01/" || !strings.Contains(got.ResultMessage, "推送失败：OSS "+errNoWar.Error()) {
 		t.Fatalf("%+v", got)
 	}
-	row, err := svc.taskByID(context.Background(), sampleNotice().TaskID)
+	row, err := svc.taskByPack(context.Background(), sampleNotice().PackTaskID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +265,7 @@ func TestHandleReceiptFailureDoesNotRewriteSuccess(t *testing.T) {
 	if err := svc.Handle(context.Background(), mustNotice(sampleNotice())); err != nil {
 		t.Fatal(err)
 	}
-	row, err := svc.taskByID(context.Background(), sampleNotice().TaskID)
+	row, err := svc.taskByPack(context.Background(), sampleNotice().PackTaskID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +445,7 @@ func TestHandleUnnamedStartsWorkspaceBuild(t *testing.T) {
 	if got.ResultStatus != resultSuccess {
 		t.Fatalf("%+v", got)
 	}
-	row, err := svc.taskByID(context.Background(), sampleNotice().TaskID)
+	row, err := svc.taskByPack(context.Background(), sampleNotice().PackTaskID)
 	if err != nil || row.JobRecID != "build-1" || row.ProjectRecID != "p-code" {
 		t.Fatalf("%+v %v", row, err)
 	}
@@ -576,7 +591,7 @@ func TestHandleFromMQWritesAudit(t *testing.T) {
 		t.Fatalf("start %s", aud.calls[0].summary)
 	}
 	got := aud.calls[1]
-	if !got.ok || got.ws != "ws-1" || got.action != audit.ActionIntakeMQ || got.targetType != "intake" || got.targetID != sampleNotice().TaskID {
+	if !got.ok || got.ws != "ws-1" || got.action != audit.ActionIntakeMQ || got.targetType != "intake" || got.targetID != sampleNotice().PackTaskID {
 		t.Fatalf("%+v", got)
 	}
 	if !strings.Contains(got.summary, "消息队列") || !strings.Contains(got.summary, "release/customer") || !strings.Contains(got.summary, msgSuccess) || !strings.Contains(got.summary, "build=build-1") || !strings.Contains(got.summary, "1. 打包") || !strings.Contains(got.summary, "2. 推送") || !strings.Contains(got.summary, "3. 邮件") {

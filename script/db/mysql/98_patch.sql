@@ -67,11 +67,12 @@ CREATE INDEX `IDX_AP_WSBLD_WS` ON `AP_WORKSPACE_BUILD` (`workspace_rec_id`, `bui
 
 UPDATE `AP_ENV` SET `workspace_rec_id` = '' WHERE `workspace_rec_id` <> '';
 
--- 外部平台打包通知。按 task_id 去重，不参与作业步骤。
+-- 外部平台打包通知。每条消息一行，主键是 rec_id。是否重复打包只看 pack_task_id，该列允许历史重复。不参与作业步骤。
 CREATE TABLE IF NOT EXISTS `AP_INTAKE_TASK` (
+  `rec_id` VARCHAR(36) NOT NULL,
   `task_id` VARCHAR(64) NOT NULL,
   `task_no` VARCHAR(64),
-  `pack_task_id` VARCHAR(128),
+  `pack_task_id` VARCHAR(128) NOT NULL,
   `subsystem_type` VARCHAR(32),
   `project_rec_id` VARCHAR(36),
   `job_rec_id` VARCHAR(36),
@@ -83,8 +84,10 @@ CREATE TABLE IF NOT EXISTS `AP_INTAKE_TASK` (
   `finished_at` DATETIME,
   `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT PK_AP_INTAKE PRIMARY KEY (`task_id`)
+  CONSTRAINT PK_AP_INTAKE PRIMARY KEY (`rec_id`)
 );
+CREATE INDEX `IDX_AP_INTAKE_TASK` ON `AP_INTAKE_TASK` (`task_id`);
+CREATE INDEX `IDX_AP_INTAKE_PACK` ON `AP_INTAKE_TASK` (`pack_task_id`);
 
 -- 队列生产与消费消息。只保留最近 300 条。
 CREATE TABLE IF NOT EXISTS `AP_MQ_MESSAGE` (

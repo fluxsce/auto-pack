@@ -200,6 +200,7 @@ export default {
       loading: 'Reading the log…',
       running: 'Running',
       detail: 'This run',
+      pack: 'Pack task',
       task: 'Task',
       branch: 'Branch',
       result: 'Result',
