@@ -507,6 +507,7 @@ defineExpose({ reload })
   flex: 1;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .mq-dialog__side {
@@ -515,6 +516,7 @@ defineExpose({ reload })
   gap: 0.65rem;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .mq-filters {
@@ -533,7 +535,10 @@ defineExpose({ reload })
 }
 
 .mq-detail {
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  max-height: 42%;
+  min-height: 0;
+  overflow: auto;
   padding: 0.7rem 0.75rem;
   border: 1px solid var(--shell-border);
   border-radius: 0.65rem;
@@ -566,17 +571,19 @@ defineExpose({ reload })
 
 .mq-detail dd {
   margin: 0;
+  min-width: 0;
   font-size: 0.78rem;
+  overflow-wrap: anywhere;
   word-break: break-word;
   white-space: pre-line;
 }
 
 .mq__list {
   list-style: none;
-  flex: 1;
+  flex: 1 1 auto;
   margin: 0;
   padding: 0;
-  min-height: 0;
+  min-height: 8rem;
   overflow: auto;
   display: flex;
   flex-direction: column;

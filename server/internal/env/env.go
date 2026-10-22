@@ -268,6 +268,46 @@ func (s *Service) FindKind(ctx context.Context, workspaceID, kind string) (Env, 
 	return e, m, nil
 }
 
+// ListKindEnabled 返回该类型全部已启用环境及解密后的配置，按名称、主键排序。
+// 消息队列接入要同时消费每一条，不能复用 FindKind 的 LIMIT 1。
+func (s *Service) ListKindEnabled(ctx context.Context, kind string) ([]Env, []map[string]any, error) {
+	codes := KindCodes(kind)
+	if len(codes) == 0 {
+		return nil, nil, nil
+	}
+	holders := strings.TrimRight(strings.Repeat("?,", len(codes)), ",")
+	args := make([]any, 0, len(codes))
+	for _, c := range codes {
+		args = append(args, c)
+	}
+	q := s.st.Rebind(`SELECT rec_id, workspace_rec_id, env_kind, env_name, COALESCE(config_hint,''), is_enabled, config_cipher
+		FROM AP_ENV WHERE env_kind IN (` + holders + `) AND is_enabled = 1 ORDER BY env_name, rec_id`)
+	rows, err := s.st.SQL().QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var envs []Env
+	var cfgs []map[string]any
+	for rows.Next() {
+		var e Env
+		var cipherText string
+		if err := rows.Scan(&e.RecID, &e.WorkspaceRecID, &e.EnvKind, &e.EnvName, &e.ConfigHint, &e.IsEnabled, &cipherText); err != nil {
+			return nil, nil, err
+		}
+		cfg, err := s.decryptMap(cipherText)
+		if err != nil {
+			return nil, nil, err
+		}
+		envs = append(envs, e)
+		cfgs = append(cfgs, cfg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, err
+	}
+	return envs, cfgs, nil
+}
+
 func (s *Service) scanKindRow(ctx context.Context, q string, args ...any) (Env, string, error) {
 	var e Env
 	var cipherText string

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"auto-pack/server/internal/access"
@@ -103,6 +104,7 @@ type Service struct {
 	mqSrc       mqSource
 	mqlog       *mqlog.Log
 	mqEnvID     string
+	handleMu    sync.Mutex // 多队列同时收消息时，一次只处理一笔，避免回执和邮件串到另一条环境
 	pendingMail mailDraft
 	steps       stepClock
 	stop        context.CancelFunc

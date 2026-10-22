@@ -140,6 +140,67 @@ func TestSaveRejectsUnknownKind(t *testing.T) {
 	}
 }
 
+func TestListKindEnabledReturnsEveryMQ(t *testing.T) {
+	svc, ctx, actor := setupEnv(t)
+	saveMQ := func(name string, enabled int) {
+		t.Helper()
+		_, err := svc.Save(ctx, actor, env.Env{
+			WorkspaceRecID: access.DefaultWorkspaceRecID,
+			EnvKind:        "mq",
+			EnvName:        name,
+			IsEnabled:      enabled,
+			Config: map[string]any{
+				"endpoint":          "https://123.mns.cn-hangzhou.aliyuncs.com",
+				"request_queue":     name + "-req",
+				"result_queue":      name + "-res",
+				"access_key_id":     "ak",
+				"access_key_secret": "sk",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	saveMQ("mq-z", 1)
+	saveMQ("mq-m", 1)
+	if _, err := svc.Save(ctx, actor, env.Env{
+		RecID:          "22222222-2222-4222-8222-222222222222",
+		WorkspaceRecID: access.DefaultWorkspaceRecID,
+		EnvKind:        "mq",
+		EnvName:        "mq-a",
+		IsEnabled:      0,
+		Config: map[string]any{
+			"endpoint":          "https://123.mns.cn-hangzhou.aliyuncs.com",
+			"request_queue":     "mq-a-req",
+			"result_queue":      "mq-a-res",
+			"access_key_id":     "ak",
+			"access_key_secret": "sk",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	one, _, err := svc.FindKind(ctx, "", "mq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.EnvName != "mq-m" {
+		t.Fatalf("find=%s", one.EnvName)
+	}
+	list, cfgs, err := svc.ListKindEnabled(ctx, "mq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 || len(cfgs) != 2 {
+		t.Fatalf("list=%d cfgs=%d", len(list), len(cfgs))
+	}
+	if list[0].EnvName != "mq-m" || list[1].EnvName != "mq-z" {
+		t.Fatalf("%s %s", list[0].EnvName, list[1].EnvName)
+	}
+	if cfgs[1]["request_queue"] != "mq-z-req" {
+		t.Fatalf("cfg=%v", cfgs[1])
+	}
+}
+
 func TestFindKindAcceptsNodeAlias(t *testing.T) {
 	svc, ctx, actor := setupEnv(t)
 	if _, err := svc.Save(ctx, actor, env.Env{

@@ -13,7 +13,17 @@ import (
 	"testing"
 	"time"
 
+	"path/filepath"
+
+	"auto-pack/server/internal/access"
+	"auto-pack/server/internal/crypt"
+	"auto-pack/server/internal/env"
 	"auto-pack/server/internal/host/mns"
+	"auto-pack/server/internal/iam"
+	"auto-pack/server/internal/migrate"
+	"auto-pack/server/internal/store"
+	"auto-pack/server/internal/user"
+	"auto-pack/server/internal/workspace"
 )
 
 func TestOpenMNSRequiresQueues(t *testing.T) {
@@ -414,4 +424,98 @@ func TestRunEnvFollowsEnabledMQ(t *testing.T) {
 	mem.mu.Lock()
 	defer mem.mu.Unlock()
 	t.Fatalf("deleted=%d posted=%d", len(mem.deleted), len(mem.posted))
+}
+
+func TestRunEnvConsumesEveryEnabledMQ(t *testing.T) {
+	memA, srvA := startMemMNS(t, "REQ-A", "RES-A")
+	memZ, srvZ := startMemMNS(t, "REQ-Z", "RES-Z")
+	envs := setupMQEnvs(t)
+	ctx := context.Background()
+	actor := iam.Actor{UserID: access.DefaultAdminRecID, LoginName: "admin"}
+	save := func(name, endpoint, req, res string) {
+		t.Helper()
+		_, err := envs.Save(ctx, actor, env.Env{
+			WorkspaceRecID: access.DefaultWorkspaceRecID,
+			EnvKind:        "mq",
+			EnvName:        name,
+			IsEnabled:      1,
+			Config: map[string]any{
+				"endpoint":          endpoint,
+				"request_queue":     req,
+				"result_queue":      res,
+				"access_key_id":     "ak",
+				"access_key_secret": "sk",
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	save("mq-a", srvA.URL, "REQ-A", "RES-A")
+	save("mq-z", srvZ.URL, "REQ-Z", "RES-Z")
+	clientA, err := mns.New(mns.Config{Endpoint: srvA.URL, AccessKeyID: "ak", AccessKeySecret: "sk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientZ, err := mns.New(mns.Config{Endpoint: srvZ.URL, AccessKeyID: "ak", AccessKeySecret: "sk"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clientA.Send(ctx, "REQ-A", []byte(`not-json`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clientZ.Send(ctx, "REQ-Z", []byte(`not-json`)); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New(Options{Envs: envs})
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := svc.Start(runCtx); err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Stop()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		memA.mu.Lock()
+		delA, postA := len(memA.deleted), len(memA.posted)
+		memA.mu.Unlock()
+		memZ.mu.Lock()
+		delZ, postZ := len(memZ.deleted), len(memZ.posted)
+		memZ.mu.Unlock()
+		if delA == 1 && delZ == 1 && postA >= 2 && postZ >= 2 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	memA.mu.Lock()
+	memZ.mu.Lock()
+	defer memA.mu.Unlock()
+	defer memZ.mu.Unlock()
+	t.Fatalf("a deleted=%d posted=%d; z deleted=%d posted=%d", len(memA.deleted), len(memA.posted), len(memZ.deleted), len(memZ.posted))
+}
+
+func setupMQEnvs(t *testing.T) *env.Service {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Config{Driver: "sqlite", Path: filepath.Join(t.TempDir(), "t.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := migrate.Apply(ctx, st, "sqlite"); err != nil {
+		t.Fatal(err)
+	}
+	if err := user.SeedDefaultAdmin(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	if err := workspace.SeedDefaultWorkspace(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := crypt.NewFromPassphrase("test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env.NewService(st, iam.NewGuard(access.NewDirectory(st)), cipher)
 }

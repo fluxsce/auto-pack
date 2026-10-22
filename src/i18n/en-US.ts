@@ -949,7 +949,7 @@ export default {
         endpoint: 'https://oss-cn-hangzhou.aliyuncs.com',
       },
     },
-    mqHint: 'Aliyun MNS: this service consumes the request queue and only publishes receipts to the result queue. A receipt has three steps: pack, push, and mail. Link OSS or FTP for the war upload. Link SMTP and a mail template to send the push path when processing finishes. The build log stays on the platform. Recipients come from the notice, then from the SMTP environment.',
+    mqHint: 'Aliyun MNS: every enabled, complete queue is consumed. This service reads that environment’s request queue and writes the receipt to its own result queue. A receipt has three steps: pack, push, and mail. Link OSS or FTP for the war upload. Link SMTP and a mail template to send the push path when processing finishes. The build log stays on the platform. Recipients come from the notice, then from the SMTP environment.',
     linkNone: 'Not linked',
     linkHint: 'Above the Enabled switch. Mail carries the OSS or FTP push path only. The build log stays on the platform. The result queue records three steps: pack, push, and mail.',
     mailPreview: 'Preview',
