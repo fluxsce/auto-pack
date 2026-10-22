@@ -105,7 +105,6 @@ type Service struct {
 	mqlog       *mqlog.Log
 	mqEnvID     string
 	handleMu    sync.Mutex // 多队列同时收消息时，一次只处理一笔，避免回执和邮件串到另一条环境
-	claimMu     sync.Mutex // 领取打包记录：同一 packTaskId 同时到达时只插入一行
 	pendingMail mailDraft
 	steps       stepClock
 	stop        context.CancelFunc
@@ -158,8 +157,8 @@ func New(opt Options) *Service {
 	return s
 }
 
-// Handle 处理一笔通知。消息都会消费。同一 packTaskId 已有记录时不重复打包：已结束的按原结果再写回执并注明原因，尚未结束的只记下原因。
-// 记录主键是独立的 rec_id。taskId 可以重复，每次打包用新的 packTaskId。校验失败不入队。作业成败仍由现有 runner 决定，上传失败不改作业状态。
+// Handle 处理一笔通知。每一条投递都消费并打包，同一 packTaskId 再次到达也再打包一次。
+// 记录主键是独立的 rec_id。校验失败不入队。作业成败仍由现有 runner 决定，上传失败不改作业状态。
 func (s *Service) Handle(ctx context.Context, raw []byte) error {
 	s.steps = stepClock{}
 	n, err := parseNotice(raw)
@@ -172,13 +171,10 @@ func (s *Service) Handle(ctx context.Context, raw []byte) error {
 	if strings.TrimSpace(n.PackTaskID) == "" {
 		return s.finishWithoutTask(ctx, n, "报文校验失败：packTaskId 必须非空")
 	}
-	claimed, rowID, err := s.claim(ctx, n, raw)
+	rowID, err := s.claim(ctx, n, raw)
 	if err != nil {
 		s.noteMQ(ctx, "", n, "领取打包任务失败", "", false)
 		return err
-	}
-	if !claimed {
-		return s.receiptExisting(ctx, n)
 	}
 	n.rowID = rowID
 	if reason := validateDataHub(n); reason != "" {
@@ -323,52 +319,6 @@ func finalBuildResult(out BuildOutcome, finalName string) (bool, string) {
 	return false, fmt.Sprintf("最终工程 %s 构建失败", finalName)
 }
 
-func (s *Service) receiptExisting(ctx context.Context, n Notice) error {
-	row, err := s.taskByPack(ctx, n.PackTaskID)
-	if err != nil {
-		s.noteMQ(ctx, "", n, "读取已有任务失败", "", false)
-		return err
-	}
-	log.Printf("intake receipt existing pack=%s status=%s result=%s", n.PackTaskID, row.TaskStatus, row.ResultStatus)
-	if row.TaskNo != "" {
-		n.TaskNo = row.TaskNo
-	}
-	if row.PackTaskID != "" {
-		n.PackTaskID = row.PackTaskID
-	}
-	if row.OSSProjectRoot != "" {
-		n.OSSProjectRoot = row.OSSProjectRoot
-		n.FTPProjectRoot = ""
-	}
-	ws := ""
-	if s.projects != nil && row.ProjectRecID != "" {
-		if prj, perr := s.projects.GetRaw(ctx, row.ProjectRecID); perr == nil {
-			ws = prj.WorkspaceRecID
-		}
-	}
-	ref := s.logRef(ctx, row.JobRecID)
-	status := row.ResultStatus
-	if status != resultSuccess && status != resultFailed {
-		s.noteMQ(ctx, ws, n, "同一 packTaskId 正在构建，不重复启动。原因：上次构建尚未结束，完成后由原任务回执", ref, true)
-		return nil
-	}
-	message := strings.TrimSpace(row.ResultMessage)
-	if message == "" {
-		if status == resultSuccess {
-			message = msgSuccess
-		} else {
-			message = "该 packTaskId 已处理"
-		}
-	}
-	pubErr := s.writeReceipt(ctx, n, status, message, nil)
-	text := "同一 packTaskId 不重复打包。原因：" + message
-	if pubErr != nil {
-		text += "；回执未写入"
-	}
-	s.noteMQ(ctx, ws, n, text, ref, pubErr == nil && status == resultSuccess)
-	return pubErr
-}
-
 func (s *Service) rememberRun(ctx context.Context, n Notice, prj project.Project, ref string) {
 	storeID := ref
 	if strings.HasPrefix(ref, "build:") {
@@ -386,19 +336,6 @@ func (s *Service) rememberRun(ctx context.Context, n Notice, prj project.Project
 		log.Printf("intake remember %s: %v", n.TaskID, err)
 	}
 	s.noteMQ(ctx, prj.WorkspaceRecID, n, "已接收，开始自动构建", ref, true)
-}
-
-func (s *Service) logRef(ctx context.Context, id string) string {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.HasPrefix(id, "build:") || s.st == nil {
-		return id
-	}
-	q := s.st.Rebind(`SELECT rec_id FROM AP_WORKSPACE_BUILD WHERE rec_id=?`)
-	var found string
-	if err := s.st.SQL().QueryRowContext(ctx, q, id).Scan(&found); err != nil || found == "" {
-		return id
-	}
-	return "build:" + found
 }
 
 func (s *Service) deliverMail(ctx context.Context, jobID string, ok bool, message, remote, url, until string) {

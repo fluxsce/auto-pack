@@ -32,32 +32,21 @@ type taskRow struct {
 	FinishedAt     string
 }
 
-// claim 记下这一条消息。同一 packTaskId 已经有记录时不再插入，调用方据此跳过打包。行主键是新的 rec_id。
-func (s *Service) claim(ctx context.Context, n Notice, raw []byte) (bool, string, error) {
-	s.claimMu.Lock()
-	defer s.claimMu.Unlock()
+// claim 为这一次投递记一行。同一 packTaskId 再次到达也新插入，调用方据此再打包。行主键是新的 rec_id。
+func (s *Service) claim(ctx context.Context, n Notice, raw []byte) (string, error) {
 	now := time.Now().UTC().Format("2006-01-02 15:04:05")
 	id := uuid.NewString()
 	q := s.st.Rebind(`INSERT INTO AP_INTAKE_TASK (
 		rec_id, task_id, task_no, pack_task_id, subsystem_type, project_rec_id, job_rec_id,
 		task_status, result_status, result_message, oss_project_root, notice_json, finished_at, created_at, updated_at)
-		SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
-		WHERE NOT EXISTS (SELECT 1 FROM AP_INTAKE_TASK WHERE pack_task_id=?)`)
-	res, err := s.st.SQL().ExecContext(ctx, q,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+	_, err := s.st.SQL().ExecContext(ctx, q,
 		id, n.TaskID, n.TaskNo, n.PackTaskID, n.SubsystemType, "", "",
-		statusRunning, "", "", firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot), string(raw), nil, now, now,
-		n.PackTaskID)
+		statusRunning, "", "", firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot), string(raw), nil, now, now)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
-	nRows, err := res.RowsAffected()
-	if err != nil {
-		return false, "", err
-	}
-	if nRows == 0 {
-		return false, "", nil
-	}
-	return true, id, nil
+	return id, nil
 }
 
 func (s *Service) saveTask(ctx context.Context, row taskRow) error {

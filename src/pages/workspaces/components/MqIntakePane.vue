@@ -108,10 +108,10 @@ function parseSummary(summary: string): { packTaskId: string; taskId: string; br
     title = title.replace(/(?:^|\s)task=\S+/, ' ').replace(/\s+/g, ' ').trim()
   }
   const parts = title.split(/\s+/).filter(Boolean)
-  const head = parts[0] || ''
+  const first = parts[0] || ''
   return {
-    packTaskId: marked ? head : '',
-    taskId: marked ? taskId : head,
+    packTaskId: marked ? first : '',
+    taskId: marked ? taskId : first,
     branch: parts.slice(1).join(' '),
     message: message || summary.trim(),
     jobId,

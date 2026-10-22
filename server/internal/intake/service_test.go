@@ -103,9 +103,8 @@ func TestHandleSameTaskNewPackStarts(t *testing.T) {
 	}
 }
 
-func TestHandleDuplicateIgnored(t *testing.T) {
+func TestHandleSameMessagePacksAgain(t *testing.T) {
 	svc, jobs, receipts, _ := setupIntake(t)
-	jobs.status = job.StatusSucceeded
 	raw := mustNotice(sampleNotice())
 	if err := svc.Handle(context.Background(), raw); err != nil {
 		t.Fatal(err)
@@ -114,12 +113,19 @@ func TestHandleDuplicateIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	fb := svc.builds.(*fakeBuild)
-	if fb.starts != 1 || len(jobs.submitted) != 0 || len(*receipts) != 2 {
+	if fb.starts != 2 || len(jobs.submitted) != 0 || len(*receipts) != 2 {
 		t.Fatalf("starts=%d submit=%d receipt=%d", fb.starts, len(jobs.submitted), len(*receipts))
 	}
 	again := decodeReceipt(t, (*receipts)[1])
-	if again.ResultStatus != resultSuccess || again.TaskID != sampleNotice().TaskID || again.ResultMessage != msgSuccess {
+	if again.ResultStatus != resultSuccess || again.PackTaskID != sampleNotice().PackTaskID || again.ResultMessage != msgSuccess {
 		t.Fatalf("%+v", again)
+	}
+	var n int
+	if err := svc.st.SQL().QueryRowContext(context.Background(), `SELECT COUNT(1) FROM AP_INTAKE_TASK WHERE pack_task_id=?`, sampleNotice().PackTaskID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("rows=%d", n)
 	}
 }
 
@@ -146,15 +152,18 @@ func TestDuplicateWhileRunningKeepsReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	fb := svc.builds.(*fakeBuild)
-	if fb.starts != 0 || len(jobs.submitted) != 0 || len(*receipts) != 0 {
+	if fb.starts != 1 || len(jobs.submitted) != 0 || len(*receipts) != 1 {
 		t.Fatalf("starts=%d submit=%d receipt=%d", fb.starts, len(jobs.submitted), len(*receipts))
 	}
-	if len(aud.calls) != 1 {
-		t.Fatalf("calls=%d", len(aud.calls))
+	if len(aud.calls) == 0 || strings.Contains(aud.calls[0].summary, "不重复打包") {
+		t.Fatalf("%+v", aud.calls)
 	}
-	got := aud.calls[0].summary
-	if !strings.Contains(got, "正在构建") || !strings.Contains(got, "原因：") || !strings.Contains(got, "build=build-1") {
-		t.Fatalf("%s", got)
+	var rows int
+	if err := svc.st.SQL().QueryRowContext(ctx, `SELECT COUNT(1) FROM AP_INTAKE_TASK WHERE pack_task_id=?`, sampleNotice().PackTaskID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 {
+		t.Fatalf("rows=%d", rows)
 	}
 }
 
@@ -174,11 +183,14 @@ func TestDuplicateAfterFinishStatesReason(t *testing.T) {
 	if err := svc.handleFromMQ(ctx, raw); err != nil {
 		t.Fatal(err)
 	}
-	if len(aud.calls) != 3 {
+	if svc.builds.(*fakeBuild).starts != 2 {
+		t.Fatalf("starts=%d", svc.builds.(*fakeBuild).starts)
+	}
+	if len(aud.calls) < 3 {
 		t.Fatalf("calls=%d", len(aud.calls))
 	}
 	got := aud.calls[2].summary
-	if !aud.calls[2].ok || !strings.Contains(got, "不重复打包") || !strings.Contains(got, "原因：打包成功，推送成功，邮件未发送") || !strings.Contains(got, "build=build-1") {
+	if !aud.calls[2].ok || strings.Contains(got, "不重复打包") || !strings.Contains(got, "已接收") {
 		t.Fatalf("%s", got)
 	}
 }

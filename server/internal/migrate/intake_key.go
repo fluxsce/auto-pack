@@ -14,7 +14,7 @@ import (
 
 // retargetIntakeKey 给已有 AP_INTAKE_TASK 补上 rec_id，并把主键改到这一列。
 // 新库建表时主键已经是 rec_id，这里直接返回。
-// pack_task_id 只用来判断同一次打包是否已经做过，允许历史重复，不改原值。空值用 task_id 补上，便于按打包号查找。
+// pack_task_id 可以重复：同一报文再次投递会再打包。空值用 task_id 补上，便于按打包号查找。
 func retargetIntakeKey(ctx context.Context, st *store.Store) error {
 	if st == nil {
 		return nil

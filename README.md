@@ -110,10 +110,8 @@ JWT 只证明身份。写操作走 `iam.Allow(actor, workspace, action)`。
 ```mermaid
 flowchart TD
   MQ["通知队列"] --> Parse["解析报文"]
-  Parse -->|无法解析或 taskId 为空| ReceiptFail["失败回执"]
-  Parse --> Claim{"taskId 是否已有记录"}
-  Claim -->|已有| Replay["不重复打包<br/>按已有结果再写回执"]
-  Claim -->|新任务| Check{"报文校验"}
+  Parse -->|无法解析或 taskId、packTaskId 为空| ReceiptFail["失败回执"]
+  Parse --> Check{"报文校验"}
   Check -->|不通过| ReceiptFail
   Check -->|通过| Job["按 customerBranch=repo_branch<br/>关联工作空间并提交构建"]
   Job --> Run["同步并构建<br/>成功邮件先挂起"]
@@ -129,13 +127,12 @@ flowchart TD
   UpOK -->|成功| OkMail["结果邮件：成功<br/>OSS 附带临时访问地址"]
   OkMail --> ReceiptOK["成功回执，消息键 taskId"]
   ReceiptFail --> MQOut["回执队列"]
-  Replay --> MQOut
   ReceiptBuild --> MQOut
   ReceiptUp --> MQOut
   ReceiptOK --> MQOut
 ```
 
-同一 `taskId` 无论进行中、成功或失败，再次投递都不重新打包。已有结果原样再写一笔回执；还在处理时回执说明不重复打包。回执写入失败会重试，耗尽后把该任务记为回执失败，不改成成功。邮件失败不影响回执。
+同一报文再次投进队列会再打包一次，并各写一笔回执。每次投递单独记一行。回执写入失败会重试，耗尽后把该次记录记为回执失败，不改成成功。邮件失败不影响回执。
 
 ### mq 环境（阿里云 MNS）
 
@@ -186,9 +183,9 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
 
 | 字段 | 说明 |
 |------|------|
-| `taskId` | 必填。同一笔打包的处理键和回执键，再次到达不重复打包。 |
+| `taskId` | 必填。写入回执。同一报文再次投递会再打包。 |
 | `taskNo` | 必填。业务任务号，写入回执和推送通知邮件。 |
-| `packTaskId` | 必填。外部打包任务标识，原样写入回执。 |
+| `packTaskId` | 必填。外部打包任务标识，原样写入回执。同一标识再次投递仍会再打包。 |
 | `resourceFiles` | 可选。要推送的资源文件，多个用英文逗号分隔，如 `app.war,config.zip`。按文件名在最终工程目录中查找。写出后只推这些文件；不写则推送全部 `war`。 |
 | `mailTo` | 可选。收件人账号，多个用英文逗号分隔，如 `zhangsan,lisi`。处理时没有 `@` 的自动补成 `@flux.com.cn`；已经写完整邮箱的保持原样。未填时用所关联 SMTP 环境里的收件人。 |
 | `customerCode` | 必填。客户代码，原样进入打包参数，并写入推送通知。 |
