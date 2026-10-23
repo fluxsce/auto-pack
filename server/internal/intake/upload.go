@@ -357,7 +357,7 @@ func (s *Service) signOSS(ctx context.Context, prj project.Project, key string, 
 	if err != nil {
 		return "", err
 	}
-	return hostoss.SignGet(cfg, key, expire)
+	return hostoss.SignGetMode(cfg, key, expire, "attachment")
 }
 
 // ossConfig 优先用该 mq 环境关联的 OSS。未关联时用已启用的 oss 环境。报文只提供对象路径。

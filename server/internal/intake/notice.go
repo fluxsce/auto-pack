@@ -49,6 +49,8 @@ type Receipt struct {
 	PackagingMode      string        `json:"packagingMode"`
 	DeploymentStrategy string        `json:"deploymentStrategy"`
 	OSSProjectRoot     string        `json:"ossProjectRoot"`
+	UploadPath         string        `json:"uploadPath,omitempty"`
+	OSSURL             string        `json:"ossUrl,omitempty"`
 	ResultStatus       string        `json:"resultStatus"`
 	ResultMessage      string        `json:"resultMessage"`
 	FinishedAt         string        `json:"finishedAt"`
@@ -227,7 +229,7 @@ func validateDataHub(n Notice) string {
 	return ""
 }
 
-func dataHubReceipt(n Notice, status, message string, at time.Time, meta []ReceiptMeta) Receipt {
+func dataHubReceipt(n Notice, status, message string, at time.Time, meta []ReceiptMeta, paths, urls string) Receipt {
 	return Receipt{
 		TaskID:             n.TaskID,
 		TaskNo:             n.TaskNo,
@@ -236,11 +238,29 @@ func dataHubReceipt(n Notice, status, message string, at time.Time, meta []Recei
 		PackagingMode:      "war",
 		DeploymentStrategy: "war",
 		OSSProjectRoot:     firstNonEmptyPath(n.OSSProjectRoot, n.FTPProjectRoot),
+		UploadPath:         receiptList(paths, true),
+		OSSURL:             receiptList(urls, false),
 		ResultStatus:       status,
 		ResultMessage:      clipMessage(message),
 		FinishedAt:         at.In(receiptTZ).Format("2006-01-02 15:04:05"),
 		Metadata:           meta,
 	}
+}
+
+// receiptList 把多次推送拼成逗号分隔。路径补成绝对路径；链接保持原样。
+func receiptList(raw string, absPath bool) string {
+	var parts []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(strings.ReplaceAll(line, "\\", "/"))
+		if line == "" {
+			continue
+		}
+		if absPath && !strings.HasPrefix(line, "/") {
+			line = "/" + line
+		}
+		parts = append(parts, line)
+	}
+	return strings.Join(parts, ",")
 }
 
 func firstNonEmptyPath(values ...string) string {

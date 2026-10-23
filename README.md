@@ -221,6 +221,8 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
   "packagingMode": "war",
   "deploymentStrategy": "war",
   "ossProjectRoot": "/开发/S01/",
+  "uploadPath": "/开发/S01/app.war,/开发/S01/config.zip",
+  "ossUrl": "https://datahub.oss.example/开发/S01/app.war?response-content-disposition=attachment,https://datahub.oss.example/开发/S01/config.zip?response-content-disposition=attachment",
   "resultStatus": "SUCCESS",
   "resultMessage": "打包成功，推送成功，邮件已发送",
   "finishedAt": "2026-07-03 18:06:21",
@@ -232,7 +234,7 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
 }
 ```
 
-失败时 `resultStatus` 为 `FAILED`，`resultMessage` 说明原因（校验 / 构建 / 上传）。`ossProjectRoot` 回填通知里的目标路径。
+失败时 `resultStatus` 为 `FAILED`，`resultMessage` 说明原因（校验 / 构建 / 上传）。`ossProjectRoot` 回填通知里的目标路径。推送成功时 `uploadPath` 写本次文件的绝对路径，多个用英文逗号分隔，例如 `/path/aa.war,/path/dd.zip`。走 OSS 时 `ossUrl` 按同样顺序给出这些文件的直接下载链接。
 
 | 阶段 | 上传 | 回执 | 邮件 |
 |------|------|------|------|

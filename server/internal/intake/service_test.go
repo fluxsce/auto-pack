@@ -266,6 +266,9 @@ func TestHandleSuccess(t *testing.T) {
 	if got.ResultStatus != resultSuccess || got.ResultMessage != msgSuccess {
 		t.Fatalf("%+v", got)
 	}
+	if got.UploadPath != "/开发/S01/app.war" || got.OSSURL != "https://datahub.oss-cn-hangzhou.aliyuncs.com/开发/S01/app.war?Expires=1&Signature=x" {
+		t.Fatalf("uploadPath=%s ossUrl=%s", got.UploadPath, got.OSSURL)
+	}
 }
 
 func TestHandleReceiptFailureDoesNotRewriteSuccess(t *testing.T) {
@@ -690,13 +693,23 @@ func TestReceiptMetadataTimes(t *testing.T) {
 	if brief != "打包成功，推送成功，邮件已发送" || strings.Contains(brief, "OSS 路径") || strings.Contains(brief, "耗时") {
 		t.Fatalf("brief %q", brief)
 	}
-	body, err := json.Marshal(dataHubReceipt(sampleNotice(), resultSuccess, brief, start, meta))
+	body, err := json.Marshal(dataHubReceipt(sampleNotice(), resultSuccess, brief, start, meta, "", ""))
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := decodeReceipt(t, body)
 	if got.ResultMessage != brief || len(got.Metadata) != 3 || got.Metadata[1].Name != "推送" || got.Metadata[1].Message != "OSS 路径 /开发/S01/app.war" || got.Metadata[1].StartedAt != "2026-07-03 18:06:20" {
 		t.Fatalf("%s", body)
+	}
+}
+
+func TestReceiptListsPushedFiles(t *testing.T) {
+	got := dataHubReceipt(sampleNotice(), resultSuccess, "ok", time.Now(), nil, "/path/aa.war\n/path/dd.zip", "https://oss.example/aa.war?Signature=a\nhttps://oss.example/dd.zip?Signature=b")
+	if got.UploadPath != "/path/aa.war,/path/dd.zip" {
+		t.Fatalf("uploadPath=%s", got.UploadPath)
+	}
+	if got.OSSURL != "https://oss.example/aa.war?Signature=a,https://oss.example/dd.zip?Signature=b" {
+		t.Fatalf("ossUrl=%s", got.OSSURL)
 	}
 }
 

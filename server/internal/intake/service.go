@@ -502,7 +502,7 @@ func (s *Service) finishWithoutTask(ctx context.Context, n Notice, message strin
 			published = brief
 		}
 	}
-	err := s.writeReceipt(ctx, n, resultFailed, published, meta)
+	err := s.writeReceipt(ctx, n, resultFailed, published, meta, "", "")
 	text := message
 	if err != nil {
 		text += "；回执未写入"
@@ -531,7 +531,7 @@ func (s *Service) finish(ctx context.Context, n Notice, prj project.Project, job
 			published = brief
 		}
 	}
-	pubErr := s.writeReceipt(ctx, n, result, published, meta)
+	pubErr := s.writeReceipt(ctx, n, result, published, meta, draft.remote, draft.signed)
 	if pubErr != nil {
 		rowStatus = statusReceiptFailed
 		log.Printf("intake receipt %s: %v", n.TaskID, pubErr)
@@ -570,8 +570,8 @@ func (s *Service) appendReceiptLog(ctx context.Context, text string) {
 	}
 }
 
-func (s *Service) writeReceipt(ctx context.Context, n Notice, result, message string, meta []ReceiptMeta) error {
-	body, err := json.Marshal(dataHubReceipt(n, result, message, time.Now(), meta))
+func (s *Service) writeReceipt(ctx context.Context, n Notice, result, message string, meta []ReceiptMeta, paths, urls string) error {
+	body, err := json.Marshal(dataHubReceipt(n, result, message, time.Now(), meta, paths, urls))
 	if err != nil {
 		return err
 	}
