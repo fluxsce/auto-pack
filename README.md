@@ -204,7 +204,7 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
 
 仓库 URL 不读报文。缺必填字段或不在允许范围时：不打包、不上传，直接写失败回执。`taskTitle`、`passedAt`、`publishedAt` 可以出现，本服务不使用。
 
-关联了 SMTP 和邮件模板后，打包和推送都成功才发信。报文有 `ossProjectRoot` 用「OSS 已更新」，只有 `ftpProjectRoot` 用「FTP 已更新」。发件人是 DATAHUB 更新通知 \<fluxdatahub@flux.com.cn\>，更新范围固定为 DATAHUB服务。两套模板版式相同。OSS 覆盖前若对象已存在，先复制到同目录 `BAK/{时间戳}/`，邮件「备份」栏和回执推送步骤都写该路径；没有备份时不写。不附构建日志。构建日志留在平台，末尾追加与回执相同的三步。回执 `resultMessage` 只写三步结论。路径、备份、耗时和收件人在 `metadata` 数组里，同样的三步明细追加到构建日志。
+关联了 SMTP 和邮件模板后，打包和推送都成功才发信。报文有 `ossProjectRoot` 用「OSS 已更新」，只有 `ftpProjectRoot` 用「FTP 已更新」。发件人是 DATAHUB 更新通知 \<fluxdatahub@flux.com.cn\>，更新范围固定为 DATAHUB服务。两套模板版式相同。OSS 覆盖前若对象已存在，先复制到传入路径下的 `备份/yyyyMMdd/HHmmss/`（东八区），邮件「备份」栏和回执推送步骤都写该路径；没有备份时不写。FTP 推送仍用 `BAK/{时间戳}/`。不附构建日志。构建日志留在平台，末尾追加与回执相同的三步。回执 `resultMessage` 只写三步结论。路径、备份、耗时和收件人在 `metadata` 数组里，同样的三步明细追加到构建日志。
 
 ### 回执报文（生产）
 
@@ -228,7 +228,7 @@ FTP 项目把 `ossProjectRoot` 换成 `ftpProjectRoot`，例如 `"/ftp/S01/"`。
   "finishedAt": "2026-07-03 18:06:21",
   "metadata": [
     {"step": 1, "name": "打包", "status": "成功", "message": "自动打包完成，war 已推送到项目路径", "startedAt": "2026-07-03 18:05:37", "finishedAt": "2026-07-03 18:06:20", "elapsed": "43秒"},
-    {"step": 2, "name": "推送", "status": "成功", "message": "OSS 路径 /开发/S01/app.war，资源 app.war,config.zip，备份路径 /开发/S01/BAK/20260703180622001/app.war", "startedAt": "2026-07-03 18:06:20", "finishedAt": "2026-07-03 18:06:22", "elapsed": "2秒"},
+    {"step": 2, "name": "推送", "status": "成功", "message": "OSS 路径 /开发/S01/app.war，资源 app.war,config.zip，备份路径 /开发/S01/备份/20260703/180622/app.war", "startedAt": "2026-07-03 18:06:20", "finishedAt": "2026-07-03 18:06:22", "elapsed": "2秒"},
     {"step": 3, "name": "邮件", "status": "已发送", "message": "收件人 a@example.com,b@example.com，模板 OSS 已更新", "startedAt": "2026-07-03 18:06:22", "finishedAt": "2026-07-03 18:06:23", "elapsed": "1秒"}
   ]
 }

@@ -219,10 +219,14 @@ func TestPushFollowsOnePath(t *testing.T) {
 	}
 }
 
-func TestOSSBackupKeyUsesBAKStamp(t *testing.T) {
+func TestOSSBackupKeyUsesDateClock(t *testing.T) {
 	at := time.Date(2026, 10, 17, 0, 49, 0, 123000000, time.UTC)
 	got := ossBackupKey("开发/S01/app.war", at)
-	if got != "开发/S01/BAK/20261017004900123/app.war" {
+	if got != "开发/S01/备份/20261017/084900/app.war" {
 		t.Fatal(got)
+	}
+	root := ossBackupKey("app.war", at)
+	if root != "备份/20261017/084900/app.war" {
+		t.Fatal(root)
 	}
 }

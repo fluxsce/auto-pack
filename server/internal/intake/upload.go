@@ -15,7 +15,6 @@ import (
 	hostftp "auto-pack/server/internal/host/ftp"
 	hostoss "auto-pack/server/internal/host/oss"
 	hostssh "auto-pack/server/internal/host/ssh"
-	"auto-pack/server/internal/host/utils"
 	"auto-pack/server/internal/project"
 )
 
@@ -131,7 +130,7 @@ func labelPushErr(via string, err error) error {
 	return fmt.Errorf("%s %w", via, err)
 }
 
-// backupOSS 在覆盖前把已有对象复制到同目录 BAK/{时间戳}/，规则与 FTP 推送一致。对象不存在时返回空路径。
+// backupOSS 在覆盖前把已有对象复制到传入 OSS 路径下的 备份/yyyyMMdd/HHmmss/。时间用东八区。对象不存在时返回空路径。
 func (s *Service) backupOSS(ctx context.Context, prj project.Project, key string, at time.Time) (string, error) {
 	if s == nil || s.upload != nil {
 		return "", nil
@@ -161,8 +160,15 @@ func ossBackupKey(objectKey string, at time.Time) string {
 	if dir == "." {
 		dir = ""
 	}
-	folder := utils.DefaultBackupDir("/"+dir, at)
-	return strings.TrimLeft(utils.RemoteJoin(folder, name), "/")
+	if at.IsZero() {
+		at = time.Now()
+	}
+	at = at.In(receiptTZ)
+	folder := "备份/" + at.Format("20060102") + "/" + at.Format("150405")
+	if dir != "" {
+		folder = dir + "/" + folder
+	}
+	return folder + "/" + name
 }
 
 // collectOSSPushFiles 收集工程目录的直接子项。文件原样加入，目录按自动推送的规则压缩。
